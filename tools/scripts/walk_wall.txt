@@ -1,0 +1,14 @@
+# Run into a building and keep pushing: the collision must hold.
+#
+# Block (66,62) is a building whose walls start on layer 2; (66,59) is the
+# road north of it. Facing south, he runs into the wall and stops.
+#
+# section: 1
+# expect: BLOCKED-Y
+# reject: block ( 66, 62)
+start 66 59
+
+0 1 0 40
+0 1 0 40
+0 1 0 40
+0 1 0 60

@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::str::FromStr;
 
 use clap::Parser;
 use gfa_assets::{DataPath, Dataset};
@@ -14,7 +15,7 @@ struct Args {
     #[arg(long)]
     data: Option<PathBuf>,
     /// Which game: gta, london69 or london61.
-    #[arg(long, default_value = "gta", value_parser = parse_game)]
+    #[arg(long, default_value = "gta", value_parser = Dataset::from_str)]
     game: Dataset,
     /// Mission script section to start in, e.g. 1, 102, 202 (London: 2, 3, 4).
     #[arg(long, default_value_t = 1)]
@@ -25,15 +26,6 @@ struct Args {
     /// Save the first frame as a PNG and quit (a smoke test).
     #[arg(long)]
     screenshot: Option<PathBuf>,
-}
-
-fn parse_game(s: &str) -> Result<Dataset, String> {
-    match s.to_ascii_lowercase().as_str() {
-        "gta" => Ok(Dataset::Gta),
-        "london69" | "london" => Ok(Dataset::London69),
-        "london61" => Ok(Dataset::London61),
-        _ => Err(format!("unknown game {s:?}: gta, london69 or london61")),
-    }
 }
 
 fn main() -> ExitCode {

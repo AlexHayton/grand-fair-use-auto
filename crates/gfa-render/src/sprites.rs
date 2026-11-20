@@ -140,6 +140,13 @@ impl SpriteBatch {
         self.items.push((instance.pos[2], order, instance));
     }
 
+    /// Add every sprite of `other`, after this batch's own.
+    pub fn extend(&mut self, other: &SpriteBatch) {
+        for &(_, _, instance) in &other.items {
+            self.push(instance);
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.items.len()
     }
@@ -172,6 +179,37 @@ pub fn startup_heading(rotation: i16) -> f32 {
 /// The angle to draw a sprite at for a heading: the art faces south.
 pub fn draw_angle(heading: f32) -> f32 {
     heading + std::f32::consts::PI
+}
+
+/// Render pixels per simulation pixel: the simulation's blocks are 32
+/// pixels across (AmiGTA1's units), the renderer's 64.
+pub const SIM_SCALE: f32 = 2.0;
+
+/// A simulation position (16.16 world pixels, 32 to a block and to a
+/// layer) in render pixels.
+pub fn from_sim(pos16: [i32; 3]) -> [f32; 3] {
+    pos16.map(|v| v as f32 / 65536.0 * SIM_SCALE)
+}
+
+/// A simulation angle (256 steps a turn, clockwise from north) in radians.
+pub fn sim_angle(angle: i32) -> f32 {
+    (angle & 255) as f32 * std::f32::consts::TAU / 256.0
+}
+
+/// A sprite drawn in its own colours at `pos`, turned `angle` radians
+/// clockwise.
+pub fn own_sprite(
+    style: &Style,
+    atlas: &SpriteAtlas,
+    sprite: usize,
+    pos: [f32; 3],
+    angle: f32,
+) -> Option<SpriteInstance> {
+    Some(SpriteInstance {
+        pos: [pos[0], pos[1], pos[2], angle],
+        rect: *atlas.rects.get(sprite)?,
+        palette_flags: [sprite_palette(style, sprite, SpriteColours::Own), 0],
+    })
 }
 
 /// The map's startup objects as sprites: parked cars and street furniture.

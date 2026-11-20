@@ -23,8 +23,15 @@ relative to sibling checkouts `../carnage3d` and `../AmiGTA1`.
 | `gfa-render::camera` | `src/FollowCameraController.cpp` | | done |
 | `gfa-assets::level` | `src/GameMapManager.cpp` (`GetStyleFileName`) | | done |
 | `gfa-tool holecheck` | | `tools/bin/holecheck.sh` | done |
-| `gfa-fixed` | | `native/gta_trig.c` | M3 |
+| `gfa-fixed::trig`, `gfa-fixed::rng` | | `native/gta_trig.c`; generators in `gta_traffic.c`, `gta_peds.c`, `gta_train.c`, `gta_main.c` (`voice_rand`) | done |
+| `gfa-sim::clock` | | `native/gta_main.c` (`SIM_HZ`, `MAX_CATCHUP`), `gta_vehphys.c` (`TIME_NUM`/`TIME_DEN`), `gta_script_run.c`, `gta_marks.c`, `gta_train.c` (`half`), `gta_peds.c` (`FRAMES`) | done |
+| `gfa-sim::map` | `src/GameDefs.h` (`eGroundType`) | `native/gta_map.c` (`gta_map_ground_type`, ramps), `gta_nav.c` (nav byte, thin walls, `seg_cross`) | done |
+| `gfa-sim::player` | `gamedata/entities/ped_animations.json` (frames) | `native/gta_player.c`, `gta_player.h` | done |
+| `gfa-sim::view` | | `native/gta_main.c` (`gta_peds_set_view`, `gta_traffic_set_view_blocks`) | done |
+| `gfa-sim::script`, `gfa-sim::replay` | | `native/gta_main.c` (autodrive orders), `tools/gtadump.c` (`cmd_walk`) | done |
+| `gfa-sim::script_world` | | `native/gta_script.h` (`gta_script_world`) | skeleton |
+| `tools/oracle/walktrace.c` | | links `native/gta_map.c`, `gta_nav.c`, `gta_player.c`, `gta_trig.c` | done |
 | `gfa-sim` vehicles | | `native/gta_vehphys.c`, `gta_car.c` | M4 |
 | `gfa-sim` traffic, police | | `native/gta_traffic.c`, `gta_route.c` | M5–M6 |
-| `gfa-sim` peds | | `native/gta_peds.c`, `gta_player.c` | M3–M5 |
+| `gfa-sim` peds | | `native/gta_peds.c` | M5 |
 | `gfa-sim` mission VM | | `native/gta_script*.c`, `gta_trig.c` | M7 |

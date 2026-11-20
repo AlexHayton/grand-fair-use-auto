@@ -68,8 +68,10 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-The AmiGTA1 oracle (`tools/oracle/`) builds AmiGTA1's host tools from a
-separate checkout for differential testing. No AmiGTA1 source is vendored.
+The AmiGTA1 oracle (`tools/oracle/`) compiles AmiGTA1's own modules from a
+separate checkout, linked with our harness (`walktrace.c`), for differential
+testing. No AmiGTA1 source is vendored. The Q14 cosine and arctangent tables
+in `gfa-fixed` are generated from their formulas, which reproduce AmiGTA1's.
 
 ## Real-ESRGAN model weights
 

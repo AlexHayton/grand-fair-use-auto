@@ -1,12 +1,15 @@
-//! A loaded level on the GPU: the city renderer and what the inspector
+//! A loaded level on the GPU: the city, the sprites, and what the inspector
 //! needs to describe a block.
 
 use gfa_assets::level::Level;
 use gfa_formats::cmp::{Face, MAP_DIM, MAP_LAYERS};
+use gfa_formats::style::SpriteCategory;
 use gfa_render::camera::Camera;
 use gfa_render::city::{CityRenderer, DepthTarget};
 use gfa_render::city_mesh::{BLOCK_PX, CityMesh, TileBanks};
-use gfa_render::sprites::{SpriteAtlas, SpriteBatch, SpriteRenderer, push_startup_objects};
+use gfa_render::sprites::{
+    SpriteAtlas, SpriteBatch, SpriteInstance, SpriteRenderer, own_sprite, push_startup_objects,
+};
 use gfa_render::style_tables::{StyleTables, TileAnimator};
 use gfa_render::{Gpu, wgpu};
 
@@ -14,7 +17,11 @@ pub struct Scene {
     pub level: Level,
     pub city: CityRenderer,
     sprites: SpriteRenderer,
-    /// The map's startup objects. From M3 the simulation supplies these.
+    atlas: SpriteAtlas,
+    /// The map's startup objects, drawn every frame. The simulation will
+    /// own these once it spawns objects (M4 and on).
+    statics: SpriteBatch,
+    /// This frame's sprites: the statics plus what moves.
     batch: SpriteBatch,
     depth: DepthTarget,
 }
@@ -47,8 +54,8 @@ impl Scene {
         let atlas = SpriteAtlas::new(&level.style);
         let sprites =
             SpriteRenderer::new(&gpu.device, &gpu.queue, format, &atlas, city.palette_view());
-        let mut batch = SpriteBatch::default();
-        let skipped = push_startup_objects(&level.map, &level.style, &atlas, &mut batch);
+        let mut statics = SpriteBatch::default();
+        let skipped = push_startup_objects(&level.map, &level.style, &atlas, &mut statics);
         if skipped > 0 {
             log::warn!("{skipped} startup objects have no sprite");
         }
@@ -56,11 +63,23 @@ impl Scene {
             level,
             city,
             sprites,
-            batch,
+            atlas,
+            statics,
+            batch: SpriteBatch::default(),
             depth: DepthTarget::new(&gpu.device, size),
         }
     }
 
+    /// A ped sprite: `frame` within the style's ped category, at `pos` (map
+    /// pixels), turned `angle` radians clockwise.
+    pub fn ped_sprite(&self, frame: u16, pos: [f32; 3], angle: f32) -> Option<SpriteInstance> {
+        let style = &self.level.style;
+        let sprite = style.sprite_index(SpriteCategory::Ped, usize::from(frame))?;
+        own_sprite(style, &self.atlas, sprite, pos, angle)
+    }
+
+    /// Draw the city, its objects and `extra` sprites.
+    #[allow(clippy::too_many_arguments)]
     pub fn draw(
         &mut self,
         gpu: &Gpu,
@@ -69,11 +88,17 @@ impl Scene {
         size: (u32, u32),
         camera: &Camera,
         seconds: f64,
+        extra: &[SpriteInstance],
     ) {
         self.depth.fit(&gpu.device, size);
         self.city.animate(&gpu.queue, seconds);
         let aspect = size.0 as f32 / size.1.max(1) as f32;
         self.city.prepare(&gpu.queue, camera, aspect);
+        self.batch.clear();
+        self.batch.extend(&self.statics);
+        for &s in extra {
+            self.batch.push(s);
+        }
         self.sprites
             .prepare(&gpu.device, &gpu.queue, camera, aspect, &mut self.batch);
         let mut pass = gfa_render::city::begin_scene(encoder, view, &self.depth, SKY);

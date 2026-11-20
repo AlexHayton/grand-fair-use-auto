@@ -836,6 +836,7 @@ dependencies = [
  "gfa-assets",
  "gfa-formats",
  "gfa-render",
+ "gfa-sim",
  "log",
  "png",
  "pollster",
@@ -896,8 +897,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "gfa-replay-wasm"
+version = "0.0.1"
+dependencies = [
+ "gfa-formats",
+ "gfa-sim",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "gfa-sim"
 version = "0.0.1"
+dependencies = [
+ "gfa-assets",
+ "gfa-fixed",
+ "gfa-formats",
+]
 
 [[package]]
 name = "gfa-tool"
@@ -908,6 +923,7 @@ dependencies = [
  "gfa-assets",
  "gfa-formats",
  "gfa-render",
+ "gfa-sim",
  "png",
  "pollster",
 ]

@@ -31,15 +31,18 @@ cargo run --release -p gfa-native -- --game london69 --level 2
 cargo run -p gfa-tool -- info                             # what's in your data folder
 ```
 
-Until the player arrives (M3) the game is a fly-over of the city:
+You start on foot at the level's starting point. Cars, people and missions
+arrive in later milestones.
 
 | Key | Does |
 |---|---|
-| Arrows or WASD (Shift: faster) | pan |
+| Arrows or WASD | run forward or back, turn |
+| Shift | walk instead of run |
 | Scroll wheel, `+` / `-` | zoom |
 | F | free look: drag with the right mouse button to tilt and turn |
 | R | look straight down again |
-| F1 | debug overlay: frame rate, camera, draw counts, the block under the cursor |
+| C | detach the camera and fly over the city with the arrows (Shift: faster); C again returns to the player |
+| F1 | debug overlay: frame rate, the player's tick and block, the camera, the block under the cursor |
 | Esc | quit |
 
 `--screenshot shot.png` saves the first frame and quits.
@@ -54,7 +57,13 @@ cargo run -p gfa-tool -- text GTADATA/ENGLISH.FXT --grep gouranga
 cargo run -p gfa-tool -- export GTADATA/STYLE001.G24        # contact sheets in export/ (gitignored)
 cargo run -p gfa-tool -- render GTADATA/NYC.CMP --at 64,64  # the city drawn offscreen, to export/render/
 cargo run -p gfa-tool -- holecheck GTADATA/NYC.CMP          # undrawn pixels at 8 viewpoints (expect 0)
+cargo run -p gfa-tool -- run tools/scripts/walk_ramp.txt     # play a test script and check it
 ```
+
+`gfa-tool run` plays a script from `tools/scripts/` headless and checks its
+`# expect:` and `# reject:` lines. `--hash-every 50` prints state hashes,
+`--trace` the player's state every tick, `--out shots/f` a picture for each
+`dump`, and `--record input.txt` the input as a replay.
 
 Web (needs `cargo install trunk`):
 
@@ -75,7 +84,16 @@ cargo test                # unit tests (no data needed)
 cargo data-test           # tests against your game data
 cargo wasm-check          # everything that ships to the web builds for wasm32
 cargo clippy --workspace --all-targets
+tools/oracle/compare.sh tools/scripts/walk_ramp.txt   # player traces against AmiGTA1 (../AmiGTA1)
+tools/oracle/fuzz.py                                  # ...for random walks on all three cities
+tools/wasmcheck/compare.sh                            # native and wasm (Node) give the same hashes
 ```
+
+The oracle builds AmiGTA1's own walking code from a sibling `../AmiGTA1`
+checkout (or `$AMIGTA1`) with clang and diffs its per-tick trace against
+ours; nothing of AmiGTA1 is copied into this repo. The wasm check needs Node
+and the wasm-bindgen CLI that matches `Cargo.lock` (Trunk's cached copy is
+used if present).
 
 ## Credits
 

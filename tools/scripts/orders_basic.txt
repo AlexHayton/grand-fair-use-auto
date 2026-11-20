@@ -1,0 +1,16 @@
+# The AmiGTA1 order format on foot: wait, run, goto and face.
+#
+# `run T up down steer handbrake` holds the keys for T ticks; `wait`
+# lets go; `goto` and `face` are fixtures that move and turn the player.
+#
+# section: 1
+# expect: player: goto (62,60) layer 2
+# expect: player: face 64
+# reject: not supported
+goto 62 60
+face 64
+wait 10
+run 50 1 0 0 0
+run 13 0 0 -1 0
+run 50 1 0 0 0
+wait 25

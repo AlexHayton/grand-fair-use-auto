@@ -1,11 +1,13 @@
 //! The game shell shared by the native and web builds.
 //!
-//! It owns the window, the GPU surface and the frame loop. M2 loads a level's
-//! map and style and lets a debug camera fly over the city, with an egui
-//! overlay (F1). Game states (front end, briefing, game) and input mapping
-//! for the player arrive in later milestones.
+//! It owns the window, the GPU surface and the frame loop. It loads a
+//! level, runs the simulation at its fixed tick ([`game`]), and draws the
+//! city with the player in it, followed by the camera. F1 shows the egui
+//! debug overlay. Game states (front end, briefing) arrive in later
+//! milestones.
 
 mod controls;
+mod game;
 mod overlay;
 mod scene;
 #[cfg(target_arch = "wasm32")]
@@ -27,6 +29,7 @@ use winit::window::{Window, WindowId};
 pub use gfa_assets::DataPath;
 
 use controls::Controls;
+use game::Game;
 use overlay::{Overlay, OverlayInfo};
 use scene::Scene;
 
@@ -77,6 +80,7 @@ struct App {
     /// Loaded before the GPU was ready; becomes a [`Scene`] when it is.
     pending: Option<Level>,
     scene: Option<Scene>,
+    game: Option<Game>,
     controls: Controls,
     /// Shown in the overlay: why there is no city, for instance.
     status: String,
@@ -99,6 +103,7 @@ impl App {
             overlay: None,
             pending: None,
             scene: None,
+            game: None,
             controls: Controls::new(Vec3::new(centre, centre, 128.0)),
             status: String::new(),
             started: Instant::now(),
@@ -157,12 +162,6 @@ impl App {
                     level.style_path,
                     started.elapsed().as_millis()
                 );
-                let start = start_position(src, &level).unwrap_or(Vec3::new(
-                    128.0 * 64.0,
-                    128.0 * 64.0,
-                    128.0,
-                ));
-                self.controls.jump_to(start);
                 if let Some(w) = &self.window {
                     w.set_title(&format!("{TITLE}: {}", level.files.name));
                 }
@@ -188,6 +187,9 @@ impl App {
             return;
         };
         let started = Instant::now();
+        let game = Game::new(&level);
+        self.controls.jump_to(game.player().pos);
+        self.game = Some(game);
         self.scene = Some(Scene::new(gpu, surface.format(), surface.size(), level));
         log::info!("city uploaded in {} ms", started.elapsed().as_millis());
         if let Some(w) = &self.window {
@@ -200,9 +202,15 @@ impl App {
 
     fn redraw(&mut self, event_loop: &ActiveEventLoop) {
         let now = Instant::now();
-        let dt = (now - self.last_frame).as_secs_f32().min(0.1);
+        let elapsed = now - self.last_frame;
         self.last_frame = now;
-        self.controls.update(dt);
+        let player = self.game.as_mut().map(|g| {
+            g.advance(elapsed.as_micros() as u64, self.controls.input());
+            g.player()
+        });
+        let dt = elapsed.as_secs_f32().min(0.1);
+        self.controls
+            .update(dt, player.map(|p| (p.pos, p.velocity)));
 
         let Some((gpu, surface)) = self.gfx.as_mut() else {
             return;
@@ -224,13 +232,25 @@ impl App {
             }
             _ => None,
         };
+        let extra: Vec<_> = match (scene.as_ref(), player) {
+            (Some(s), Some(p)) => s
+                .ped_sprite(p.frame, p.pos.to_array(), p.draw_angle)
+                .into_iter()
+                .collect(),
+            _ => Vec::new(),
+        };
+        let player_line = self
+            .game
+            .as_ref()
+            .map(|g| format!("tick {}  {}", g.world.tick, g.world.player_summary()));
         let fps = self.stats.fps;
         let status = self.status.clone();
         let target = self.controls.target;
         let free_look = self.controls.free_look;
+        let flying = self.controls.flying;
         let outcome = surface.frame(gpu, |encoder, view| {
             match scene.as_mut() {
-                Some(s) => s.draw(gpu, encoder, view, size, &camera, seconds),
+                Some(s) => s.draw(gpu, encoder, view, size, &camera, seconds, &extra),
                 None => gfa_render::clear(encoder, view, scene::SKY),
             }
             if let Some(o) = overlay.as_mut() {
@@ -241,6 +261,8 @@ impl App {
                     camera: camera.eye.to_array(),
                     target: target.to_array(),
                     free_look,
+                    flying,
+                    player: player_line.as_deref(),
                     draw: scene.as_ref().map(|s| s.city.last_draw),
                     mesh: scene.as_ref().map(|s| s.city.mesh_stats),
                     inspect,
@@ -290,7 +312,22 @@ impl App {
                 });
         let camera = self.controls.camera();
         let seconds = self.started.elapsed().as_secs_f64();
-        scene.draw(gpu, &mut encoder, target.view(), (w, h), &camera, seconds);
+        let extra: Vec<_> = self
+            .game
+            .as_ref()
+            .map(Game::player)
+            .and_then(|p| scene.ped_sprite(p.frame, p.pos.to_array(), p.draw_angle))
+            .into_iter()
+            .collect();
+        scene.draw(
+            gpu,
+            &mut encoder,
+            target.view(),
+            (w, h),
+            &camera,
+            seconds,
+            &extra,
+        );
         gpu.queue.submit([encoder.finish()]);
         let rgba = target.read(gpu);
         if let Some(dir) = path.parent() {
@@ -313,16 +350,6 @@ impl App {
             ControlFlow::Wait
         });
     }
-}
-
-/// Where the level puts the player, in map pixels: its first `PLAYER`
-/// declaration, whose position is in blocks.
-fn start_position(src: &dyn AssetSource, level: &Level) -> Option<Vec3> {
-    let sections = level::sections(src, level.files.dataset).ok()?;
-    let section = sections.iter().find(|s| s.id == level.files.section)?;
-    let d = section.decls.iter().find(|d| d.kind == "PLAYER")?;
-    let [x, y, z] = d.pos.map(|v| v as f32);
-    Some(Vec3::new(x + 0.5, y + 0.5, z) * 64.0)
 }
 
 impl ApplicationHandler<UserEvent> for App {

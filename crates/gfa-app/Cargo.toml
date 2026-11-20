@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 gfa-assets.workspace = true
 gfa-formats.workspace = true
+gfa-sim.workspace = true
 gfa-render.workspace = true
 egui.workspace = true
 egui-wgpu.workspace = true

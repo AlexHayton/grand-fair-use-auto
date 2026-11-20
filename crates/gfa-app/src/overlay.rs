@@ -14,6 +14,8 @@ pub struct OverlayInfo<'a> {
     pub camera: [f32; 3],
     pub target: [f32; 3],
     pub free_look: bool,
+    pub flying: bool,
+    pub player: Option<&'a str>,
     pub draw: Option<gfa_render::city::DrawStats>,
     pub mesh: Option<gfa_render::city_mesh::MeshStats>,
     pub inspect: Option<String>,
@@ -143,12 +145,15 @@ fn panel(ui: &mut egui::Ui, info: &OverlayInfo<'_>, debug_view: &mut DebugView) 
     ui.separator();
     let blocks =
         |p: [f32; 3]| format!("{:.2}, {:.2}, {:.2}", p[0] / 64.0, p[1] / 64.0, p[2] / 64.0);
+    if let Some(p) = info.player {
+        ui.label(p);
+    }
     ui.label(format!("camera {}", blocks(info.camera)));
     ui.label(format!("target {}", blocks(info.target)));
-    ui.label(if info.free_look {
-        "free look: right-drag to tilt and turn, R resets"
-    } else {
-        "arrows/WASD pan, wheel zooms, F free look"
+    ui.label(match (info.flying, info.free_look) {
+        (_, true) => "free look: right-drag to tilt and turn, R resets",
+        (true, false) => "flying: arrows/WASD pan, C returns to the player",
+        (false, false) => "arrows/WASD run, Shift walks, wheel zooms, F free look, C fly",
     });
     if let Some(d) = info.draw {
         ui.label(format!(

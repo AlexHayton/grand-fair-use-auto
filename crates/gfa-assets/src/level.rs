@@ -38,6 +38,9 @@ pub struct LevelFiles {
     pub section: u32,
     pub name: String,
     pub map: String,
+    /// The section itself: the player's start, the declarations and the
+    /// mission logic.
+    pub mission: Section,
 }
 
 /// A level's map and style, parsed.
@@ -83,6 +86,7 @@ pub fn find(
         // Mission files name maps relative to GTADATA/, London's included
         // (`uk\uk.cmp`).
         map: format!("GTADATA/{map}"),
+        mission: s.clone(),
     })
 }
 

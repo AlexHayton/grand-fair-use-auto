@@ -17,7 +17,9 @@ dbg_macro = "warn"
 
 [workspace.dependencies]
 # Our crates
+gfa-fixed = { path = "crates/gfa-fixed" }
 gfa-formats = { path = "crates/gfa-formats" }
+gfa-sim = { path = "crates/gfa-sim" }
 gfa-assets = { path = "crates/gfa-assets" }
 gfa-render = { path = "crates/gfa-render" }
 gfa-app = { path = "crates/gfa-app" }

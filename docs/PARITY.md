@@ -22,6 +22,20 @@ its state changes, and put the evidence in the last column.
 
 AmiGTA1 references are to `native/` in a sibling `../AmiGTA1` checkout.
 
+## On foot (M3)
+
+| Feature | Original | AmiGTA1 | GFA | M | Evidence / notes |
+|---|---|---|---|---|---|
+| Run (default), turn, back up at half pace | ✓ | full | done | M3 | `gta_player.c`; oracle traces match |
+| Walk key | ✗ | full | done | M3 | Not in the original (it only runs); AmiGTA1 and we keep it on Shift as an extra |
+| Collision from ground types, wall sliding | ✓ | full | done | M3 | `gta_player.c`, `gta_map_ground_type` |
+| Missing pavement blocks count as pavement | ✓ | full | done | M3 | `gta_map.c` (NYC 25,17) |
+| Ramps between layers | ✓ | full | done | M3 | NYC 19,44 lands on layer 3 (`tools/scripts/walk_ramp.txt`) |
+| Fences (solid flat faces) on GTA's maps | ✓ | full | done | M3 | `gta_nav.c` tile lists per style |
+| Fences on London's maps | ✓ | none | — | M11 | No tile lists for London's styles yet: walked through for now |
+| Railway blocks closed to traffic routing | ✗ | full | done | M3 | AmiGTA1's own deviation (the original treats them as road); kept, for traffic |
+| Drowning, punching, jumping, vaulting cars | ✓ | partial | — | M4–M6 | `gta_main.c` (water ticks, punch, vault) |
+
 ## Vehicles (M4)
 
 | Feature | Original | AmiGTA1 | GFA | M | Evidence / notes |

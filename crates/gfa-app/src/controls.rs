@@ -1,18 +1,22 @@
-//! The M2 debug camera: fly over a city before there is a player to follow.
+//! Keys and mouse: the player's controls, and the camera.
 //!
-//! - Arrows or WASD pan; Shift is faster. The follow camera trails the point
-//!   being panned, with its lead-ahead, as it will trail the player in M3.
+//! - Arrows or WASD: run forward and back, turn. Shift walks.
+//! - Return gets in and out of cars; Space is the handbrake and jump;
+//!   Ctrl fires; Tab is the special key; Z and X change weapon.
 //! - Scroll wheel, `+`/`-` or PageUp/PageDown zoom (camera height).
 //! - `F` toggles free look: drag with the right mouse button to tilt and
 //!   turn. `R` returns to straight down.
+//! - `C` detaches the camera to fly over the city with the movement keys
+//!   (Shift is faster); the player stands still meanwhile.
 //!
-//! Render-side only; nothing here reaches the simulation.
+//! The keys reach the simulation only as a [`TickInput`] per tick.
 
 use std::collections::HashSet;
 
 use gfa_render::camera::{Camera, FollowCamera};
 use gfa_render::city_mesh::BLOCK_PX;
 use gfa_render::glam::{Vec2, Vec3};
+use gfa_sim::input::{Buttons, TickInput};
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
@@ -23,9 +27,12 @@ const ROOF_Z: f32 = 6.0 * PX;
 pub struct Controls {
     held: HashSet<KeyCode>,
     pub follow: FollowCamera,
-    /// The point being panned around, map pixels.
+    /// What the camera looks at, map pixels: the player, or in fly mode a
+    /// point moved with the keys.
     pub target: Vec3,
     pub free_look: bool,
+    /// The camera is detached from the player.
+    pub flying: bool,
     pub pitch: f32,
     pub yaw: f32,
     dragging: bool,
@@ -44,6 +51,7 @@ impl Controls {
             follow,
             target,
             free_look: false,
+            flying: false,
             pitch: 0.0,
             yaw: 0.0,
             dragging: false,
@@ -134,29 +142,70 @@ impl Controls {
                 self.pitch = 0.0;
                 self.yaw = 0.0;
             }
+            KeyCode::KeyC => self.flying = !self.flying,
             KeyCode::Equal | KeyCode::NumpadAdd | KeyCode::PageUp => self.follow.zoom(0.8),
             KeyCode::Minus | KeyCode::NumpadSubtract | KeyCode::PageDown => self.follow.zoom(1.25),
             _ => {}
         }
     }
 
-    fn axis(&self, neg: [KeyCode; 2], pos: [KeyCode; 2]) -> f32 {
-        let held = |ks: [KeyCode; 2]| ks.iter().any(|k| self.held.contains(k));
-        f32::from(u8::from(held(pos))) - f32::from(u8::from(held(neg)))
+    fn any(&self, keys: &[KeyCode]) -> bool {
+        keys.iter().any(|k| self.held.contains(k))
     }
 
-    /// Advance by `dt` seconds.
-    pub fn update(&mut self, dt: f32) {
-        let x = self.axis(
-            [KeyCode::ArrowLeft, KeyCode::KeyA],
-            [KeyCode::ArrowRight, KeyCode::KeyD],
-        );
-        let y = self.axis(
-            [KeyCode::ArrowUp, KeyCode::KeyW],
-            [KeyCode::ArrowDown, KeyCode::KeyS],
-        );
-        let fast =
-            self.held.contains(&KeyCode::ShiftLeft) || self.held.contains(&KeyCode::ShiftRight);
+    const UP: [KeyCode; 2] = [KeyCode::ArrowUp, KeyCode::KeyW];
+    const DOWN: [KeyCode; 2] = [KeyCode::ArrowDown, KeyCode::KeyS];
+    const LEFT: [KeyCode; 2] = [KeyCode::ArrowLeft, KeyCode::KeyA];
+    const RIGHT: [KeyCode; 2] = [KeyCode::ArrowRight, KeyCode::KeyD];
+    const SHIFT: [KeyCode; 2] = [KeyCode::ShiftLeft, KeyCode::ShiftRight];
+
+    /// The player's buttons this tick. Nothing while the camera flies.
+    pub fn input(&self) -> TickInput {
+        if self.flying {
+            return TickInput::default();
+        }
+        let b = Buttons::NONE
+            .with(Buttons::UP, self.any(&Self::UP))
+            .with(Buttons::DOWN, self.any(&Self::DOWN))
+            .with(Buttons::LEFT, self.any(&Self::LEFT))
+            .with(Buttons::RIGHT, self.any(&Self::RIGHT))
+            .with(Buttons::WALK, self.any(&Self::SHIFT))
+            .with(
+                Buttons::ENTER,
+                self.any(&[KeyCode::Enter, KeyCode::NumpadEnter]),
+            )
+            .with(Buttons::HANDBRAKE, self.any(&[KeyCode::Space]))
+            .with(
+                Buttons::FIRE,
+                self.any(&[KeyCode::ControlLeft, KeyCode::ControlRight]),
+            )
+            .with(Buttons::SPECIAL, self.any(&[KeyCode::Tab]))
+            .with(Buttons::WEAPON_PREV, self.any(&[KeyCode::KeyZ]))
+            .with(Buttons::WEAPON_NEXT, self.any(&[KeyCode::KeyX]));
+        TickInput::new(b)
+    }
+
+    /// Advance the camera by `dt` seconds, following `player` (position and
+    /// velocity, map pixels) unless flying.
+    pub fn update(&mut self, dt: f32, player: Option<(Vec3, Vec3)>) {
+        match player {
+            Some((pos, velocity)) if !self.flying => {
+                self.target = pos;
+                self.velocity = velocity;
+            }
+            _ => self.fly(dt),
+        }
+        self.follow
+            .update(self.target, self.velocity, dt, ROOF_Z + PX);
+    }
+
+    fn fly(&mut self, dt: f32) {
+        let axis = |neg: [KeyCode; 2], pos: [KeyCode; 2]| {
+            f32::from(u8::from(self.any(&pos))) - f32::from(u8::from(self.any(&neg)))
+        };
+        let x = axis(Self::LEFT, Self::RIGHT);
+        let y = axis(Self::UP, Self::DOWN);
+        let fast = self.any(&Self::SHIFT);
         // Pan speed follows the zoom, so the screen moves at a steady rate.
         let speed = self.follow.height * if fast { 3.0 } else { 1.0 };
         let dir = Vec2::new(x, y).normalize_or_zero();
@@ -168,8 +217,6 @@ impl Controls {
         let max = 256.0 * PX;
         self.target.x = self.target.x.clamp(0.0, max);
         self.target.y = self.target.y.clamp(0.0, max);
-        self.follow
-            .update(self.target, self.velocity, dt, ROOF_Z + PX);
     }
 
     pub fn camera(&self) -> Camera {

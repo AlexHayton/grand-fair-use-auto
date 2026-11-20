@@ -1,17 +1,19 @@
 //! `gfa-tool`: developer CLI for inspecting the user's game data.
 //!
-//! Milestone M0 has `info`. M1 adds format dumps and art export; later
-//! milestones add headless rendering, script runs and mission coverage.
+//! Format dumps and art export (M1), headless rendering and the holecheck
+//! (M2), and script runs against the simulation (M3).
 
 mod export;
 mod render;
+mod run;
 mod sheet;
 
 use std::path::PathBuf;
+use std::str::FromStr;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use gfa_assets::{AssetSource, DataPath, Datasets, FsSource};
+use gfa_assets::{AssetSource, DataPath, Dataset, Datasets, FsSource};
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -112,6 +114,36 @@ enum Command {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+    /// Play a test script on a level and check its `# expect:` lines.
+    Run {
+        /// Script file: AmiGTA1 orders (`wait`, `run`, `goto`, …) or walk
+        /// legs (`turn forward walk ticks`).
+        script: PathBuf,
+        /// Which game: gta, london69 or london61.
+        #[arg(long, default_value = "gta", value_parser = Dataset::from_str)]
+        game: Dataset,
+        /// Mission section to load; overrides the script's `# section:`.
+        #[arg(long)]
+        section: Option<u32>,
+        /// Ticks to run (50 a second); defaults to the script's length.
+        #[arg(long)]
+        ticks: Option<u32>,
+        /// Print the state hash every K ticks.
+        #[arg(long)]
+        hash_every: Option<u32>,
+        /// Print the player's state every tick (the oracle's trace format).
+        #[arg(long)]
+        trace: bool,
+        /// Use AmiGTA1's sim view size, to compare with the oracle.
+        #[arg(long)]
+        amigta1_view: bool,
+        /// Write a PNG for each `dump`/`film` tick: PREFIX000.png, …
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Save the input as a recording.
+        #[arg(long)]
+        record: Option<PathBuf>,
+    },
     /// Count undrawn pixels at AmiGTA1's eight inland viewpoints (holecheck.sh).
     Holecheck {
         /// Game path of a map. Defaults to GTADATA/NYC.CMP.
@@ -207,6 +239,30 @@ fn main() -> Result<()> {
             );
             Ok(())
         }
+        Command::Run {
+            script,
+            game,
+            section,
+            ticks,
+            hash_every,
+            trace,
+            amigta1_view,
+            out,
+            record,
+        } => run::run(
+            &src,
+            run::RunArgs {
+                script,
+                game,
+                section,
+                ticks,
+                hash_every,
+                trace,
+                amigta1_view,
+                out,
+                record,
+            },
+        ),
         Command::Holecheck { path, height, save } => {
             let mut scene = render::Scene::load(&src, &path, None, (640, 400))?;
             scene.show_sprites = false;

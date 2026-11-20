@@ -9,13 +9,14 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use gfa_assets::AssetSource;
+use gfa_formats::style::{SpriteCategory, Style};
 use gfa_render::Gpu;
 use gfa_render::camera::Camera;
 use gfa_render::city::{CityRenderer, DebugView, DepthTarget, begin_scene};
 use gfa_render::city_mesh::{BLOCK_PX, CityMesh, TileBanks};
 use gfa_render::glam::Vec3;
 use gfa_render::offscreen::{OFFSCREEN_FORMAT, Offscreen};
-use gfa_render::sprites::{SpriteAtlas, SpriteBatch, SpriteRenderer};
+use gfa_render::sprites::{SpriteAtlas, SpriteBatch, SpriteInstance, SpriteRenderer};
 use gfa_render::style_tables::{StyleTables, TileAnimator};
 
 /// AmiGTA1's eight inland holecheck positions (blocks), chosen for NYC.
@@ -64,6 +65,8 @@ pub struct Scene {
     target: Offscreen,
     depth: DepthTarget,
     pub style_path: String,
+    style: Style,
+    atlas: SpriteAtlas,
 }
 
 impl Scene {
@@ -132,6 +135,8 @@ impl Scene {
             target,
             depth,
             style_path,
+            style,
+            atlas,
         })
     }
 
@@ -152,18 +157,33 @@ impl Scene {
 
     /// Render one view; returns RGBA rows. Holes have alpha 0.
     pub fn render(&mut self, view: &View, debug: DebugView, seconds: f64) -> Vec<u8> {
+        self.render_with(view, debug, seconds, &[])
+    }
+
+    /// Render with `extra` sprites besides the map's own.
+    pub fn render_with(
+        &mut self,
+        view: &View,
+        debug: DebugView,
+        seconds: f64,
+        extra: &[SpriteInstance],
+    ) -> Vec<u8> {
         let aspect = self.target.width as f32 / self.target.height as f32;
         self.city.debug_view = debug;
         self.city.animate(&self.gpu.queue, seconds);
         let camera = view.camera();
         self.city.prepare(&self.gpu.queue, &camera, aspect);
         if self.show_sprites {
+            let mut batch = self.batch.clone();
+            for &s in extra {
+                batch.push(s);
+            }
             self.sprites.prepare(
                 &self.gpu.device,
                 &self.gpu.queue,
                 &camera,
                 aspect,
-                &mut self.batch,
+                &mut batch,
             );
         }
         let mut encoder = self
@@ -184,6 +204,26 @@ impl Scene {
         }
         self.gpu.queue.submit([encoder.finish()]);
         self.target.read(&self.gpu)
+    }
+
+    /// A ped sprite: `frame` within the ped category, at a simulation
+    /// position, drawn at a simulation angle.
+    pub fn ped_sprite(
+        &self,
+        frame: u16,
+        pos16: [i32; 3],
+        draw_angle: i32,
+    ) -> Option<SpriteInstance> {
+        let sprite = self
+            .style
+            .sprite_index(SpriteCategory::Ped, usize::from(frame))?;
+        gfa_render::sprites::own_sprite(
+            &self.style,
+            &self.atlas,
+            sprite,
+            gfa_render::sprites::from_sim(pos16),
+            gfa_render::sprites::sim_angle(draw_angle),
+        )
     }
 
     pub fn last_draw(&self) -> gfa_render::city::DrawStats {

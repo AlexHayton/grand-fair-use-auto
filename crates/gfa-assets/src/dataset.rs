@@ -59,6 +59,20 @@ impl fmt::Display for Dataset {
     }
 }
 
+impl std::str::FromStr for Dataset {
+    type Err = String;
+
+    /// `gta`, `london69` (or `london`) and `london61`, any case.
+    fn from_str(s: &str) -> Result<Self, String> {
+        match s.to_ascii_lowercase().as_str() {
+            "gta" => Ok(Dataset::Gta),
+            "london69" | "london" => Ok(Dataset::London69),
+            "london61" => Ok(Dataset::London61),
+            _ => Err(format!("unknown game {s:?}: gta, london69 or london61")),
+        }
+    }
+}
+
 /// The games found in a data folder, and whether their music is there.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Datasets {

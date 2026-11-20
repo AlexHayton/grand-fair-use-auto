@@ -1,0 +1,25 @@
+# Up NYC's eastbound ramp and onto the road over the street.
+#
+# Blocks (11..18, 44) on layer 2 are a 7 degree ramp rising east (slope
+# values 33..40). Block (19,44) has road on layer 2 (the street below) and
+# on layer 3 (the bridge). Walking east off the ramp's top must land on
+# layer 3 and stay there, not drop under the bridge.
+#
+# section: 1
+# expect: layer 2 -> 3 at (19,44)
+# reject: layer 3 -> 2
+start 9 44
+
+# Face east: from south (128), 13 ticks at 5 steps a tick to the left is 63.
+-1 0 0 13
+
+# Up the ramp and off the top.
+0 1 0 40
+0 1 0 40
+0 1 0 40
+0 1 0 40
+0 1 0 40
+
+# Along whatever he is on now.
+0 1 0 60
+0 1 0 60

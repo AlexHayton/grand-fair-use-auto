@@ -4,7 +4,7 @@ A living document. Tick boxes as work lands, add a dated line to the
 **progress log**, and record every non-obvious choice in the **decision log**
 (newest first). When a milestone's exit criterion is met, say so in the log.
 
-**Status:** M0, M1 and M2 complete (2026-11-20), except a Safari check of the web build. Next: M3, the deterministic sim foundation.
+**Status:** M0 to M3 complete (2026-11-20), except a Safari check of the web build. Next: M4, vehicles.
 
 ## Goal
 
@@ -230,17 +230,36 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
   - Met except Safari: native and Chrome render at 2560×1600; holecheck is 0 on all six maps (NYC, SANB, MIAMI, UK, MC, UKE).
 
 **M3: Deterministic sim foundation**
-- [ ] `gfa-fixed` ports AmiGTA1's formats, trig and RNGs (`gta_trig.c`).
-- [ ] Tick scheduler: the 50 Hz base with exact dividers (script 25 Hz, vehphys 7/15, peds 3/2, marks/trains/objects at ½); render interpolation.
-- [ ] Logical sim view (Principle 4). Map and height queries, including the nav byte grid (`gta_nav.c`) and ground types (`gta_map_ground_type`). `ScriptWorld` trait skeleton.
-- [ ] Input becomes a recorded command stream. Parse the AmiGTA1 order format (`wait/run/enter/goto/park/…`, `gta_main.c:6875-7084`).
-- [ ] `gfa-tool run --section N --script f --ticks T [--hash-every K]` checks the expected-log lines from the script header.
-- [ ] Player on foot. Ref: `gta_player.c`.
-- [ ] Oracle: build AmiGTA1's `gtadump` with clang, directly from a sibling `../AmiGTA1` checkout into `tools/oracle/build`. Bake `.til` from the user's GRY with `gtabake`. A small trace patch lives in our repo.
+- [x] `gfa-fixed` ports AmiGTA1's formats, trig and RNGs (`gta_trig.c`).
+  - `trig`: the Q14 cosine table and the `dir16` arctangent, both generated from their formulas (a test rebuilds them with floats); `cos16`/`sin16` interpolate fractional angles.
+  - `rng`: the traffic/train (Numerical Recipes), ped (ANSI C) and voice generators in 32-bit arithmetic; `fx`: 16.16 helpers at 32 px a block.
+- [x] Tick scheduler: the 50 Hz base with exact dividers (script 25 Hz, vehphys 7/15, peds 3/2, marks/trains/objects at ½); render interpolation.
+  - `gfa_sim::clock`: `Half` (both of AmiGTA1's phases), `Ratio` (vehicle physics 7/15 fires on the third tick, as AmiGTA1's accumulator), `ped_frames`.
+  - The app's `Pacer` turns wall time into ticks (at most 6 a frame, AmiGTA1's catch-up cap) and the player is drawn between the last two ticks.
+- [x] Logical sim view (Principle 4). Map and height queries, including the nav byte grid (`gta_nav.c`) and ground types (`gta_map_ground_type`). `ScriptWorld` trait skeleton.
+  - `SimView::GAME` is 10×6 half-blocks (a 21:9 window at the default camera height); `SimView::AMIGTA1` (5×4) is for oracle runs.
+  - `gfa_sim::map`: ground types with the missing-pavement rule, the nav byte (railway blocks zeroed, dirt roads as road), thin walls from the solid flat-face tile lists, ramps (`slope_up_dir`, `slope_is_top`), `wall_cross`, and `ground_z` for the height on a ramp.
+  - `ScriptWorld` holds the M3 callbacks and a table of which AmiGTA1 callbacks each later milestone adds; unsupported calls return `Unsupported` instead of succeeding.
+- [x] Input becomes a recorded command stream. Parse the AmiGTA1 order format (`wait/run/enter/goto/park/…`, `gta_main.c:6875-7084`).
+  - `TickInput` is the buttons held on a tick; `InputLog` records the ticks where it changes (`gfa-input 1` text format) and plays them back.
+  - `Script` reads both AmiGTA1 formats in one file: orders (`autodrive.txt`) and walk legs (`gtadump walk`), with `start`, and `# section:`, `# expect:` and `# reject:` headers. Every order is recognised; fixtures for later milestones log "not supported yet".
+- [x] `gfa-tool run --section N --script f --ticks T [--hash-every K]` checks the expected-log lines from the script header.
+  - Also `--trace` (per-tick player state, the oracle's format), `--out` (PNGs for `dump`/`film`, with the player drawn), `--record` (save the input) and `--amigta1-view`.
+  - Scripts live in `tools/scripts/`.
+- [x] Player on foot. Ref: `gta_player.c`.
+  - Run by default, Shift walks; turning, backing up at half pace, sliding along walls, fences, ramps between layers (NYC's bridge at 19,44 lands on layer 3), the walk and run cycles.
+  - In the app: arrows/WASD drive him, the follow camera trails him, `C` detaches the camera to fly.
+- [x] Oracle: build AmiGTA1's `gtadump` with clang, directly from a sibling `../AmiGTA1` checkout into `tools/oracle/build`. Bake `.til` from the user's GRY with `gtabake`. A small trace patch lives in our repo.
+  - Instead of patching `gtadump`, our own harness (`tools/oracle/walktrace.c`) links AmiGTA1's `gta_map.c`, `gta_nav.c`, `gta_player.c` and `gta_trig.c` from the sibling checkout and prints a per-tick trace. `tools/oracle/compare.sh` diffs it against `gfa-tool run --trace`; `tools/oracle/fuzz.py` does so for random walks on all three cities.
+  - Baking `.til` is not needed for walking (the player needs no style), so it waits for the first oracle check that reads car data (M4).
 - Exit:
   - You can walk every level.
   - The same script gives identical hashes on native and wasm (run in node).
   - `walk` traces match the oracle.
+  - Met:
+    - Every mission section of all three games (28 levels, multiplayer included) starts the player on walkable ground, and he runs freely from there (data test `every_level_is_walkable`). Native app tested on Liberty City; the web bundle builds with the sim in it.
+    - `tools/wasmcheck/compare.sh` runs scripts natively and as wasm in Node 24: 16 scripts, 2,223 hashes and every log line identical.
+    - The three walk scripts and 24 random walks (about 43,000 ticks over NYC, San Andreas and Vice City) match AmiGTA1 tick for tick: position, layer, angle, animation frame and blocked flags.
 
 **M4: Vehicles.** Ref: `gta_vehphys.c/.h` (essay in the header), `gta_car.c`, `gta_train.c`, `gta_main.c:790-805` and around line 8960 (jump arc).
 - [ ] Two-tyre rigid body with the style's raw 16.16 values. Rear grip ×1.5; handbrake 0.6; road-snap assist.
@@ -428,6 +447,13 @@ Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.m
 
 Newest first. Each entry: date, decision, why.
 
+- **2026-11-20. The oracle is our own small C harness linking AmiGTA1's modules, not a patched `gtadump`.** `gtadump walk` never builds the nav grid, so fences are off in it; our `walktrace.c` builds the grid and prints a per-tick trace. Nothing of AmiGTA1 is copied into this repo: the harness compiles its sources where they are, in the sibling checkout.
+- **2026-11-20. Fences on London's maps stop no one yet.** The solid flat-face tile lists are AmiGTA1's research into GTA's three styles; London's styles have none. Recorded in `docs/PARITY.md` until someone settles them.
+- **2026-11-20. The logical sim view is a fixed 10×6 half-blocks** (`SimView::GAME`), covering a 21:9 window at the follow camera's default height. AmiGTA1 derives it from window width and zoom, which makes spawning depend on the display. Oracle runs use AmiGTA1's 5×4. A later milestone may tie it to sim state (the original zooms out with speed), never to the renderer.
+- **2026-11-20. A script's `start` faces the player south; a section start uses the `PLAYER` declaration's heading.** Both as AmiGTA1: `gta_player_init` faces south (the art's own facing), and the game then sets the declaration's angle (`b / 4`, 1024 steps to 256).
+- **2026-11-20. Test scripts run orders for their tick count and release the keys when the script ends.** AmiGTA1's harness also drops the keys on the last tick of the last order, a quirk of where it advances its queue; that is not game behaviour and is not copied.
+- **2026-11-20. Trig tables are generated from their formulas, not copied.** `round(cos(2πi/256)·16384)` and `round(atan(i/64)·256/2π·65536)` reproduce AmiGTA1's tables exactly; a unit test rebuilds them with floats.
+- **2026-11-20. Random number generators use 32-bit arithmetic**, as on the Amiga. AmiGTA1's host build keeps 64-bit seeds; masked draws agree, but its train generator's `seed >> 16` does not, so host-oracle train traces (M4) must allow for it.
 - **2026-11-20. Colour 0 is see-through only on flat blocks** (Carnage3D), not on every side face (AmiGTA1). Drawn in 3D, AmiGTA1's rule opens holes through solid walls, whose windows use colour 0 for black: the first NYC render showed them at block 64,64. AmiGTA1's 2D painter drew the ground first, so the holes never showed there.
 - **2026-11-20. Sloped side faces lose their top rows rather than squashing the tile.** The face keeps the tile's scale, as a wall cut by a ramp would. Carnage3D squashes; AmiGTA1 draws full-height walls. To check against the original if it ever looks wrong.
 - **2026-11-20. Flat blocks are plates whose two sides run the same way in the world**, and a missing side borrows the other's tile (AmiGTA1). Back-face culling decides which side shows, as the original's straight-down camera did. Signs read correctly; a flat block nudges half a pixel towards the eye to win against the wall it shares a plane with.
@@ -470,6 +496,12 @@ Newest first. Each entry: date, decision, why.
 
 Newest first.
 
+- **2026-11-20. M3 done.**
+  - `gfa-fixed`: trig, generators and 16.16 helpers. `gfa-sim`: `clock`, `map`, `player`, `world`, `view`, `input`, `script`, `replay`, `script_world`, `hash` (FNV-1a over a fixed encoding).
+  - `gfa-app`: the player runs in the window at 50 Hz, drawn between ticks; the camera follows him; the overlay shows his tick, block, layer and ground.
+  - `gfa-tool run`, `tools/scripts/` (four scripts), `tools/oracle/` (walk harness, compare, fuzz), `tools/wasmcheck/` (native vs Node), and the `gfa-replay-wasm` crate behind it.
+  - `LevelFiles` now carries its mission section; `Dataset` parses from `gta`/`london69`/`london61`.
+  - Totals: 57 unit tests, 13 data tests; fmt, clippy, wasm-check and a release Trunk build (6.8 MB wasm) green.
 - **2026-11-20. M2 done, except Safari.**
   - `gfa_render`: `city_mesh` (faces, slopes, lid rotation, flips, flat blocks, 16×16 chunks), `style_tables` (tile atlas, palettes, remap and animation tables for GRY and G24), `city` and `city.wgsl`, `sprites` and `sprites.wgsl`, `camera` (perspective, frustum, follow), `offscreen`.
   - `gfa_assets::level`: finds a section's map and the style beside it, by game.
