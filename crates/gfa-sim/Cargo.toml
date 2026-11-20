@@ -1,0 +1,12 @@
+[package]
+name = "gfa-sim"
+description = "The deterministic game simulation: a pure function of (state, tick inputs)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+

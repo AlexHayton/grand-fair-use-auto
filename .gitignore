@@ -1,0 +1,57 @@
+# ---------------------------------------------------------------------------
+# Build output
+# ---------------------------------------------------------------------------
+/target/
+/dist/
+**/dist/
+.DS_Store
+
+# ---------------------------------------------------------------------------
+# NEVER COMMIT GAME DATA, OR ANYTHING DERIVED FROM IT.
+#
+# Grand Fair Use Auto ships no game data. You supply your own copy and point
+# the engine at it through gfa.local.toml or GFA_DATA. Upscaled "HD" packs,
+# exported art and baked tiles are derived works of that data and stay local
+# too. The patterns below are written case-insensitively ([cC][mM][pP]) so
+# they hold on case-sensitive filesystems as well as on macOS.
+# ---------------------------------------------------------------------------
+gfa.local.toml
+*.local.toml
+/hd/
+/export/
+[gG][tT][aA][dD][aA][tT][aA]/
+[gG][tT][aA][dD][oO][sS]/
+[mM][uU][sS][iI][cC]/
+*.[cC][mM][pP]
+*.[gG][rR][yY]
+*.[gG]24
+*.[fF][xX][tT]
+*.[rR][aA][wW]
+*.[rR][aA][tT]
+*.[sS][dD][tT]
+*.[sS][mM][kK]
+*.[rR][eE][pP]
+*.[fF][oO][nN]
+*.[oO][gG][gG]
+*.[wW][aA][vV]
+*.[dD][aA][tT]
+*.[iI][nN][iI]
+*.[aA][cC][tT]
+*.[tT][gG][aA]
+*.[mM][aA][pP]
+*.[pP][kK]
+*.[tT][iI][lL]
+*.[pP][aA][kK]
+*.[gG][fF][vV]
+*.[iI][sS][oO]
+*.[mM][pP]4
+*.[eE][xX][eE]
+[eE][nN][gG][uU][kK].[tT][xX][tT]
+
+# Python upscaling pipeline: virtualenv, model weights, work dirs
+tools/hdtex/.venv/
+tools/hdtex/work/
+*.pth
+
+# AmiGTA1 oracle build (built from the sibling checkout, never vendored)
+tools/oracle/build/

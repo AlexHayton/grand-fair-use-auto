@@ -1,0 +1,4 @@
+# Copy to gfa.local.toml (gitignored) and point it at your own copy of the game.
+# `data` is the folder that contains GTADATA/ (and optionally MUSIC/).
+# The GFA_DATA environment variable and the --data flag override this.
+data = "/path/to/GTA"

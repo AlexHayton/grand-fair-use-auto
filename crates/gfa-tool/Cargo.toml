@@ -1,0 +1,17 @@
+[package]
+name = "gfa-tool"
+description = "Developer CLI: inspect, dump and export the game data; headless checks"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+gfa-assets.workspace = true
+gfa-formats.workspace = true
+anyhow.workspace = true
+clap.workspace = true

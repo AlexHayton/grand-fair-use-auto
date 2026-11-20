@@ -1,0 +1,6 @@
+[alias]
+# Every crate except the native binaries must build for the browser.
+wasm-check = "check --target wasm32-unknown-unknown --workspace --exclude gfa-native --exclude gfa-tool"
+# Tests that need the user's own game data are #[ignore]d; this runs them.
+# The data folder comes from GFA_DATA or gfa.local.toml (see README).
+data-test = "test --workspace -- --ignored --nocapture"

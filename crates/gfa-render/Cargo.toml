@@ -1,0 +1,19 @@
+[package]
+name = "gfa-render"
+description = "wgpu renderer: city mesh, sprites, palettes, HUD, HD textures, video"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+log.workspace = true
+thiserror.workspace = true
+wgpu.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wgpu = { workspace = true, features = ["webgl"] }

@@ -1,0 +1,440 @@
+# Grand Fair Use Auto: implementation plan
+
+A living document. Tick boxes as work lands, add a dated line to the
+**progress log**, and record every non-obvious choice in the **decision log**
+(newest first). When a milestone's exit criterion is met, say so in the log.
+
+**Status:** M0 complete; M1 in progress, with CMP done (2026-11-20). Next: style files (GRY + G24).
+
+## Goal
+
+An "HD remaster" of the 1997 Grand Theft Auto, played from the user's own
+original data, natively on Apple Silicon (Metal) and in the browser (WebGL2).
+It ports **Carnage3D**'s data and rendering knowledge and **AmiGTA1**'s
+deterministic simulation, mission VM and HUD to Rust and wgpu. It adds what
+neither project has: CD-audio radio, saves, HD art and video, and the whole
+game rather than its first jobs.
+
+In scope: the base game (Liberty City, San Andreas, Vice City), London 1969
+and 1961, the FMV intro, HD visual polish, and a port of the hdtex upscaling
+pipeline. Out of scope: multiplayer, though the deterministic sim keeps the
+door open.
+
+### Setting up the data
+
+Copy `gfa.local.toml.example` to `gfa.local.toml` and point `data` at the
+folder that contains `GTADATA/`. Alternatively set `GFA_DATA` or pass
+`--data`. Never commit the path or the data.
+
+## Reference projects and what they give us
+
+**Carnage3D** (sibling checkout `../carnage3d`, ~39k lines C++, MIT © 2019 jericho)
+- Strengths:
+  - Data loaders: `src/GameMapManager.cpp` (CMP), `src/StyleData.cpp` (G24 only), `src/GameTextsManager.cpp` (FXT), `src/Font.cpp`, `src/AudioSampleArchive.cpp`. Structs are in `src/GameDefs.h`.
+  - Palette-indexed renderer: `src/GameMapHelpers.cpp` (`BuildMapMesh`, slopes 1–44, lid rotation and flips), `src/MapRenderer.cpp` (22×22-block chunks), `gamedata/shaders/*.glsl`.
+  - Perspective follow camera: `src/FollowCameraController.cpp`.
+  - Hand-authored entity metadata: `gamedata/entities/{gta_objects,ped_animations,pedestrians,weapons}.json`.
+- Gaps:
+  - No `MISSION.INI` parsing and no missions.
+  - Route data is skipped; AI driving is stubbed.
+  - Car handling ignores the style file's physics.
+  - Box2D multi-level collision is a hack.
+  - No police, no trains, no front end, no radio.
+- Its `web/*.data` bundles demo game data. Do not copy it.
+
+**AmiGTA1** (sibling checkout `../AmiGTA1`, ~38k lines of portable game-logic C, MIT)
+- What it covers:
+  - Behaviour derived from the original.
+  - `.GRY` v325 only (`native/gta_style.c`).
+  - Every gameplay system: traffic, police, peds, weapons, trains, services and the mission VM (`gta_script.c`, `gta_script_run.c`).
+- Sim units:
+  - 16.16 positions at **32 px per block** (the original's lengths halved, inertia quartered).
+  - 256-step angles, 0 = north, clockwise.
+  - Q14 cosine table (`gta_trig.c`).
+- Timing:
+  - Base tick `SIM_HZ 50`; the script runs at 25 Hz.
+  - Vehicle physics runs at 23.33 Hz via a 7/15 accumulator.
+  - Ped timers use `FRAMES(n)=n*3/2`.
+  - LCGs with fixed seeds (traffic 12345, peds 777, trains 0x5eed).
+- Determinism leaks we must fix:
+  - Spawn rings and `GENERAL_ONSCREEN` follow the camera view and zoom.
+  - Ticks per frame come from the wall clock.
+  - `long` overflow behaves differently between m68k and the host.
+- Mission VM:
+  - 32 process slots; one command per process per 25 Hz tick.
+  - `p2`/`p3` success and failure jumps; `p5` pays the score.
+  - The ~70-callback `gta_script_world` table is a clean seam to copy as a trait.
+- Mission VM caveats:
+  - Unknown commands silently succeed.
+  - Only the first job of each level has been played through.
+  - The vocabulary docs are private, not in the repo.
+  - Bug: `parse_line` drops the 5th number, which breaks SPECIFIC_DOOR remaps.
+- `gta_main.c` is 11k lines: game logic (arrest, cranes, doors and garages, bombs, the jump arc, the arrow, HUD text, the script callbacks) tangled with the platform layer. It needs careful extraction.
+- Test harness:
+  - `tools/gtadump.c` has about 60 host subcommands: `drive`, `walk`, `scriptrun`, `view` and others.
+  - `tools/bin/holecheck.sh` is the render regression.
+  - The 117 `tools/scripts/*.txt` input scripts are consumed one order per tick; each header lists the log lines it expects.
+
+**hdtex** (`../in_pursuit_of_greed/tools/hdtex`, the author's own project)
+- Real-ESRGAN 4× using the vendored `rrdbnet.py` (MPS on Mac).
+- `upscale.py` handles wrap-aware tiling: tiles are upscaled as a 3×3 mosaic and the centre is cropped back out.
+- Sprites: transparency is filled before upscaling, then remasked.
+- `palette.py` requantizes in Oklab with no dithering and holds back semantic indices.
+- `pixelart.py` uses EPX for fonts and index-semantic art.
+- `pack.py` writes a split sidecar where any subset loads.
+- `roundtrip.py` proves the codecs before anything else is trusted.
+- Video uses NGX VSR (NVIDIA only), with ESRGAN as the macOS fallback.
+
+**Game data:** a Director's Cut install (complete). Its location is machine-local (`gfa.local.toml` / `GFA_DATA`).
+- `GTADATA/`:
+  - Maps and styles: NYC, SANB and MIAMI `.CMP`; STYLE001-003 in both `.GRY` and `.G24`.
+  - Script and text: `MISSION.INI` (sections [1],[2],[102],[103],[202],[203] plus multiplayer); FXTs; `.FON`.
+  - Front end and briefings: `F_*.RAW/.RAT`, `F_PAL.RAW`; `CUT0-5.RAW/.ACT` with `AUDIO/0-5.WAV` voice-overs.
+  - Sound: `AUDIO/LEVEL00x`, `VOCALCOM` and `MISBRIEF` `.SDT/.RAW`.
+  - Video, replays and saves: `MOVIE.SMK` (SMK2); `1/102/202.REP` replays; `PLAYER_A.DAT`.
+- `GTADATA/UK/`: London (`UK.CMP`, `MC.CMP`, `uke.cmp`, `Style001.g24/.gry`, `MISSUK.INI`, `missuke.ini`/`misse8.ini`, FXTs, `UK.MAP`, `MC.MAP`, `AUDIO/*.PK`, `MOVIE.SMK`).
+- `MUSIC/GTA/Track02-11.ogg` and `MUSIC/LONDON/Track02-16.ogg`, each with a `CDAUDIO.DAT` cue sheet.
+
+
+Toolchain: Rust stable (1.100 at the start), the `wasm32-unknown-unknown` target, Trunk 0.22, Node 24 (for running wasm tests), Apple clang (for the AmiGTA1 oracle).
+
+
+## Principles
+1. **Behaviour comes from AmiGTA1; data and geometry from Carnage3D.** On gameplay, AmiGTA1 wins.
+2. **The sim is pure and deterministic.** `gfa-sim` has no floats (`#![deny(clippy::float_arithmetic)]`), no I/O, no clock and no platform crates. It is a function `(state, tick inputs) -> state`. Rendering interpolates between ticks with floats.
+3. **Use AmiGTA1's sim units exactly**: 16.16 at 32 px/block, 256-step angles, the Q14 table, the 50 Hz base and its subsystem dividers.
+   - The ~38k lines then translate mechanically, with their tuned constants intact.
+   - AmiGTA1's host harness can serve as a differential oracle.
+   - Conversion to original and render units happens only at the boundaries.
+   - Use `i32` with explicit wrapping where AmiGTA1 relies on 32-bit overflow; `i64` for intermediates.
+4. **Close AmiGTA1's determinism leaks.**
+   - Spawn and despawn rings and on-screen checks use a fixed **logical sim view** sized for the widest supported aspect. They never use the window or render zoom. Widescreen, Retina and HD therefore cannot change gameplay.
+   - Wall-clock catch-up lives outside the sim.
+   - Replays record `(tick, input)` only.
+5. **One codebase, two targets.** Every crate except `gfa-native` compiles for `wasm32-unknown-unknown`. wgpu always uses `Limits::downlevel_webgl2_defaults()`, even on Metal.
+6. **Ship no game data, or anything derived from it.** HD packs are generated locally and gitignored, never published. The `.gitignore` denies data extensions, as AmiGTA1's does.
+7. **Prove before trusting.**
+   - Parse every file.
+   - Round-trip the codecs.
+   - Headless render holecheck.
+   - Replay hashes, native vs wasm.
+   - Differential traces against AmiGTA1.
+   - Mission opcode coverage.
+8. **AmiGTA1 is the floor, not the ceiling.** The target is the whole original game, so anything AmiGTA1 lacks or leaves partial is scheduled work (see *Gaps beyond AmiGTA1*). Where AmiGTA1 is silent, establish the original's behaviour before building it, and log the evidence in the decision log. Evidence sources, in order:
+   - the game's own data (FXT strings, MISSION.INI, style tables);
+   - Carnage3D's docs;
+   - community format and mission docs;
+   - watching the original `GTADOS` executables run under DOSBox-X.
+
+   Never invent features. For example, AmiGTA1 notes that the original's police send no army or SWAT (`gta_traffic.h:2622`), so we add none unless evidence says otherwise.
+
+## Workspace layout
+```
+grand-fair-use-auto/
+  Cargo.toml  rust-toolchain.toml  .cargo/config.toml
+  IMPLEMENTATION_PLAN.md  README.md  LICENSE (MIT)  THIRD-PARTY.md
+  crates/
+    gfa-fixed/    Fx16 (16.16), Angle256/ang16, Q14 trig, gta_dir16 atan, LCG RNG
+    gfa-formats/  pure parsers (&[u8] -> structs): CMP (+routes, nav), GRY v325 + G24 v336,
+                  FXT, FON, SDT/RAW, F_*.RAW/RAT, F_PAL, CUT*.RAW/ACT, MISSION.INI,
+                  PLAYER_A.DAT, CDAUDIO.DAT, SMK2, REP (probe)
+    gfa-assets/   async AssetSource; case-insensitive resolver; dataset detection
+                  (GTA / London 69 / London 61 / demo); FsSource + WebSource
+    gfa-sim/      map/nav queries, player, peds, vehphys, traffic, police, weapons,
+                  pickups, trains, services, marks, score/heat, career, mission VM
+                  (+ ScriptWorld trait = AmiGTA1's gta_script_world)
+    gfa-render/   wgpu: city mesh chunks, sprite batcher, palette/CLUT/remap in WGSL,
+                  HUD/fonts, camera, lights/post, HD textures, video frames
+    gfa-audio/    kira: SFX banks, positional mix, engine pitch, radio, voice
+    gfa-app/      winit shell + states (boot/frontend/briefing/game), input map,
+                  config, SaveStore, egui debug overlay
+    gfa-native/   bin (pollster, std::fs, CLI: --data --level --nohd)
+    gfa-web/      cdylib + Trunk index.html (folder picker, IndexedDB cache, audio unlock)
+    gfa-tool/     CLI: info/dump, export PNG/manifest, headless render + holecheck,
+                  run <script> (replay + hashes + expectations), mission coverage, hd pack
+  data/entities/  object/ped-anim/ped/weapon metadata adapted from Carnage3D JSON (MIT)
+  tools/hdtex/    Python upscaling pipeline adapted from in_pursuit_of_greed
+  tools/oracle/   out-of-tree build of AmiGTA1's gtadump + trace patch (differential tests)
+  tools/scripts/  input scripts (AmiGTA1 order format) with expected-log headers
+  docs/           REFERENCE_MAP.md, FORMATS.md, MISSION_OPCODES.md,
+                  PARITY.md (feature ledger: original / AmiGTA1 / GFA status + evidence)
+```
+Main crates:
+- wgpu, winit, glam (render side only), egui + egui-wgpu + egui-winit
+- kira (ogg playback)
+- web-time, wasm-bindgen(-futures), web-sys, pollster
+- serde, toml, serde_json; anyhow, thiserror
+- zstd (pure-Rust ruzstd on the web)
+- image (tool only)
+
+## Milestones
+Each milestone has tasks with checkboxes and an **exit criterion**. Named references are the files to read while porting.
+
+**M0: Scaffold and guardrails**
+- [x] git init. `.gitignore`: `target/`, data extensions (`*.cmp *.gry *.g24 *.fxt *.raw *.rat *.sdt *.smk *.rep *.fon *.ogg *.wav`, matched case-insensitively), `gfa.local.toml`, `hd/`, `tools/hdtex/.venv`, `*.pth`, `tools/oracle/build/`.
+- [x] LICENSE (MIT). THIRD-PARTY.md: the Carnage3D and AmiGTA1 MIT notices; Real-ESRGAN weights (BSD-3) are downloaded, never committed. README.
+- [x] Workspace and crate skeletons. Cargo aliases: `wasm-check`, `data-test`.
+- [x] Data path resolution: `--data` flag, then `GFA_DATA`, then `gfa.local.toml`.
+- [x] `docs/PARITY.md` seeded from *Gaps beyond AmiGTA1*.
+- [x] `gfa-native` opens a winit + wgpu window that clears the screen. `gfa-web` builds with Trunk.
+- Exit: `cargo build`, `cargo test` and `cargo wasm-check` are green; a window opens natively and in the browser.
+
+**M1: Formats** (`gfa-formats`, `gfa-tool`)
+- [x] CMP v331. Ref: Carnage3D `GameMapManager.cpp`, AmiGTA1 `gta_map.c`. (`gfa_formats::cmp`, notes in `docs/FORMATS.md`)
+  - Header; base offsets and column-compressed blocks, validated on load; lookups by `(x, y, z)`.
+  - Startup objects, routes (police patrols and roadblock lists, which Carnage3D skips), service bases, districts.
+  - All six Director's Cut maps parse. Column (25,18) of NYC matches AmiGTA1's recorded dump.
+  - The nav byte grid (`gta_nav.c`) is derived from the map at runtime, not stored, so it moves to M3.
+- [ ] Style. Ref: AmiGTA1 `gta_style.c` (GRY v325), Carnage3D `StyleData.cpp` (G24 v336).
+  - Tiles, animations, CLUTs and palette indices, remaps.
+  - Objects, car info (raw 16.16 physics), sprites, sprite numbers, deltas, HUD "arrow" sprites.
+- [ ] FXT (0xBF/0xA6 keys, 195 escape), FON (with its 768-byte palette), SDT/RAW (12-byte LE entries; 8-bit unsigned).
+- [ ] Front-end images (`F_*`, `F_PAL`, `CUT*.RAW/.ACT`), `PLAYER_A.DAT` (`gta_career.c`), `CDAUDIO.DAT`. Header probes for SMK2 and REP.
+- [ ] `MISSION.INI`: sections; typed declarations (5 trailing numbers, fixing AmiGTA1's bug); the command block. Ref: `gta_script.c`, `gta_script_run.c:244`, Carnage3D `docs/ped.txt`.
+- [ ] `gfa-tool info | export {tiles,sprites,fonts,frontend,cuts} | mission {list,dump}`. (`info` and `map [--at X,Y]` done)
+- [ ] Data tests, gated on `GFA_DATA`: parse every file in GTADATA and UK, assert counts (e.g. [1] has 575 declarations and 2116 commands), and write contact-sheet PNGs for review.
+- Exit: the whole Director's Cut set parses, and the exported art looks right. GRY and G24 agree on structure.
+
+**M2: Static city renderer (native + web)**
+- [ ] City mesh. Ref: Carnage3D `GameMapHelpers::BuildMapMesh`, `MapRenderer`.
+  - Faces, lid rotation and flips, slopes 1–44, flat/transparent faces.
+  - 22×22 chunks with frustum culling.
+- [ ] Palette-indexed textures in WGSL via `textureLoad`.
+  - R8Uint tile array; palette, palette-index and remap tables.
+  - Animated-tile lookup table.
+  - Ref: `gamedata/shaders/city_mesh.glsl`, `sprites.glsl`.
+- [ ] Follow camera: perspective, FOV 55°, height zoom, lead-ahead. Free-look debug camera. The egui overlay shows fps, camera position and a block inspector.
+- [ ] Sprite batcher: instanced quads, height/draw-order sort. Particles are drawn as quads.
+- [ ] `gfa-tool render`: headless offscreen PNG. Holecheck: clear to a sentinel colour and count leftover pixels at 8 fixed viewpoints (AmiGTA1 `holecheck.sh`).
+- [ ] Web: `<input webkitdirectory>` folder picker into WebSource; cache in IndexedDB.
+- Exit: NYC, SANB and MIAMI render at Retina resolution on macOS and in Chrome and Safari; holecheck = 0.
+
+**M3: Deterministic sim foundation**
+- [ ] `gfa-fixed` ports AmiGTA1's formats, trig and RNGs (`gta_trig.c`).
+- [ ] Tick scheduler: the 50 Hz base with exact dividers (script 25 Hz, vehphys 7/15, peds 3/2, marks/trains/objects at ½); render interpolation.
+- [ ] Logical sim view (Principle 4). Map and height queries, including the nav byte grid (`gta_nav.c`) and ground types (`gta_map_ground_type`). `ScriptWorld` trait skeleton.
+- [ ] Input becomes a recorded command stream. Parse the AmiGTA1 order format (`wait/run/enter/goto/park/…`, `gta_main.c:6875-7084`).
+- [ ] `gfa-tool run --section N --script f --ticks T [--hash-every K]` checks the expected-log lines from the script header.
+- [ ] Player on foot. Ref: `gta_player.c`.
+- [ ] Oracle: build AmiGTA1's `gtadump` with clang, directly from a sibling `../AmiGTA1` checkout into `tools/oracle/build`. Bake `.til` from the user's GRY with `gtabake`. A small trace patch lives in our repo.
+- Exit:
+  - You can walk every level.
+  - The same script gives identical hashes on native and wasm (run in node).
+  - `walk` traces match the oracle.
+
+**M4: Vehicles.** Ref: `gta_vehphys.c/.h` (essay in the header), `gta_car.c`, `gta_train.c`, `gta_main.c:790-805` and around line 8960 (jump arc).
+- [ ] Two-tyre rigid body with the style's raw 16.16 values. Rear grip ×1.5; handbrake 0.6; road-snap assist.
+- [ ] Wall resolve with a 10-point outline and safe-position revert.
+- [ ] Ramps and layers; jumps.
+- [ ] Damage via sprite deltas; burning, exploding, wrecks.
+- [ ] Door-by-door enter and exit; vault the car; drag out the driver; bikes and convertibles.
+- [ ] Trains.
+- [ ] Use `tools/vehruler.c` as the measurement reference.
+- [ ] Close the M4 items in *Gaps beyond AmiGTA1*: tank, boats and water, specials, trains, pull-over, bombs, chain explosions.
+- Exit: every class drives, including the tank and the boats; the (91,105..108) jump lands; vehicle traces match the oracle.
+
+**M5: Living city.** Ref: `gta_traffic.c` (10.6k lines), `gta_route.c` (BFS: 48-block window, 700 nodes), `gta_nav.c`, `gta_peds.c`.
+- [ ] Fleet spawn and despawn on the logical view.
+- [ ] AI driver: lanes, junctions, give way, queues, S-curve lane change, U-turn.
+- [ ] Traffic lights.
+- [ ] SAT `box_mtv` collisions with impulse and spin (`fleet_collide`, around `gta_traffic.c:8067`).
+- [ ] Peds on pavements, crossings, knockdowns, panic.
+- [ ] Close the M5 items in *Gaps beyond AmiGTA1*: counter-punch, gang roles, special ped groups, junction fidelity.
+- Exit: the `drive` traces from `fullgate`/`litegate` (4 sites × 3 seeds × 12,000 ticks) match the oracle, with no deadlocks.
+
+**M6: Combat, police, services.** Ref: `gta_weapon.c`, `gta_pickup.c`, `gta_score.c` (heat thresholds such as LC 151/251/351/501), `gta_traffic.c:9681-10500` (cop dispatch, roadblocks), `gta_peds.c:1912-2066` (arrest, shooting), `gta_service.c`, `gta_marks.c`, plus the `gta_main.c` busted/wasted/siren code.
+- [ ] Five weapons, rockets and flames, fires and explosions; crates.
+- [ ] Wanted levels, chases and rams, roadblocks, arrest; BUSTED and WASTED, lives, hospital.
+- [ ] Ambulance and fire engine. Spray and bomb shops.
+- [ ] Tyre marks, blood and oil for all cars. AmiGTA1 only marks the player's car.
+- [ ] Close the M6 items in *Gaps beyond AmiGTA1*: crates, armour, friendly fire, wall fires, power-ups, bonuses, police reasons, bust tally.
+- Exit: the bust, death and spray-escape loops work; the AmiGTA1 `car_*`, `bankblast` and `blood*` scripts pass.
+
+**M7: Mission VM, HUD, text.** Ref: `gta_script.c`, `gta_script_run.c` (`cmd_names[]` at lines 35-172; `step()` at 645; `gta_script_tick` at 2691), `gta_script.h:203-220` and `:459-663`, the `gta_main.c` callbacks (doors, cranes, bombs, the arrow), `gta_hud.c`, `gta_font.c`, `gta_text.c`, and `gta_main.c:2615-2830` (text displays).
+- [ ] Port the VM: declarations, the command table, 32 processes, triggers (TRIGGER/MPHONES/CARTRIGGER/DUM_MISSION_TRIG), phones, arrows, garages and doors, cranes, kill frenzies, bank robbery.
+- [ ] **Unknown commands log section and line and count toward coverage. They do not silently succeed.**
+- [ ] `docs/MISSION_OPCODES.md` lists every command used in GTA's `MISSION.INI` with its status. Sources: AmiGTA1's table, Carnage3D `docs/ped.txt`, community mission docs, and observed behaviour.
+- [ ] `gfa-tool mission coverage` produces the coverage report.
+- [ ] Original HUD: cop heads, weapon and ammo, armour, jail-free card, the pager scroll, the brief box, the big two-line card, score and multiplier fonts.
+- [ ] Close the M7 items in *Gaps beyond AmiGTA1*: every job, a playthrough script per job, mission-only vehicles.
+- Exit, in order:
+  1. LC jobs 1–2 pass AmiGTA1's `threejobs`/`phonering`/`lc2_job1` scripts.
+  2. Each level's first job passes (`sa1`, `sa2`, `vc1`, `vc2`).
+  3. All of chapter 1 is completable. This goes beyond AmiGTA1.
+  4. All 6 chapters are completable.
+  5. Every used opcode is implemented, or stubbed with a documented reason.
+
+**M8: Front end, audio, saves.** Ref: `gta_front.c`, `gta_career.c`, `gta_audio.c` (radio and engine-pitch logic), `gta_sfx.c`, `gta_snd.h`.
+- [ ] Title and menus in the original fonts; player and chapter select; high scores.
+- [ ] Briefing stills `CUT0-5` with `0-5.WAV`.
+- [ ] SFX banks with positional mix; engine pitch; VOCALCOM; MISBRIEF.
+- [ ] Radio: clock-based stations `(offset+elapsed) mod length` mapped to `Track02-11.ogg` through `CDAUDIO.DAT`; the police band only in police cars; on-foot ambience; a station key.
+- [ ] Web audio starts on the first gesture.
+- [ ] Close the M8 items in *Gaps beyond AmiGTA1*: cheats, language, high scores, pause and options, attract demos, complete speech and SFX.
+- [ ] Saves: read and write the original `PLAYER_A.DAT` format behind a `SaveStore` trait.
+  - Native: `~/Library/Application Support/GrandFairUseAuto`.
+  - Web: IndexedDB.
+  - A versioned sidecar holds settings.
+- Exit: boot, title, chapter, play, complete, save, relaunch, resume.
+
+**M9: FMV**
+- [ ] SMK2 decoder in Rust, written from the public format description rather than LGPL FFmpeg or libsmacker code. Video and audio. Skippable. Same code on native and web. Covers `MOVIE.SMK` and `UK/MOVIE.SMK`.
+- Exit: the intro plays in sync on macOS and in the browser.
+
+**M10: HD remaster layer** (port of hdtex)
+- [ ] `gfa-tool export-art` writes PNG indices plus a JSON manifest per asset: class (tile/sprite/font/hud/frontend/cut), CLUT, wrap flag, semantic indices, sprite span masks.
+- [ ] `tools/hdtex`:
+  - Reuse `rrdbnet.py`, `upscale.py`, `palette.py`, `pixelart.py`, `contact_sheet.py`, the `pack.py` split logic, `setup.sh` and `fetch_weights.py`.
+  - New code: a manifest-driven `assets.py`, `extract`/`process` stages, and `make_hd.py`.
+- [ ] Rules carried over:
+  - 64×64 tiles: 3×3 wrap upscaling, so roads have no seams.
+  - Sprites: fill, upscale, remask.
+  - **Requantize in Oklab to each asset's own CLUT, no dithering**, so car and ped remaps and palette shading keep working.
+  - Fonts and HUD art with semantic indices: EPX.
+  - Front-end and CUT stills: 4×.
+- [ ] Round-trip gate first: export, re-import and pack must be byte-identical at 1×.
+- [ ] Engine: optional `GFA_HD.00N.pak` sidecar.
+  - Split parts; any subset loads; missing entries fall back.
+  - ORIGINAL/HD runtime toggle; `--nohd`.
+  - On the web, loaded from the user's local folder.
+  - Stays within WebGL2 limits (2048² textures, 256 array layers) by splitting 256² tiles across several arrays or atlas pages.
+- [ ] Video: `MOVIE.SMK` frames 2×, with ESRGAN on Mac or NGX VSR on NVIDIA (`nvvsr.py`), requantized per frame.
+  - Stored in a tiny `.gfv` container: paletted frames, delta + zstd, original PCM.
+  - Decoded by the same Rust code everywhere.
+- [ ] Polish:
+  - Additive dynamic lights: headlights, siren strobes, muzzle flash, explosions.
+  - Smooth speed-based zoom (render only, never the sim view).
+  - Optional xBRZ-style shader when no pack is present; optional CRT shader.
+- Exit:
+  - The toggle works on native and web.
+  - No tile seams.
+  - Remaps are correct in HD.
+  - Contact sheets have been reviewed.
+
+**M11: London 1969 and 1961**
+- [ ] Detection: `MISSUK.INI` means 69, `missuke.ini` means 61.
+- [ ] `Style001`/`Sty001` styles; London FXT key; `Track02-16`.
+- [ ] Investigate `UK.MAP`, `MC.MAP` (CMP-like headers), `AUDIO/*.PK` and `misse8.ini`.
+- [ ] Left-hand traffic.
+- Exit: London 69 is playable; London 61 loads and plays.
+
+**M12: Polish and release**
+- [ ] Settings: render scale, HD toggle, key rebinding, gamepad (gilrs).
+- [ ] macOS `.app` bundle.
+- [ ] Static web deploy with no data in it.
+- [ ] Performance: 60 fps on M-series and in Safari.
+- [ ] Docs.
+
+## Gaps beyond AmiGTA1 (full-game parity)
+Sources for this list:
+- AmiGTA1's own status notes: the README "WHAT IS NOT IN v0.7.1" (`tools/bin/readme_gen.py:620`) and `gta_weapon.h:34` "Not built yet".
+- Its in-code `NOT PORTED` and `not yet` markers.
+- An audit of what it never models.
+
+Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.md`. **(verify)** means: settle the original's behaviour first (Principle 8), because AmiGTA1 gives no answer.
+
+**M4 Vehicles**
+- [ ] **Tank** (model 0x25). AmiGTA1 has only its handling: the engine cut at top speed (`gta_vehphys.c:395`) and its turn rate. Add:
+  - the rotating turret, aimed independently of the hull;
+  - cannon shells on the fire key: projectile, explosion, wall and car damage;
+  - its armour and resistance to damage;
+  - pushing and crushing cars;
+  - where it spawns, and how it is reached. **(verify)**
+- [ ] **Boats and water.**
+  - AmiGTA1 places the boat as a map object with no driving (`gta_traffic.c:1152`, `gta_car.c:6`). Add water-only boat handling: ground type 5 is water (`gta_vehphys.c:612`), boarding at the shore, and the boats that missions use.
+  - Cars entering water sink and are lost.
+  - Finish drowning for the player and peds. The water ticks at `gta_main.c:2253` are only partial.
+- [ ] **Map-placed specials**: the boat, tank, helicopter and RC car are placed from the map's object list (`gta_traffic.c:1152`).
+  - The helicopter (model 88) is filtered out of traffic (`gta_traffic.c:1186`). Model it as a script-driven vehicle: the escape helicopter's destination (`gta_script.h:82`), takeoff and flight.
+  - Drivable or not? **(verify)**
+- [ ] **Trains**: follow the bogie path table instead of cutting corners on the chord.
+  - Trams stay still, as in the original.
+  - Make train boarding, riding and IS_PLAYER_ON_TRAIN robust across all three cities.
+- [ ] **Horn and pull-over**: the original's look-ahead of up to five blocks for a car (`gta_main.c:3957`, NOT PORTED).
+- [ ] **Bombs**: the type-4 tanker bomb, whose wreck blows five times (`gta_main.c:4272`, not ported). Find the global that triggers it.
+- [ ] **Chain explosions**: a burning wreck sets off its neighbours (`gta_weapon.h:34`).
+- [ ] **Emergency vehicles the player drives**: the siren and light toggle in cop cars, ambulances and fire engines, and how traffic reacts to it.
+
+**M5 Living city**
+- [ ] The victim's ped counter-punch (`gta_peds.c:1675`).
+- [ ] Settle the gang-role state machine (`gta_peds.c:1111`).
+- [ ] **Special ped groups** that the bonuses need: Hare Krishna lines; Elvis impersonators **(verify which levels)**. Spawn rules come from the style and ped tables.
+- [ ] Traffic fidelity issues AmiGTA1 lists as open: junction wobble (`gta_traffic.c:5871`) and corner landing error (`gta_traffic.c:5666`).
+
+**M6 Combat, police, services**
+- [ ] Re-audit `gta_weapon.h:34`, since that list is partly stale, and finish whatever is still missing:
+  - weapon crates;
+  - friendly-fire groups;
+  - armour absorbing hits (the pickup sets `player_armour`; confirm it is read);
+  - free-standing fires that rockets leave on walls.
+- [ ] **Power-ups that "nothing reads"** (`gta_main.c:10291`). Enumerate every pickup kind from the style's object table, then implement each one's effect and timer: speed-up, the multiplier, the kill-frenzy crate handed to the script, extra life, and the rest.
+- [ ] **In-game bonuses AmiGTA1 lacks** (`gta_score.h:17`: "GOURANGA!" not built).
+  - GOURANGA, the Elvis bonus, cop-kill bonuses, and any others. **Build the list from the FXT bonus strings**, so nothing is invented.
+  - Each pays its points and multiplier and shows its card and voice.
+- [ ] The crime counters the pager prints on a bust (`gta_score.h:16`).
+- [ ] The police AI's reason for the siren (`gta_main.c:9976`) and the cop's 0x13 call (`gta_snd.h:219`). Check bribes and jail-free cards end to end.
+- [ ] Police escalation stays cop cars only (`gta_traffic.h:2622`) unless evidence says otherwise.
+
+**M7 Missions**
+- [ ] **Every job of every chapter.** AmiGTA1 played through only the first job of each level.
+  - Add one `tools/scripts` playthrough per job as each job is finished.
+  - Each job's script must pass in CI. Where the oracle has no answer, record a replay hash instead.
+- [ ] Mission-only vehicles and objects: tanker, escape helicopter, train jobs, boat jobs, crane and garage set pieces. They come from the opcode coverage report.
+
+**M8 Front end, audio, saves**
+- [ ] **Cheats**: port AmiGTA1's name-entry cheat table (`gta_career.c:223`; flags `GTA_CHEAT_*` in `gta_career.h:69-78`). Also check for Director's Cut and London cheats. **(verify)**
+- [ ] **Language select** across the four FXTs, plus the SPECIAL.FXT toggle (`GTA_CHEAT_LANG`).
+- [ ] **High-score table**: layout from the research notes in `gta_career.h`; display, entry and save.
+- [ ] **Pause menu and in-game options** (audio, controls, HD/original). These are new.
+- [ ] **Attract mode**: decode `1/102/202.REP` and play them as front-end demos. If the format resists decoding, record our own demos. This links to the `.REP` stretch oracle.
+- [ ] Complete speech and SFX: every VOCALCOM line and its trigger, the MISBRIEF briefings, and the cop 0x13 call. The stolen-channel fade becomes a kira mixer bus.
+
+**M11 London**: all of it is beyond AmiGTA1, whose level table covers sections [1],[2],[102],[103],[202],[203] only (`gta_main.c:167`).
+
+## Cross-cutting
+- **Attribution:** `docs/REFERENCE_MAP.md` maps each module to its Carnage3D and AmiGTA1 sources, and module headers credit them, as AmiGTA1 credits Carnage3D.
+- **Testing layers:** unit tests; data tests gated on `GFA_DATA`; golden renders and holecheck; replay hashes, native vs wasm; oracle traces; script expectations; mission coverage. Stretch goal: decode the original `.REP` replays as a fidelity oracle.
+- **Risks and open questions** (answers go in the decision log):
+  - G24 vs GRY as the default (G24 for colour and HD; GRY for oracle parity).
+  - Extracting `gta_main.c` cleanly.
+  - Whether the oracle needs trace hooks beyond a small patch.
+  - WebGL2 texture budget for HD; Safari performance.
+  - London's unknown files and left-hand traffic.
+  - Features where AmiGTA1 is silent (tank turret, boats, bonuses, attract demos). These need evidence from the original, possibly by observing it under DOSBox-X, which costs time per item.
+  - Smacker licensing hygiene.
+  - HD pack size on the web.
+
+## Decision log
+
+Newest first. Each entry: date, decision, why.
+
+- **2026-11-20. Parsers keep raw records; game rules decide later.** The CMP parser keeps the map column-compressed as in the file, keeps duplicate startup objects, and keeps ground and direction bits where the file puts them (one block up). The sim chooses Carnage3D's or AmiGTA1's interpretation, with AmiGTA1 winning on gameplay (Principle 1).
+- **2026-11-20. Unused-dependency warnings are kept on.** Cargo 1.100 warns on unused (workspace) dependencies. Crates gain dependencies when they first use them, rather than declaring them all up front.
+- **2026-11-20. Drawing pauses while the window is hidden.** On macOS an occluded window makes every acquire return `Occluded`. Without the pause, the loop spun at about 5,000 iterations per second. While hidden, the app probes four times a second and resumes on `WindowEvent::Occluded(false)`.
+- **2026-11-20. Non-sRGB surface formats are preferred** (`Bgra8Unorm` on Metal, `Rgba8Unorm` on WebGL2). Palette bytes then reach the screen exactly as the original drew them. Any lighting or HD blending that wants linear space will convert in the shader.
+- **2026-11-20. WebGL2 limits everywhere; only the texture size follows the adapter.** The device uses `Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits())`, so a Retina surface (2560x1600 and up) can be configured. Game art must still keep to `gfa_render::ASSET_TEXTURE_MAX` (2048).
+- **2026-11-20. Web: WebGL2 only; the WebGPU backend is not enabled.** One code path and one set of limits. We can revisit once the renderer is complete.
+- **2026-11-20. Web data access is synchronous after load.** `AssetSource` is a sync trait (`FsSource` natively). The web build will read the picked folder into a `MemSource` (cached in IndexedDB) before the game starts. This replaces the "async AssetSource" idea in the layout above.
+- **2026-11-20. Toolchain is Rust stable (1.100) + wgpu 30 + winit 0.30.** Trunk 0.22.2 required rustc ≥ 1.96.1, so the toolchain was upgraded. winit 0.31 is still in beta.
+- **2026-11-20. Data folder = the folder containing `GTADATA/`.** Resolution order: `--data`, then `GFA_DATA`, then `gfa.local.toml` found by walking up from the working directory. A path to `GTADATA/` itself is lifted to its parent. London lives in `GTADATA/UK/` (Director's Cut layout).
+- **2026-11-20. Game data and derived art are never committed.** Case-insensitive `.gitignore` patterns cover every original data extension; HD packs and exports stay local.
+- **2026-11-20. Extras in scope: HD polish, London 69/61, FMV intro, hdtex port.** Multiplayer is out.
+- **2026-11-20. Deterministic fixed-point sim in AmiGTA1's exact units** (16.16 at 32 px/block, 256-step angles, Q14 trig, 50 Hz base). The ported C keeps its tuned constants, and AmiGTA1 can act as a differential oracle. Gemini's rapier2d suggestion was rejected.
+- **2026-11-20. Rust + wgpu (Metal native, WebGL2 web), one codebase.**
+
+## Progress log
+
+Newest first.
+
+- **2026-11-20. M1: CMP parser.**
+  - `gfa_formats::cmp` with 2 unit tests, plus data tests that parse all six Director's Cut maps (NYC, SANB, MIAMI, UK, MC, UKE) and validate every column.
+  - `gfa-tool map <path> [--at X,Y]`.
+  - Found that `UK.MAP` and `MC.MAP` are CMP-headed, uncompressed editor maps (`docs/FORMATS.md`).
+- **2026-11-20. M0 done.**
+  - Workspace with 10 crates (`gfa-fixed`, `gfa-formats`, `gfa-assets`, `gfa-sim`, `gfa-render`, `gfa-audio`, `gfa-app`, `gfa-native`, `gfa-web`, `gfa-tool`).
+  - Case-insensitive data guard in `.gitignore`, checked with `git check-ignore` against sample names.
+  - `gfa-assets`: data-path resolution, case-insensitive `FsSource`, `MemSource`, dataset detection. 7 unit tests, plus 1 data test that finds GTA, London 69 and London 61, all with music.
+  - Native `gfa`: Metal window on the Apple M1 Max at 2560x1600, about 120 fps with vsync.
+  - Web: Trunk build; Chrome runs WebGL2 through ANGLE on Metal, and the surface tracks the canvas (2560x1600).
+  - `gfa-tool info` prints the data folder and the games found.
+  - `cargo build`, `cargo test`, `cargo wasm-check`, `cargo data-test` and clippy are all green.
