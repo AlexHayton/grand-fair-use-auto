@@ -47,6 +47,9 @@ pub enum Order {
     Goto { bx: i32, by: i32, face: Option<i32> },
     /// Turn the player to an angle.
     Face(i32),
+    /// Put the player on block `(bx, by)` on `layer` (ours: `goto` takes
+    /// the lowest walkable layer, which under a bridge is the street).
+    Stand { bx: i32, by: i32, layer: i32 },
     /// Press the enter key for a tick.
     Enter,
     /// Put the player straight into a car of table record `model`, centred
@@ -224,6 +227,7 @@ impl Script {
                     }
                 }
                 ("face", Some(&[a]), _) => Order::Face(a),
+                ("stand", Some(&[bx, by, layer]), _) => Order::Stand { bx, by, layer },
                 ("enter", Some(&[]), _) => Order::Enter,
                 ("drive", Some(&[model, bx, by, face]), _) => Order::Drive {
                     model,

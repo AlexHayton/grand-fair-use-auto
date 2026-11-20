@@ -2,6 +2,7 @@
 # reverse with full lock, coast to rest. tools/oracle/compare.sh diffs every
 # tick of position, velocity, heading, spin, steering, layer and damage.
 #
+# oracle: drive
 # section: 1
 # expect: car: in - model 0 at (62,60) layer 2
 drive 0 62 60 128

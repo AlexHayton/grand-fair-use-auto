@@ -3,6 +3,7 @@
 # Block (62,60) is ordinary road: layer 1's lid is the surface, so he
 # stands on layer 2.
 #
+# oracle: walk
 # section: 1
 # expect: start (62,60) layer 2 angle
 # expect: leg  4: turn  1 fwd  0 walk 0 x 13  ->  block ( 62, 60) +16.00,16.00  layer 2  angle 132

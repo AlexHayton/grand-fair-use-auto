@@ -299,6 +299,37 @@ pub fn push_car(
     }
 }
 
+/// A train carriage from the style's train sprites: a body between two
+/// bogie pieces, all at the body's height and turned `angle` radians. The
+/// engine's leading piece is train sprite 4 and the last carriage's
+/// trailing piece 3, the other pieces 2; the engine's body is 1, the rest 0
+/// (AmiGTA1 `gta_trains_draw`).
+#[allow(clippy::too_many_arguments)]
+pub fn push_carriage(
+    out: &mut Vec<SpriteInstance>,
+    style: &Style,
+    atlas: &SpriteAtlas,
+    body: [f32; 2],
+    front: [f32; 2],
+    back: [f32; 2],
+    z: f32,
+    angle: f32,
+    first: bool,
+    last: bool,
+) {
+    use gfa_formats::style::SpriteCategory;
+    let pieces = [
+        (front, if first { 4 } else { 2 }),
+        (back, if last { 3 } else { 2 }),
+        (body, if first { 1 } else { 0 }),
+    ];
+    for (at, n) in pieces {
+        if let Some(sprite) = style.sprite_index(SpriteCategory::Train, n) {
+            out.extend(own_sprite(style, atlas, sprite, [at[0], at[1], z], angle));
+        }
+    }
+}
+
 /// Map object `object`'s sprite, frame `frame` of it (fires and other
 /// animated objects keep their frames in a run of sprites).
 pub fn object_sprite(

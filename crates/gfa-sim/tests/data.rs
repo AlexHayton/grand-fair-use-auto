@@ -1,6 +1,8 @@
 //! Simulation checks against the user's own game data. Run with
 //! `cargo data-test`.
 
+mod common;
+
 use gfa_assets::level::{self, load_map};
 use gfa_assets::{AssetSource, DataPath, Dataset, FsSource};
 use gfa_sim::input::{Buttons, TickInput};
@@ -142,4 +144,46 @@ fn g24_and_gry_cars_agree() {
         }
         println!("style {n}: {} cars agree", g24.cars.len());
     }
+}
+
+/// Every script in tools/scripts/ passes its own `# expect:` and
+/// `# reject:` checks, and runs the same twice.
+#[test]
+#[ignore = "needs game data (cargo data-test)"]
+fn every_script_passes() {
+    use gfa_sim::replay::{self, RunOptions};
+    use gfa_sim::script::Script;
+    let src = data();
+    let opts = RunOptions {
+        ticks: None,
+        hash_every: Some(50),
+    };
+    let mut failed = Vec::new();
+    for (name, text) in common::scripts() {
+        let script = Script::parse(&text).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let lv = common::level(&src, script.section.unwrap_or(1));
+        let report = replay::run(
+            &mut common::world(&lv, &script, false),
+            &script,
+            opts,
+            |_, _| {},
+        );
+        let again = replay::run(
+            &mut common::world(&lv, &script, false),
+            &script,
+            opts,
+            |_, _| {},
+        );
+        assert_eq!(report.hashes, again.hashes, "{name}: not deterministic");
+        let checks = script.expect.len() + script.reject.len();
+        if report.failures.is_empty() {
+            println!("{name}: {} ticks, {checks} checks pass", report.ticks);
+        } else {
+            for f in &report.failures {
+                println!("{name}: FAIL {f}");
+            }
+            failed.push(name);
+        }
+    }
+    assert!(failed.is_empty(), "scripts failed: {failed:?}");
 }

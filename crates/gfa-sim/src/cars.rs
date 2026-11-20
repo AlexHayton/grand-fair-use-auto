@@ -4,8 +4,8 @@
 //! Ported from AmiGTA1's main loop (`gta_main.c`, MIT): the door point and
 //! door-side rules, the walk to the door and the ten-step get-in, the
 //! nine-step get-out with the car still rolling, the ramp climb judged at
-//! the nose, the jump off a ramp with nothing beyond it, and bodywork
-//! damage from walls. Parked cars come from the map's startup objects, as in
+//! the nose, the jump off a ramp with nothing beyond it, bodywork damage
+//! from walls, and the vault over a car's roof. Parked cars come from the map's startup objects, as in
 //! the original (Carnage3D `CreateStartupObjects`).
 
 use crate::hash::{SimHash, StateHasher};
@@ -40,6 +40,13 @@ const EXIT_LAT: [i64; 9] = [-2, -2, -2, -1, 1, 0, 0, 0, 1];
 const LIFT: i64 = 1 << 16;
 const GRAVITY: i64 = 1 << 16;
 const Z_MAX: i64 = 160 << 16;
+/// The vault: a state lasts four ticks (the get-in's clock), he may spend
+/// at most 15 states on a roof before he is put down, and a vehicle must
+/// stand lower than 20 (the car table's `vert`: 10 for a saloon, 24 for a
+/// bus) to be vaulted rather than slid under.
+pub const VAULT_TICKS: i32 = 4;
+pub const VAULT_HOLD_MAX: i32 = 15;
+pub const VAULT_MAX_VERT: i16 = 20;
 /// Damage at which a car is a write-off, and how long it then burns.
 pub const WRECKED: i32 = 100;
 pub const FUSE: i32 = 120;
@@ -184,8 +191,63 @@ pub fn panel_delta(ci: &CarInfo, cx: i64, cy: i64, face: i32, hx: i64, hy: i64) 
 
 /// Which flank the door is on: -1 when the model has a door record (the
 /// side its door art opens on), +1 for a bike.
-fn door_side(ci: &CarInfo) -> i64 {
+pub fn door_side(ci: &CarInfo) -> i64 {
     if ci.doors.is_empty() { 1 } else { -1 }
+}
+
+/// A body's half length and half width in world px.
+pub fn half_size(ci: &CarInfo) -> (i32, i32) {
+    (i32::from(ci.length >> 1) / 2, i32::from(ci.width >> 1) / 2)
+}
+
+/// Can the player go over this vehicle's roof? Anything lower than
+/// [`VAULT_MAX_VERT`]; a taller one is slid under.
+pub fn vaultable(ci: &CarInfo) -> bool {
+    ci.vert < VAULT_MAX_VERT
+}
+
+/// Getting in from the far side. When the player stands on the flank away
+/// from the door, clear of the body and no more than 59 degrees off
+/// square-on (tan 59° is 5/3), and his straight line to the door crosses
+/// the body, he runs at that crossing and goes over the roof. Returns the
+/// point 2 px short of the near flank where his line meets it, and the
+/// heading straight across the car. AmiGTA1 reads the original's vault
+/// trigger off the geometry this way, once, at RETURN.
+pub fn far_side(
+    ci: &CarInfo,
+    car: (i64, i64, i32),
+    player: (i64, i64),
+    door: (i64, i64),
+) -> Option<((i64, i64), i32)> {
+    let (cx, cy, face) = car;
+    let (fx, fy) = (i64::from(sin(face)), -i64::from(cos(face)));
+    let (rx, ry) = (i64::from(cos(face)), i64::from(sin(face)));
+    // Along and across the body, in whole px from its centre.
+    let local = |x: i64, y: i64| {
+        let (dx, dy) = ((x - cx) >> 16, (y - cy) >> 16);
+        ((dx * fx + dy * fy) >> 14, (dx * rx + dy * ry) >> 14)
+    };
+    let (along_p, across_p) = local(player.0, player.1);
+    let (along_d, across_d) = local(door.0, door.1);
+    let (hl, hw) = half_size(ci);
+    let (hl, hw) = (i64::from(hl), i64::from(hw));
+    let opposite = (across_p < 0) != (across_d < 0);
+    if !opposite || across_p.abs() <= hw || along_p.abs() * 3 > across_p.abs() * 5 {
+        return None;
+    }
+    let edge = if across_p < 0 { -hw } else { hw };
+    // Integer division truncates toward zero, as C's does.
+    let along_hit = along_p + ((along_d - along_p) * (across_p - edge)) / (across_p - across_d);
+    if along_hit.abs() > hl {
+        return None;
+    }
+    let out = if across_p < 0 { edge - 2 } else { edge + 2 };
+    let point = (
+        cx + (fx * along_hit + rx * out) * 4,
+        cy + (fy * along_hit + ry * out) * 4,
+    );
+    let head = (if across_d < 0 { face - 64 } else { face + 64 }) & 255;
+    Some((point, head))
 }
 
 /// Where the player stands to get in: level with the hinge along the body

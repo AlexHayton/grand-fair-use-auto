@@ -395,6 +395,94 @@ impl Cmp {
     }
 }
 
+/// Writes a small map in the CMP layout, for tests: give it the blocks of
+/// a few columns and it writes the file [`Cmp::parse`] reads. Every other
+/// column is empty.
+#[derive(Debug, Clone, Default)]
+pub struct CmpBuilder {
+    /// `(x, y)` to the column's blocks, ground first (layer 0 upwards).
+    columns: std::collections::BTreeMap<(u8, u8), Vec<Block>>,
+    objects: Vec<StartupObject>,
+    pub style_number: u8,
+}
+
+impl CmpBuilder {
+    pub fn new(style_number: u8) -> Self {
+        CmpBuilder {
+            style_number,
+            ..CmpBuilder::default()
+        }
+    }
+
+    /// Put `block` at `(x, y, z)`; layers below it that are not set become
+    /// empty blocks.
+    pub fn set(&mut self, x: u8, y: u8, z: usize, block: Block) -> &mut Self {
+        assert!(z < MAP_LAYERS);
+        let col = self.columns.entry((x, y)).or_default();
+        if col.len() <= z {
+            col.resize(z + 1, Block::default());
+        }
+        col[z] = block;
+        self
+    }
+
+    pub fn object(&mut self, o: StartupObject) -> &mut Self {
+        self.objects.push(o);
+        self
+    }
+
+    /// The file's bytes.
+    pub fn build(&self) -> Vec<u8> {
+        let mut blocks: Vec<Block> = Vec::new();
+        let mut columns: Vec<u16> = vec![MAP_LAYERS as u16];
+        let mut base = vec![0u32; MAP_DIM * MAP_DIM];
+        for (&(x, y), col) in &self.columns {
+            base[usize::from(y) * MAP_DIM + usize::from(x)] = (columns.len() * 2) as u32;
+            columns.push((MAP_LAYERS - col.len()) as u16);
+            // Block indices are stored top down.
+            for b in col.iter().rev() {
+                columns.push(blocks.len() as u16);
+                blocks.push(*b);
+            }
+        }
+        let mut f = Vec::new();
+        f.extend(CMP_VERSION.to_le_bytes());
+        f.extend([self.style_number, 1, 0, 0]);
+        let sizes = [
+            0u32,
+            (self.objects.len() * OBJECT_RECORD) as u32,
+            (columns.len() * 2) as u32,
+            (blocks.len() * BLOCK_RECORD) as u32,
+            0,
+        ];
+        for n in sizes {
+            f.extend(n.to_le_bytes());
+        }
+        for b in base {
+            f.extend(b.to_le_bytes());
+        }
+        for c in columns {
+            f.extend(c.to_le_bytes());
+        }
+        for b in blocks {
+            f.extend(b.type_map.to_le_bytes());
+            f.push(b.type_map_ext);
+            f.extend(b.faces);
+        }
+        for o in &self.objects {
+            for v in [o.x, o.y, o.z] {
+                f.extend(v.to_le_bytes());
+            }
+            f.extend([o.kind, o.remap]);
+            for v in [o.rotation, o.pitch, o.roll] {
+                f.extend(v.to_le_bytes());
+            }
+        }
+        f.extend([0u8; LOCATION_GROUPS * LOCATIONS_PER_GROUP * 3]);
+        f
+    }
+}
+
 fn read_pos(r: &mut Reader<'_>) -> Result<BlockPos, FormatError> {
     let [x, y, z] = r.array()?;
     Ok(BlockPos { x, y, z })
@@ -488,5 +576,26 @@ mod tests {
         let col0 = 28 + MAP_DIM * MAP_DIM * 4;
         f[col0..col0 + 2].copy_from_slice(&3u16.to_le_bytes()); // 3 empty -> 3 blocks, runs off the end
         assert!(matches!(Cmp::parse(&f), Err(FormatError::Invalid { .. })));
+    }
+
+    #[test]
+    fn builder_round_trip() {
+        let road = Block {
+            type_map: 0x20,
+            ..Block::default()
+        };
+        let floor = Block {
+            faces: [0, 0, 0, 0, 7],
+            ..Block::default()
+        };
+        let mut b = CmpBuilder::new(1);
+        b.set(10, 20, 1, floor).set(10, 20, 2, road);
+        let m = Cmp::parse(&b.build()).unwrap();
+        assert_eq!(m.style_number, 1);
+        assert_eq!(m.column_height(10, 20), 3);
+        assert_eq!(m.block(10, 20, 2), Some(&road));
+        assert_eq!(m.block(10, 20, 1), Some(&floor));
+        assert_eq!(m.block(10, 20, 0), Some(&Block::default()));
+        assert_eq!(m.block(11, 20, 0), None);
     }
 }

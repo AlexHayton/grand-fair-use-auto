@@ -32,9 +32,11 @@ relative to sibling checkouts `../carnage3d` and `../AmiGTA1`.
 | `gfa-sim::script_world` | | `native/gta_script.h` (`gta_script_world`) | skeleton |
 | `tools/oracle/walktrace.c` | | links `native/gta_map.c`, `gta_nav.c`, `gta_player.c`, `gta_trig.c` | done |
 | `gfa-sim::vehicle` | | `native/gta_vehphys.c`, `gta_vehphys.h` | done |
-| `gfa-sim::cars` | `src/GameObjectsManager.cpp` (`CreateStartupObjects`) | `native/gta_main.c` (`car_door_point`, `car_door_pos`, enter and exit, the jump, `ped_car_block`) | wip |
+| `gfa-sim::cars` | `src/GameObjectsManager.cpp` (`CreateStartupObjects`) | `native/gta_main.c` (`car_door_point`, `car_door_pos`, enter and exit, the jump, `ped_car_block`, `car_body_hit`, the vault and the slide) | wip |
 | `tools/oracle/drivetrace.c` | | links `native/gta_vehphys.c`, `gta_style.c`, `gta_nav.c`, `gta_map.c`, `gta_trig.c` | done |
-| `gfa-sim` damage, trains, specials | | `native/gta_car.c`, `gta_train.c` | M4 |
+| `gfa-sim::trains` | | `native/gta_train.c`, `gta_train.h` | done |
+| `tools/oracle/traintrace.c` | | links `native/gta_train.c`, `gta_map.c`, `gta_trig.c` | done |
+| `gfa-sim` boats, tank, specials | | `native/gta_car.c`, `gta_traffic.c:1152` | M4 |
 | `gfa-sim` traffic, police | | `native/gta_traffic.c`, `gta_route.c` | M5–M6 |
 | `gfa-sim` peds | | `native/gta_peds.c` | M5 |
 | `gfa-sim` mission VM | | `native/gta_script*.c`, `gta_trig.c` | M7 |

@@ -1,0 +1,31 @@
+# Over a car's roof, three ways: getting in from the far side, getting out
+# with the door blocked, and jumping while running at a car.
+#
+# On the plain road at (62,60) a saloon (record 0) is parked 20 px east of
+# the player facing south, so its door is on the far (east) flank: RETURN
+# takes him over the roof to it. Once he is in, a second saloon parked 16 px
+# east blocks that door, and RETURN puts him out over the roof to the west.
+# Then he turns east and runs back at his car, jumping when it is in front
+# of him, and goes over both cars.
+#
+# section: 1
+# expect: car: far side - will vault heading 64
+# expect: car: landed after state
+# expect: car: in - model 0
+# expect: car: door blocked by a car - over the roof, heading 192
+# expect: player: landed after state
+# expect: player: jump - vaulting car
+# reject: no car within reach
+# reject: car: out at
+start 62 60
+park 0 20 0 128
+enter
+wait 100
+park 0 16 0 128
+enter
+wait 80
+face 64
+0 1 0 20
+jump
+wait 80
+0 0 0 1

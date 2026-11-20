@@ -1,0 +1,30 @@
+# Board Liberty City's train 0 at a station, ride it, take the controls,
+# drive it, hand them back, and get off at its next station: (111,121) on
+# layer 2, where it stops at tick 6481.
+#
+# The trains leave their first stations at once. Train 0 next stops at tick
+# 1937 with its second carriage at (188,66) on layer 3; the platform is the
+# pavement at (187,66) west of the rail. Boarding reaches 24 px and the
+# block's centre is 32 px from the rail, so he steps to the platform edge.
+#
+# section: 1
+# expect: train: train 0 stops at (188,66) layer 3
+# expect: train: boards train 0
+# expect: train: hijacked train 0
+# expect: train: handed back train 0
+# expect: train: train 0 stops at (111,121) layer 2
+# expect: train: off train 0
+stand 187 66 3
+face 64
+wait 1935
+run 8 1 0 0 0
+enter
+wait 100
+fire 1
+wait 1
+run 200 1 0 0 0
+wait 300
+fire 1
+wait 3955
+enter
+wait 50

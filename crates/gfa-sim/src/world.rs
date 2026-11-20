@@ -8,7 +8,8 @@ use crate::cars::{
 use crate::hash::{SimHash, StateHasher};
 use crate::input::{Buttons, TickInput};
 use crate::map::{SimMap, ground};
-use crate::player::{Anim, Player, Stick};
+use crate::player::{Anim, Player, RUN_SPEED, Stick};
+use crate::trains::{Carriage, TrainEvent, Trains};
 use crate::vehicle::{CLASS_BIKE, Pedals, Veh};
 use crate::view::SimView;
 use gfa_fixed::fx::{BLOCK_SHIFT, FP, block_centre};
@@ -65,6 +66,52 @@ pub struct Entering {
     pub step: i32,
     pub tick: i32,
     pub bike: bool,
+    /// Coming from the far side: over the roof first.
+    pub over: Option<Over>,
+}
+
+/// Going over a car's roof at running pace along a fixed heading. Every
+/// four ticks is a state, and at each state's end he looks a pixel ahead:
+/// still car, and he stays up (the frame advances to the fourth and holds);
+/// clear, and he lands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Vault {
+    pub head: i32,
+    pub step: i32,
+    pub tick: i32,
+    /// States spent with car still ahead, capped by [`cars::VAULT_HOLD_MAX`].
+    pub hold: i32,
+}
+
+impl Vault {
+    pub fn new(head: i32) -> Self {
+        Vault {
+            head,
+            step: 0,
+            tick: 0,
+            hold: 0,
+        }
+    }
+}
+
+impl SimHash for Vault {
+    fn sim_hash(&self, h: &mut StateHasher) {
+        for v in [self.head, self.step, self.tick, self.hold] {
+            h.i32(v);
+        }
+    }
+}
+
+/// Getting in from the far side: he runs at the near flank (that is
+/// `Entering::door` meanwhile), goes over the roof, then walks to the door.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Over {
+    /// The real door.
+    pub door: (i64, i64),
+    /// Straight across the car.
+    pub head: i32,
+    /// Set once he is on the roof.
+    pub vault: Option<Vault>,
 }
 
 /// Getting out; the car keeps rolling, with nobody at the controls.
@@ -99,6 +146,14 @@ pub enum Doing {
     Entering(Entering),
     Driving,
     Exiting(Exiting),
+    /// Aboard train `n`.
+    Riding(usize),
+    /// Over a car's roof on foot: SPACE while running at a low car, or
+    /// thrown out over the roof when the door is blocked.
+    Vaulting(Vault),
+    /// Under a tall vehicle, a pixel along every state until clear; the
+    /// count is the tick within the state.
+    Sliding(i32),
 }
 
 /// The simulation.
@@ -116,6 +171,7 @@ pub struct World {
     pub driven: Option<Driven>,
     /// Vehicles standing in the streets.
     pub parked: Vec<Parked>,
+    pub trains: Trains,
     /// Last tick's buttons, to find presses.
     prev: Buttons,
     log: Vec<LogLine>,
@@ -128,6 +184,7 @@ impl World {
             player.angle = a & 255;
         }
         let parked = cars::parked_from_map(&map, &cars);
+        let trains = Trains::new(&map);
         let mut world = World {
             tick: 0,
             map,
@@ -137,6 +194,7 @@ impl World {
             doing: Doing::OnFoot,
             driven: None,
             parked,
+            trains,
             prev: Buttons::NONE,
             log: Vec::new(),
         };
@@ -151,23 +209,54 @@ impl World {
             if found { "" } else { " (no walkable layer)" }
         );
         world.say(text);
+        let trains = world.trains.describe();
+        world.say(trains);
+        for i in 0..world.trains.trains.len() {
+            let c = world.trains.carriage(i, 0);
+            let kind = if world.trains.trains[i].tram {
+                "tram"
+            } else {
+                "train"
+            };
+            world.say(format!(
+                "trains: {kind} {i} at ({},{}) layer {}",
+                c.body.0 >> 21,
+                c.body.1 >> 21,
+                c.layer
+            ));
+        }
         world
     }
 
     /// Advance one tick.
     pub fn step(&mut self, input: TickInput) {
         let b = input.buttons;
-        if b.pressed_since(self.prev).contains(Buttons::ENTER) {
+        let pressed = b.pressed_since(self.prev);
+        if pressed.contains(Buttons::ENTER) {
             match self.doing {
-                Doing::OnFoot => self.try_enter(),
+                Doing::OnFoot => {
+                    if !self.try_board() {
+                        self.try_enter();
+                    }
+                }
                 Doing::Driving => self.try_exit(),
-                Doing::Entering(_) | Doing::Exiting(_) => {}
+                Doing::Riding(t) => self.try_get_off(t),
+                // A press mid-animation is dropped, not queued.
+                Doing::Entering(_) | Doing::Exiting(_) | Doing::Vaulting(_) | Doing::Sliding(_) => {
+                }
             }
+        }
+        // On foot, the handbrake key is jump.
+        if pressed.contains(Buttons::HANDBRAKE) && self.doing == Doing::OnFoot {
+            self.jump();
         }
         match self.doing {
             Doing::OnFoot => self.walk(b),
             Doing::Entering(e) => self.entering(e),
             Doing::Exiting(e) => self.exiting(e),
+            Doing::Riding(t) => self.ride(t, b, pressed.contains(Buttons::FIRE)),
+            Doing::Vaulting(v) => self.vaulting(v),
+            Doing::Sliding(t) => self.sliding(t),
             Doing::Driving => {}
         }
         if self.doing == Doing::Driving {
@@ -179,8 +268,140 @@ impl World {
             };
             self.drive(pedals);
         }
+        self.run_trains();
         self.prev = b;
         self.tick += 1;
+    }
+
+    /// RETURN on foot beside a stopped train: get on (within 24 px of a
+    /// carriage, as AmiGTA1 in play).
+    fn try_board(&mut self) -> bool {
+        let p = &self.player;
+        let Some(t) = self.trains.board(p.x.into(), p.y.into(), p.layer, 24) else {
+            return false;
+        };
+        self.trains.rider = Some(t);
+        self.doing = Doing::Riding(t);
+        self.say(format!("train: boards train {t}"));
+        true
+    }
+
+    fn try_get_off(&mut self, t: usize) {
+        match self.trains.get_off(&self.map, t) {
+            Some((x, y, layer)) => {
+                if self.trains.trains[t].driven {
+                    self.trains.hijack(t);
+                }
+                self.trains.rider = None;
+                self.player.x = x as i32;
+                self.player.y = y as i32;
+                self.player.layer = layer;
+                self.doing = Doing::OnFoot;
+                self.say(format!("train: off train {t} at ({},{})", x >> 21, y >> 21));
+            }
+            None => self.say(format!("train: cannot get off train {t} here")),
+        }
+    }
+
+    /// Carried by the train; FIRE takes or hands back the controls, and up
+    /// and down drive it.
+    fn ride(&mut self, t: usize, b: Buttons, fire: bool) {
+        if fire {
+            let took = self.trains.hijack(t);
+            self.say(format!(
+                "train: {} train {t}",
+                if took { "hijacked" } else { "handed back" }
+            ));
+        }
+        self.trains
+            .drive(t, b.contains(Buttons::UP), b.contains(Buttons::DOWN));
+        let (x, y, layer) = self.trains.rider_spot(t);
+        self.player.x = x as i32;
+        self.player.y = y as i32;
+        self.player.layer = layer;
+        if self.trains.trains[t].wrecked {
+            self.trains.rider = None;
+            self.doing = Doing::OnFoot;
+        }
+    }
+
+    /// The trains' tick, and what it did to the world.
+    fn run_trains(&mut self) {
+        let on_foot = matches!(
+            self.doing,
+            Doing::OnFoot | Doing::Entering(_) | Doing::Vaulting(_) | Doing::Sliding(_)
+        );
+        let p = &self.player;
+        let player = on_foot.then(|| (i64::from(p.x), i64::from(p.y), p.layer));
+        let cars: Vec<_> = self
+            .parked
+            .iter()
+            .map(|c| (i64::from(c.x), i64::from(c.y), c.layer))
+            .collect();
+        for event in self.trains.tick(player, &cars) {
+            match event {
+                TrainEvent::RanOver => self.say("train: ran the player over".into()),
+                TrainEvent::Stopped(t) => {
+                    let c = self
+                        .trains
+                        .carriage(t, if self.trains.trains[t].tram { 0 } else { 1 });
+                    self.say(format!(
+                        "train: train {t} stops at ({},{}) layer {}",
+                        c.body.0 >> 21,
+                        c.body.1 >> 21,
+                        c.layer
+                    ));
+                }
+                TrainEvent::Crushed(i) => {
+                    let c = &mut self.parked[i];
+                    if c.damage < cars::WRECKED {
+                        c.damage = (c.damage + 20).min(cars::WRECKED);
+                    }
+                    if c.damage >= cars::WRECKED && !c.wrecked {
+                        c.wrecked = true;
+                        c.dmg_bits |= cars::DAMAGE_MASK;
+                    }
+                    let (x, y) = (c.x >> 21, c.y >> 21);
+                    self.say(format!("train: hit a car at ({x},{y})"));
+                }
+                TrainEvent::Wrecked(t, carriages) => {
+                    // Each carriage becomes a burnt-out wreck of the train's
+                    // (model 11) or tram's (12) record.
+                    let id = if self.trains.trains[t].tram { 12 } else { 11 };
+                    let model = self.cars.iter().position(|c| c.model == id);
+                    for (x, y, face, layer) in carriages {
+                        if let Some(model) = model {
+                            self.parked.push(Parked {
+                                model,
+                                x: x as i32,
+                                y: y as i32,
+                                face,
+                                layer,
+                                remap: 0,
+                                damage: cars::WRECKED,
+                                dmg_bits: cars::DAMAGE_MASK,
+                                wrecked: true,
+                            });
+                        }
+                    }
+                    if self.doing == Doing::Riding(t) {
+                        self.doing = Doing::OnFoot;
+                    }
+                    self.say(format!("train: train {t} wrecked"));
+                }
+            }
+        }
+    }
+
+    /// Every carriage of every working train, for the renderer.
+    pub fn carriages(&self) -> Vec<Carriage> {
+        let mut out = Vec::new();
+        for (i, t) in self.trains.trains.iter().enumerate() {
+            if !t.wrecked {
+                out.extend((0..t.carriages()).map(|j| self.trains.carriage(i, j)));
+            }
+        }
+        out
     }
 
     fn walk(&mut self, b: Buttons) {
@@ -207,20 +428,123 @@ impl World {
 
     /// Is a parked car's body at `(px, py)` on `layer`, grown by `margin`?
     fn car_at(&self, px: i64, py: i64, layer: i32, margin: i32) -> bool {
-        self.parked.iter().any(|c| {
-            let ci = &self.cars[c.model];
-            c.layer == layer
-                && body_hit(
-                    c.x.into(),
-                    c.y.into(),
-                    c.face,
-                    i32::from(ci.length >> 1) / 2,
-                    i32::from(ci.width >> 1) / 2,
-                    px,
-                    py,
-                    margin,
-                )
+        self.car_hit(px, py, layer, margin).is_some()
+    }
+
+    /// The first parked car whose body is at `(px, py)` on `layer`, grown
+    /// by `margin`.
+    fn car_hit(&self, px: i64, py: i64, layer: i32, margin: i32) -> Option<usize> {
+        self.parked.iter().position(|c| {
+            let (hl, hw) = cars::half_size(&self.cars[c.model]);
+            c.layer == layer && body_hit(c.x.into(), c.y.into(), c.face, hl, hw, px, py, margin)
         })
+    }
+
+    /// SPACE on foot: running at a car with its body 3 px ahead, go over a
+    /// low one along his own heading, or slide under a tall one. Anything
+    /// else does nothing.
+    fn jump(&mut self) {
+        let p = &self.player;
+        if p.anim != Anim::Run {
+            return;
+        }
+        // A Q14 unit times 12 is 3 px.
+        let ahead = (
+            i64::from(p.x) + i64::from(sin(p.angle)) * 12,
+            i64::from(p.y) - i64::from(cos(p.angle)) * 12,
+        );
+        let Some(i) = self.car_hit(ahead.0, ahead.1, p.layer, 1) else {
+            return;
+        };
+        if cars::vaultable(&self.cars[self.parked[i].model]) {
+            self.doing = Doing::Vaulting(Vault::new(p.angle));
+            self.say(format!("player: jump - vaulting car {i}"));
+        } else {
+            self.doing = Doing::Sliding(0);
+            self.say(format!("player: jump - sliding under car {i}"));
+        }
+    }
+
+    /// One tick over a roof, at running pace. At each state's end `still`
+    /// is asked about the point a pixel ahead; returns true when he lands.
+    fn vault_step(&mut self, v: &mut Vault, still: impl Fn(&World, (i64, i64)) -> bool) -> bool {
+        let (fx, fy) = (i64::from(sin(v.head)), -i64::from(cos(v.head)));
+        let run = i64::from(RUN_SPEED);
+        let p = &mut self.player;
+        p.x = (i64::from(p.x) + ((fx * run) >> 14)) as i32;
+        p.y = (i64::from(p.y) + ((fy * run) >> 14)) as i32;
+        p.angle = v.head;
+        p.anim = Anim::Vault;
+        p.frame = v.step as u8;
+        v.tick += 1;
+        if v.tick < cars::VAULT_TICKS {
+            return false;
+        }
+        v.tick = 0;
+        // A Q14 unit times 4 is a pixel.
+        let ahead = (i64::from(p.x) + (fx << 2), i64::from(p.y) + (fy << 2));
+        if !still(self, ahead) {
+            return true;
+        }
+        v.hold += 1;
+        if v.hold > cars::VAULT_HOLD_MAX {
+            return true;
+        }
+        // The frame climbs to the fourth and holds there.
+        if v.step < 3 {
+            v.step += 1;
+        }
+        false
+    }
+
+    /// The free vault: over whatever car is under him, landing on his feet
+    /// with the controls back.
+    fn vaulting(&mut self, mut v: Vault) {
+        let layer = self.player.layer;
+        // Still over a car while the point ahead is on one, or while he is
+        // himself within a walker's margin of one (the point alone put him
+        // down on the far wing).
+        let landed = self.vault_step(&mut v, |w, a| {
+            let (px, py) = (i64::from(w.player.x), i64::from(w.player.y));
+            w.car_at(a.0, a.1, layer, 0) || w.car_at(px, py, layer, PED_CAR_MARGIN)
+        });
+        if !landed {
+            self.doing = Doing::Vaulting(v);
+            return;
+        }
+        self.stand_up();
+        self.say(format!("player: landed after state {}", v.step));
+    }
+
+    /// Under a tall vehicle: a pixel along his heading every state while
+    /// it is still over him, then up.
+    fn sliding(&mut self, mut t: i32) {
+        self.player.anim = Anim::SlideUnder;
+        self.player.frame = 0;
+        t += 1;
+        if t < cars::VAULT_TICKS {
+            self.doing = Doing::Sliding(t);
+            return;
+        }
+        let p = &self.player;
+        if self.car_at(p.x.into(), p.y.into(), p.layer, 1) {
+            let a = p.angle;
+            self.player.x += sin(a) << 2;
+            self.player.y -= cos(a) << 2;
+            self.doing = Doing::Sliding(0);
+            return;
+        }
+        self.stand_up();
+        self.say("player: out from under".into());
+    }
+
+    /// Back on his feet with the controls.
+    fn stand_up(&mut self) {
+        self.player.anim = Anim::Stand;
+        self.player.frame = 0;
+        let (bx, by) = self.player.block();
+        self.player.ground = self.map.ground_type(bx, by, self.player.layer);
+        self.doing = Doing::OnFoot;
     }
 
     /// A walker who has stepped into a car goes back along whichever axis
@@ -265,37 +589,104 @@ impl World {
         };
         let car = self.parked.remove(i);
         let ci = &self.cars[car.model];
-        let door = door_point(ci, car.x.into(), car.y.into(), car.face);
+        let mut door = door_point(ci, car.x.into(), car.y.into(), car.face);
         let (px, py) = (i64::from(self.player.x), i64::from(self.player.y));
-        let px_dist = ((door.0 - px).abs() + (door.1 - py).abs()) >> 16;
+        let bike = ci.vtype == CLASS_BIKE;
+        let mut over = None;
+        if !bike && cars::vaultable(ci) {
+            let at = (i64::from(car.x), i64::from(car.y), car.face);
+            if let Some((flank, head)) = cars::far_side(ci, at, (px, py), door) {
+                over = Some(Over {
+                    door,
+                    head,
+                    vault: None,
+                });
+                door = flank;
+            }
+        }
+        let walk_len = walk_ticks((px, py), door);
+        if let Some(o) = over.as_mut() {
+            // Already against the body: straight over.
+            if walk_len == 0 {
+                o.vault = Some(Vault::new(o.head));
+            }
+        }
+        let (model, width) = (ci.model, cars::half_size(ci).1 * 2 + 4);
         let e = Entering {
             car,
             door,
             from: (px, py, self.player.angle),
-            walk_len: ((px_dist * 3) / 4).clamp(0, 60) as i32,
+            walk_len,
             walk_t: 0,
             step: 0,
             tick: 0,
-            bike: ci.vtype == CLASS_BIKE,
+            bike,
+            over,
         };
         self.say(format!(
-            "car: going for model {} at ({},{})",
-            ci.model,
+            "car: going for model {model} at ({},{})",
             car.x >> 21,
             car.y >> 21
         ));
+        if let Some(o) = over {
+            self.say(format!(
+                "car: far side - will vault heading {}, over {width} px",
+                o.head
+            ));
+        }
         self.doing = Doing::Entering(e);
     }
 
     fn entering(&mut self, mut e: Entering) {
+        if let Some(mut over) = e.over
+            && let Some(mut v) = over.vault
+        {
+            // Over the roof of the car he is getting into, which is the
+            // only car the look ahead asks about.
+            let car = e.car;
+            let (hl, hw) = cars::half_size(&self.cars[car.model]);
+            let landed = self.vault_step(&mut v, |_, a| {
+                body_hit(car.x.into(), car.y.into(), car.face, hl, hw, a.0, a.1, 0)
+            });
+            if landed {
+                // Down on the door side: the walk to the door resumes.
+                let p = &self.player;
+                let at = (i64::from(p.x), i64::from(p.y));
+                e.from = (at.0, at.1, p.angle);
+                e.door = over.door;
+                e.walk_len = walk_ticks(at, over.door);
+                e.walk_t = 0;
+                e.over = None;
+                let px = ((over.door.0 - at.0).abs() + (over.door.1 - at.1).abs()) >> 16;
+                self.say(format!(
+                    "car: landed after state {} at ({},{}), {px} px from the door",
+                    v.step,
+                    at.0 >> 16,
+                    at.1 >> 16
+                ));
+            } else {
+                over.vault = Some(v);
+                e.over = Some(over);
+            }
+            self.doing = Doing::Entering(e);
+            return;
+        }
         let p = &mut self.player;
         if e.walk_t < e.walk_len {
             p.anim = Anim::Walk;
             p.frame = ((e.walk_t / 3) % 8) as u8;
             p.x = lerp_fp(e.from.0, e.door.0, e.walk_t, e.walk_len) as i32;
             p.y = lerp_fp(e.from.1, e.door.1, e.walk_t, e.walk_len) as i32;
-            p.angle = lerp_angle(e.from.2, e.car.face, e.walk_t, e.walk_len);
+            // Towards the car's heading, or straight across it when he is
+            // making for the roof.
+            let face = e.over.map_or(e.car.face, |o| o.head);
+            p.angle = lerp_angle(e.from.2, face, e.walk_t, e.walk_len);
             e.walk_t += 1;
+            if let Some(o) = e.over.as_mut()
+                && e.walk_t >= e.walk_len
+            {
+                o.vault = Some(Vault::new(o.head));
+            }
             self.doing = Doing::Entering(e);
             return;
         }
@@ -375,8 +766,24 @@ impl World {
             None
         };
         if let Some(what) = blocked {
-            // AmiGTA1 climbs out over the roof; not built yet (M4).
-            self.say(format!("car: door blocked by {what}"));
+            // Out over the roof: put on the car half way along its front
+            // half, facing the flank the door is not on, and into the
+            // vault. The car is parked first so the vault finds it under
+            // him.
+            let (ox, oy, layer) = (v.ox, v.oy, d.layer);
+            let (hl, _) = cars::half_size(ci);
+            let head = (a - cars::door_side(ci) as i32 * 64) & 255;
+            self.park_driven(a);
+            // A Q14 unit times 2 is half a pixel.
+            let p = &mut self.player;
+            p.x = (ox + i64::from(sin(a)) * i64::from(hl) * 2) as i32;
+            p.y = (oy - i64::from(cos(a)) * i64::from(hl) * 2) as i32;
+            p.angle = head;
+            p.layer = layer;
+            self.doing = Doing::Vaulting(Vault::new(head));
+            self.say(format!(
+                "car: door blocked by {what} - over the roof, heading {head}"
+            ));
             return;
         }
         let door = door_point(ci, v.ox, v.oy, a);
@@ -432,30 +839,33 @@ impl World {
             self.player.y = y as i32;
         }
         self.player.angle = (e.face + side * if e.bike { 64 } else { 32 }) & 255;
-        let car = Parked {
-            model: v.model,
-            x: v.ox as i32,
-            y: v.oy as i32,
-            face: e.face,
-            layer: d.layer,
-            remap: v.remap.unwrap_or(0),
-            damage: v.damage,
-            dmg_bits: v.dmg_bits,
-            wrecked: false,
-        };
-        self.parked.push(car);
-        self.driven = None;
-        self.player.anim = Anim::Stand;
-        self.player.frame = 0;
-        let (bx, by) = self.player.block();
-        self.player.ground = self.map.ground_type(bx, by, self.player.layer);
-        self.doing = Doing::OnFoot;
+        self.park_driven(e.face);
+        self.stand_up();
         self.say(format!(
             "car: out at ({},{}) facing {}",
             self.player.x >> 16,
             self.player.y >> 16,
             self.player.angle
         ));
+    }
+
+    /// Leave the driven car standing where it is, facing `face`.
+    fn park_driven(&mut self, face: i32) {
+        let Some(d) = self.driven.take() else {
+            return;
+        };
+        let v = &d.veh;
+        self.parked.push(Parked {
+            model: v.model,
+            x: v.ox as i32,
+            y: v.oy as i32,
+            face,
+            layer: d.layer,
+            remap: v.remap.unwrap_or(0),
+            damage: v.damage,
+            dmg_bits: v.dmg_bits,
+            wrecked: false,
+        });
     }
 
     fn drive(&mut self, pedals: Pedals) {
@@ -544,7 +954,8 @@ impl World {
         let mut out: Vec<ShownCar> = self.parked.iter().map(|c| shown(c, 0)).collect();
         if let Doing::Entering(e) = self.doing {
             let t = e.step * ENTER_TICKS + e.tick;
-            let door = if e.bike || e.walk_t < e.walk_len {
+            // No door until he is at it: not on the way, not on the roof.
+            let door = if e.bike || e.walk_t < e.walk_len || e.over.is_some() {
                 None
             } else {
                 cars::door_delta(t)
@@ -572,8 +983,13 @@ impl World {
     /// hidden inside a car.
     pub fn player_frame(&self) -> Option<u16> {
         match self.doing {
+            // Aboard a train he is out of sight.
+            Doing::Riding(_) => None,
             Doing::OnFoot => Some(self.player.ped_frame()),
-            Doing::Entering(e) if e.walk_t < e.walk_len => Some(self.player.ped_frame()),
+            Doing::Entering(e) if e.walk_t < e.walk_len || e.over.is_some() => {
+                Some(self.player.ped_frame())
+            }
+            Doing::Vaulting(_) | Doing::Sliding(_) => Some(self.player.ped_frame()),
             Doing::Entering(e) if e.bike => {
                 Some(BIKE_ENTER_FIRST + e.step.clamp(0, BIKE_FRAMES - 1) as u16)
             }
@@ -628,6 +1044,22 @@ impl World {
         self.say(format!(
             "player: goto ({bx},{by}) layer {layer}{}",
             if found { "" } else { " (no walkable layer)" }
+        ));
+    }
+
+    /// A test fixture: the player on foot in the middle of block `(bx, by)`
+    /// on `layer`, keeping his heading.
+    pub fn stand(&mut self, bx: i32, by: i32, layer: i32) {
+        let angle = self.player.angle;
+        let (mut player, _) = Player::place(&self.map, bx, by);
+        player.layer = layer;
+        player.angle = angle;
+        player.ground = self.map.ground_type(bx, by, layer);
+        self.player = player;
+        self.doing = Doing::OnFoot;
+        let g = ground_name(self.player.ground);
+        self.say(format!(
+            "player: stand ({bx},{by}) layer {layer} ground {g}"
         ));
     }
 
@@ -733,6 +1165,34 @@ impl World {
                 for v in [e.from.2, e.walk_len, e.walk_t, e.step, e.tick] {
                     h.i32(v);
                 }
+                match e.over {
+                    None => h.u8(0),
+                    Some(o) => {
+                        h.u8(1);
+                        h.bytes(&o.door.0.to_le_bytes());
+                        h.bytes(&o.door.1.to_le_bytes());
+                        h.i32(o.head);
+                        match o.vault {
+                            None => h.u8(0),
+                            Some(v) => {
+                                h.u8(1);
+                                v.sim_hash(&mut h);
+                            }
+                        }
+                    }
+                }
+            }
+            Doing::Riding(t) => {
+                h.u8(4);
+                h.u32(t as u32);
+            }
+            Doing::Vaulting(v) => {
+                h.u8(5);
+                v.sim_hash(&mut h);
+            }
+            Doing::Sliding(t) => {
+                h.u8(6);
+                h.i32(t);
             }
             Doing::Exiting(e) => {
                 h.u8(3);
@@ -752,6 +1212,7 @@ impl World {
         for c in &self.parked {
             c.sim_hash(&mut h);
         }
+        self.trains.sim_hash(&mut h);
         h.finish()
     }
 
@@ -803,6 +1264,13 @@ fn part_wide(v: i64) -> String {
 }
 
 /// The centre of a block as a 16.16 point.
+/// Ticks to walk from `a` to `b` at the walk-to-the-door pace: three ticks
+/// every four pixels of Manhattan distance, at most 60.
+fn walk_ticks(a: (i64, i64), b: (i64, i64)) -> i32 {
+    let px = ((b.0 - a.0).abs() + (b.1 - a.1).abs()) >> 16;
+    ((px * 3) / 4).clamp(0, 60) as i32
+}
+
 pub fn block_point(bx: i32, by: i32) -> (i32, i32) {
     (block_centre(bx), block_centre(by))
 }

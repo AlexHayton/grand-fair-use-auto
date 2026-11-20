@@ -4,9 +4,9 @@
 //! (M2), and script runs against the simulation (M3).
 
 mod export;
-mod render;
-mod run;
 mod sheet;
+
+use gfa_tool::{render, run};
 
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -134,6 +134,9 @@ enum Command {
         /// Print the player's state every tick (the oracle's trace format).
         #[arg(long)]
         trace: bool,
+        /// Print every train's state every tick (traintrace's format).
+        #[arg(long)]
+        trace_trains: bool,
         /// Run as AmiGTA1's harnesses do, to compare with the oracle: its
         /// view size, and no parked cars from the map.
         #[arg(long)]
@@ -247,6 +250,7 @@ fn main() -> Result<()> {
             ticks,
             hash_every,
             trace,
+            trace_trains,
             oracle,
             out,
             record,
@@ -259,6 +263,7 @@ fn main() -> Result<()> {
                 ticks,
                 hash_every,
                 trace,
+                trace_trains,
                 oracle,
                 out,
                 record,

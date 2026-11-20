@@ -25,6 +25,7 @@ pub struct RunArgs {
     pub ticks: Option<u32>,
     pub hash_every: Option<u32>,
     pub trace: bool,
+    pub trace_trains: bool,
     pub oracle: bool,
     pub out: Option<PathBuf>,
     pub record: Option<PathBuf>,
@@ -79,6 +80,9 @@ pub fn run(src: &dyn AssetSource, args: RunArgs) -> Result<()> {
         if args.trace {
             println!("{}", trace_line(w));
         }
+        if args.trace_trains {
+            println!("{}", gfa_sim::trains::trace_line(w.tick, &w.trains));
+        }
         if let (true, Some(scene), Some(out)) = (dump, scene.as_mut(), &args.out) {
             let path = picture_path(out, pictures);
             pictures += 1;
@@ -121,29 +125,41 @@ fn picture_path(out: &Path, n: usize) -> PathBuf {
 
 /// The view from above the player, with him in it.
 fn picture(scene: &mut render::Scene, world: &World, path: &Path) -> Result<()> {
-    let p = &world.player;
-    let block = |v: i32| v as f32 / 65536.0 / 32.0;
-    let view = render::View {
-        at: (block(p.x), block(p.y)),
-        height: 6.0 + p.layer as f32,
-        pitch: 0.0,
-        yaw: 0.0,
-    };
-    let extra = world_sprites(scene, world);
-    let rgba = scene.render_with(
-        &view,
-        DebugView::Normal,
-        f64::from(world.tick) / 50.0,
-        &extra,
-    );
+    let rgba = render_world(scene, world);
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
     render::write_png(path, scene.size(), &rgba)
 }
 
+/// The camera straight down over the player, six blocks above his layer.
+pub fn player_view(world: &World) -> render::View {
+    let p = &world.player;
+    let block = |v: i32| v as f32 / 65536.0 / 32.0;
+    render::View {
+        at: (block(p.x), block(p.y)),
+        height: 6.0 + p.layer as f32,
+        pitch: 0.0,
+        yaw: 0.0,
+    }
+}
+
+/// Render the world from [`player_view`], with everything it holds drawn.
+pub fn render_world(scene: &mut render::Scene, world: &World) -> Vec<u8> {
+    let extra = world_sprites(scene, world);
+    scene.render_with(
+        &player_view(world),
+        DebugView::Normal,
+        f64::from(world.tick) / 50.0,
+        &extra,
+    )
+}
+
 /// The simulation's sprites: standing cars, the player's car, the player.
-fn world_sprites(scene: &render::Scene, world: &World) -> Vec<gfa_render::sprites::SpriteInstance> {
+pub fn world_sprites(
+    scene: &render::Scene,
+    world: &World,
+) -> Vec<gfa_render::sprites::SpriteInstance> {
     let mut out = Vec::new();
     for c in world.standing_cars() {
         scene.push_car(&mut out, c.model, c.remap, c.pos, c.face + 128, c.deltas);
@@ -160,6 +176,12 @@ fn world_sprites(scene: &render::Scene, world: &World) -> Vec<gfa_render::sprite
             v.angle() + 128,
             deltas,
         );
+    }
+    for c in world.carriages() {
+        let z = world
+            .map
+            .ground_z(c.body.0 as i32, c.body.1 as i32, c.layer);
+        scene.push_carriage(&mut out, &c, z);
     }
     if let Some(frame) = world.player_frame() {
         let p = &world.player;

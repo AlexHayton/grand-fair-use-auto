@@ -3,6 +3,7 @@
 # Block (66,62) is a building whose walls start on layer 2; (66,59) is the
 # road north of it. Facing south, he runs into the wall and stops.
 #
+# oracle: walk
 # section: 1
 # expect: BLOCKED-Y
 # reject: block ( 66, 62)

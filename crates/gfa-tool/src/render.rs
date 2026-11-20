@@ -272,6 +272,32 @@ impl Scene {
             deltas,
         );
     }
+    /// A train carriage from the simulation, at height `z` (16.16).
+    pub fn push_carriage(
+        &self,
+        out: &mut Vec<SpriteInstance>,
+        c: &gfa_sim::trains::Carriage,
+        z: i32,
+    ) {
+        use gfa_render::sprites::{from_sim, sim_angle};
+        let xy = |p: (i64, i64)| {
+            let r = from_sim([p.0 as i32, p.1 as i32, 0]);
+            [r[0], r[1]]
+        };
+        gfa_render::sprites::push_carriage(
+            out,
+            &self.style,
+            &self.atlas,
+            xy(c.body),
+            xy(c.front),
+            xy(c.back),
+            from_sim([0, 0, z])[2],
+            sim_angle(c.angle + 128),
+            c.first,
+            c.last,
+        );
+    }
+
     pub fn last_draw(&self) -> gfa_render::city::DrawStats {
         self.city.last_draw
     }

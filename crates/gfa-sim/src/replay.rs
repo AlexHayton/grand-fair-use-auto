@@ -127,6 +127,7 @@ impl Runner {
                         .with(Buttons::WALK, walk);
                 }
                 Order::Goto { bx, by, face } => world.teleport(bx, by, face),
+                Order::Stand { bx, by, layer } => world.stand(bx, by, layer),
                 Order::Drive {
                     model,
                     bx,

@@ -4,6 +4,7 @@
 # blocks ahead. The car must stop against it (and take damage), never end a
 # tick inside it, and reverse away when told.
 #
+# oracle: drive
 # section: 1
 # expect: car: wall hit
 drive 0 66 57 128

@@ -118,6 +118,26 @@ impl Scene {
                 out.extend(fire_sprite(style, &self.atlas, fuse, pos));
             }
         }
+        for c in world.carriages() {
+            let (x, y) = (c.body.0 as i32, c.body.1 as i32);
+            let z = world.map.ground_z(x, y, c.layer);
+            let xy = |p: (i64, i64)| {
+                let r = from_sim([p.0 as i32, p.1 as i32, 0]);
+                [r[0], r[1]]
+            };
+            gfa_render::sprites::push_carriage(
+                &mut out,
+                style,
+                &self.atlas,
+                xy(c.body),
+                xy(c.front),
+                xy(c.back),
+                from_sim([0, 0, z])[2],
+                sim_angle(c.angle + 128),
+                c.first,
+                c.last,
+            );
+        }
         if let Some((pose, f)) = frame.player {
             out.extend(self.ped_sprite(f, pose.pos.to_array(), pose.draw_angle));
         }

@@ -1,6 +1,15 @@
 [alias]
 # Every crate except the native binaries must build for the browser.
 wasm-check = "check --target wasm32-unknown-unknown --workspace --exclude gfa-native --exclude gfa-tool"
-# Tests that need the user's own game data are #[ignore]d; this runs them.
-# The data folder comes from GFA_DATA or gfa.local.toml (see README).
-data-test = "test --workspace -- --ignored --nocapture"
+# Plain `cargo test` needs nothing: unit tests and the simulation on small
+# maps built in memory. The rest are #[ignore]d and run with these:
+#
+# Tests against your own game data (GFA_DATA or gfa.local.toml, see README):
+# formats, every level walkable, every script in tools/scripts/, the
+# holecheck, the player and cars drawn.
+data-test = "test --workspace -- --ignored --nocapture --skip oracle_ --skip wasm_"
+# The game data plus the AmiGTA1 oracle (a ../AmiGTA1 checkout and clang)
+# and the native-vs-wasm check (Node and wasm-bindgen).
+oracle-test = "test --workspace -- --ignored --nocapture oracle_ wasm_"
+# Everything.
+test-all = "test --workspace -- --include-ignored --nocapture"

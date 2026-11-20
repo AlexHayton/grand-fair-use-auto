@@ -39,7 +39,7 @@ city can be driven; traffic, people and missions arrive in later milestones.
 | Arrows or WASD | on foot: run forward or back, turn. In a car: accelerate, reverse, steer |
 | Shift | walk instead of run |
 | Return | get into the nearest car, or out of yours |
-| Space | handbrake |
+| Space | handbrake; on foot, jump: over a low car, under a tall one |
 | Scroll wheel, `+` / `-` | zoom |
 | F | free look: drag with the right mouse button to tilt and turn |
 | R | look straight down again |
@@ -82,21 +82,23 @@ right) chooses another folder or forgets the saved one. `?level=102` or
 ## Checks
 
 ```sh
-cargo test                # unit tests (no data needed)
-cargo data-test           # tests against your game data
-cargo wasm-check          # everything that ships to the web builds for wasm32
+cargo test          # no data needed: unit tests, and the simulation on small maps built in memory
+cargo data-test     # against your game data: formats, every level walkable, every script in
+                    # tools/scripts/, the holecheck on six maps, the player and cars drawn
+cargo oracle-test   # against AmiGTA1 and across platforms (needs more, see below)
+cargo test-all      # all of the above
+cargo wasm-check    # everything that ships to the web builds for wasm32
 cargo clippy --workspace --all-targets
-tools/oracle/compare.sh tools/scripts/walk_ramp.txt   # player traces against AmiGTA1 (../AmiGTA1)
-tools/oracle/compare.sh tools/scripts/drive_jump.txt  # the car's traces against AmiGTA1
-tools/oracle/fuzz.py [--drive]                        # ...for random walks (or drives) on all three cities
-tools/wasmcheck/compare.sh                            # native and wasm (Node) give the same hashes
 ```
 
-The oracle builds AmiGTA1's own walking and driving code from a sibling `../AmiGTA1`
-checkout (or `$AMIGTA1`) with clang and diffs its per-tick trace against
-ours; nothing of AmiGTA1 is copied into this repo. The wasm check needs Node
-and the wasm-bindgen CLI that matches `Cargo.lock` (Trunk's cached copy is
-used if present).
+`cargo oracle-test` builds AmiGTA1's own walking, driving and train code from
+a sibling `../AmiGTA1` checkout (or `$AMIGTA1`) with clang, runs the scripts in
+`tools/scripts/` marked `# oracle: walk` or `# oracle: drive`, 48 random walks
+and drives over the three cities, and 12,000 ticks of every city's trains
+through both, and compares every tick. Nothing of AmiGTA1 is copied into this
+repo. It also runs the scripts natively and as wasm in Node and compares their
+logs and state hashes; that needs Node and the wasm-bindgen CLI matching
+`Cargo.lock` (Trunk's cached copy is used if present).
 
 ## Credits
 

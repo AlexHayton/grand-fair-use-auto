@@ -5,6 +5,7 @@
 # at (91,90) climbs onto layer 3, leaves the ground at (91,105) and must
 # land on the far side, on layer 3, not in the water.
 #
+# oracle: drive
 # section: 1
 # expect: car: layer 2 -> 3 at (91,92)
 # expect: car: jump from (91,105) layer 3

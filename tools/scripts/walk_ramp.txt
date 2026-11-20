@@ -5,6 +5,7 @@
 # on layer 3 (the bridge). Walking east off the ramp's top must land on
 # layer 3 and stay there, not drop under the bridge.
 #
+# oracle: walk
 # section: 1
 # expect: layer 2 -> 3 at (19,44)
 # reject: layer 3 -> 2

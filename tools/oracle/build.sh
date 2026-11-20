@@ -1,5 +1,5 @@
 #!/bin/sh
-# Build the AmiGTA1 oracle harnesses (walktrace, drivetrace) into
+# Build the AmiGTA1 oracle harnesses (walktrace, drivetrace, traintrace) into
 # tools/oracle/build/.
 #
 # AmiGTA1's sources are compiled where they are, in a sibling checkout
@@ -24,4 +24,6 @@ $cc -std=c89 -O1 -w -I"$src" -o "$here/build/walktrace" \
 $cc -std=c89 -O1 -w -I"$src" -o "$here/build/drivetrace" \
     "$here/drivetrace.c" "$src/gta_map.c" "$src/gta_nav.c" \
     "$src/gta_vehphys.c" "$src/gta_style.c" "$src/gta_trig.c"
-echo "built $here/build/walktrace and drivetrace from $ami ($(git -C "$ami" rev-parse --short HEAD 2>/dev/null || echo 'not a git checkout'))"
+$cc -std=c89 -O1 -w -I"$src" -o "$here/build/traintrace" \
+    "$here/traintrace.c" "$src/gta_map.c" "$src/gta_train.c" "$src/gta_trig.c"
+echo "built $here/build/walktrace, drivetrace and traintrace from $ami ($(git -C "$ami" rev-parse --short HEAD 2>/dev/null || echo 'not a git checkout'))"

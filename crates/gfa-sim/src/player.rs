@@ -45,6 +45,12 @@ pub mod frames {
     pub const WALK_FIRST: u16 = 0;
     pub const RUN_FIRST: u16 = 8;
     pub const STAND: u16 = 98;
+    /// Going over a car's roof: one frame a vault state (AmiGTA1
+    /// `GTA_PED_VAULT_FIRST`; the last two never play).
+    pub const VAULT_FIRST: u16 = 91;
+    pub const VAULT_FRAMES: u16 = 6;
+    /// Lying on his back under a vehicle too tall to vault.
+    pub const SLIDE_UNDER: u16 = 41;
 }
 
 /// What the player is doing, for the sprite.
@@ -53,6 +59,10 @@ pub enum Anim {
     Stand,
     Walk,
     Run,
+    /// Over a car's roof; `frame` is the vault state.
+    Vault,
+    /// Sliding under a tall vehicle.
+    SlideUnder,
 }
 
 /// The player's controls for one tick.
@@ -193,6 +203,10 @@ impl Player {
             Anim::Stand => frames::STAND,
             Anim::Walk => frames::WALK_FIRST + u16::from(self.frame),
             Anim::Run => frames::RUN_FIRST + u16::from(self.frame),
+            Anim::Vault => {
+                frames::VAULT_FIRST + u16::from(self.frame).min(frames::VAULT_FRAMES - 1)
+            }
+            Anim::SlideUnder => frames::SLIDE_UNDER,
         }
     }
 

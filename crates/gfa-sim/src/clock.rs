@@ -47,6 +47,11 @@ impl Half {
         self.flag = !self.flag;
         self.flag == self.runs_when_set
     }
+
+    /// Where in its two-tick cycle it is, for state hashes.
+    pub fn phase(&self) -> bool {
+        self.flag
+    }
 }
 
 /// A subsystem that runs `num` times every `den` ticks, spread evenly by an

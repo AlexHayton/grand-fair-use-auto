@@ -1,16 +1,19 @@
 # Get into a car, drive it down the street, stop and get out.
 #
-# A car (record 0, a one-door saloon) is parked 20 px east of the player
-# on the plain road at (62,60), facing south. RETURN walks him to its door
-# and in; then full throttle south, the reverse gear to stop, and out.
+# A car (record 0, a one-door saloon) is parked 20 px west of the player
+# on the plain road at (62,60), facing south, so its door (east) faces him.
+# RETURN walks him to it and in; then full throttle south, the reverse gear
+# to stop, and out. (From the other side he would go over the roof: see
+# vault.txt.)
 #
 # section: 1
 # expect: car: in - model 0
 # expect: car: out at
 # reject: no car within reach
+# reject: will vault
 # reject: too fast to get out
 start 62 60
-park 0 20 0 128
+park 0 -20 0 128
 enter
 wait 100
 run 150 1 0 0 0

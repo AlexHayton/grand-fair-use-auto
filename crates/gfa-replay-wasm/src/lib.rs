@@ -1,8 +1,8 @@
 //! The replay runner, exported to JavaScript for the determinism check.
 //!
-//! `tools/wasmcheck/compare.sh` builds this for `wasm32-unknown-unknown`,
-//! runs scripts through it in Node, and diffs the run logs and state hashes
-//! against `gfa-tool run` on the same files. Everything here is the shared
+//! The `wasm_matches_native` test (`cargo oracle-test`) builds this for
+//! `wasm32-unknown-unknown`, runs scripts through it in Node, and compares
+//! the run logs and state hashes with the same runs done natively. Everything here is the shared
 //! [`gfa_sim::replay::run_bytes`]; this crate only moves bytes across.
 
 use gfa_sim::replay::{RunOptions, run_bytes};
