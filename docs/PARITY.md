@@ -61,13 +61,14 @@ AmiGTA1 references are to `native/` in a sibling `../AmiGTA1` checkout.
 | Feature | Original | AmiGTA1 | GFA | M | Evidence / notes |
 |---|---|---|---|---|---|
 | Pistol, machine gun, rocket, flamethrower | ✓ | full | — | M6 | `gta_weapon.c` |
+| Respray refusals (emergency, RC car, tank, no cash) | ✓ | ? | — | M6 | ENGLISH.FXT `no_emerg_respray`, `no_modelcar_respray`, `no_tank_respray`, `no_respray` |
 | Weapon crates | ✓ | ? | — | M6 | `gta_weapon.h:34` list is partly stale |
 | Friendly-fire groups | ✓? | none | — | M6 | `gta_weapon.h:34` |
 | Armour absorbing hits | ✓ | partial | — | M6 | pickup sets it; reader unconfirmed |
 | Fires left on walls by rockets | ✓? | none | — | M6 | `gta_weapon.h:34` |
 | Power-ups (speed, multiplier, frenzy…) | ✓ | partial | — | M6 | "nothing reads them", `gta_main.c:10291` |
 | Kill frenzies | ✓ | partial | — | M6/M7 | crate handed to the script |
-| Bonuses: GOURANGA, Elvis, cop kills | ✓? | none | — | M6 | list from FXT strings; `gta_score.h:17` |
+| Bonuses: GOURANGA, Elvis, cop kills | ✓ (GOURANGA) / ? | none | — | M6 | `gta_score.h:17`. ENGLISH.FXT has `[8787] GOURANGA!`, cards `4000`–`4005` (YOU GOT IT!, FRENZY PASSED!, BONUS LOST!, BUSTED!, WASTED!, GO! GO! GO!), `frenzy`, `multiplier+`. No Elvis or cop-kill card text found yet |
 | Wanted levels, chases, roadblocks, arrest | ✓ | full | — | M6 | `gta_traffic.c:9681-10500` |
 | Police: army/SWAT/FBI escalation | ✗ | n/a | n/a | — | `gta_traffic.h:2622`: cop cars only |
 | Siren reason in police AI | ✓ | partial | — | M6 | `gta_main.c:9976` |
@@ -88,6 +89,7 @@ AmiGTA1 references are to `native/` in a sibling `../AmiGTA1` checkout.
 | First job of each level | ✓ | full | — | M7 | `threejobs`, `sa1`, `vc1`… scripts |
 | Every job of every chapter | ✓ | none | — | M7 | only first jobs played through |
 | Cranes, garages, doors, bank robbery | ✓ | full | — | M7 | in `gta_main.c` |
+| Races (checkpoints, win/lose) | ✓ multiplayer only | n/a | n/a | — | the "Canonball Run" sections [1002]–[1004] etc. are multiplayer; FXT `win_race`, `lost_race`. Out of scope with multiplayer |
 | HUD (cop heads, pager, brief box, cards) | ✓ | full | — | M7 | `gta_hud.c` |
 
 ## Front end, audio, saves (M8)
@@ -97,9 +99,9 @@ AmiGTA1 references are to `native/` in a sibling `../AmiGTA1` checkout.
 | Title and menus, player and chapter select | ✓ | partial | — | M8 | `gta_front.c` |
 | Cheat names | ✓ | full | — | M8 | `gta_career.c:223` |
 | Language select (4 FXTs, SPECIAL.FXT) | ✓ | partial | — | M8 | `GTA_CHEAT_LANG` |
-| High-score table | ✓ | none | — | M8 | notes in `gta_career.h` |
+| High-score table | ✓ | partial | — | M8 | `gfa_formats::career` reads the six tables; display and entry to do |
 | Briefing stills CUT0-5 with voice | ✓ | none | — | M8 | |
-| Attract-mode demos (.REP) | ✓ | none | — | M8 | format undecoded |
+| Attract-mode demos (.REP) | ✓ | none | — | M8 | `{u32 tick, u32 input}` change logs, one per city (FORMATS.md); input bits not decoded |
 | Pause menu, options | ✓ | none | — | M8 | |
 | SFX banks, positional mix, engine pitch | ✓ | full | — | M8 | `gta_sfx.c`, `gta_audio.c` |
 | VOCALCOM speech, MISBRIEF briefings | ✓ | partial | — | M8 | |

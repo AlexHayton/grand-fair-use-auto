@@ -29,6 +29,16 @@ cargo run -p gfa-native              # the game (window opens; levels arrive in 
 cargo run -p gfa-tool -- info        # what's in your data folder
 ```
 
+Inspecting the data (`gfa-tool --help` lists everything):
+
+```sh
+cargo run -p gfa-tool -- map GTADATA/NYC.CMP --at 25,18     # a map, or one column of it
+cargo run -p gfa-tool -- style GTADATA/STYLE001.G24 --cars  # a style and its vehicles
+cargo run -p gfa-tool -- mission GTADATA/MISSION.INI        # the level scripts
+cargo run -p gfa-tool -- text GTADATA/ENGLISH.FXT --grep gouranga
+cargo run -p gfa-tool -- export GTADATA/STYLE001.G24        # contact sheets in export/ (gitignored)
+```
+
 Web (needs `cargo install trunk`):
 
 ```sh

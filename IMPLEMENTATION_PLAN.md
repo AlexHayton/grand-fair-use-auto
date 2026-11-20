@@ -4,7 +4,7 @@ A living document. Tick boxes as work lands, add a dated line to the
 **progress log**, and record every non-obvious choice in the **decision log**
 (newest first). When a milestone's exit criterion is met, say so in the log.
 
-**Status:** M0 complete; M1 in progress, with CMP done (2026-11-20). Next: style files (GRY + G24).
+**Status:** M0 and M1 complete (2026-11-20). Next: M2, the static city renderer.
 
 ## Goal
 
@@ -185,15 +185,24 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
   - Startup objects, routes (police patrols and roadblock lists, which Carnage3D skips), service bases, districts.
   - All six Director's Cut maps parse. Column (25,18) of NYC matches AmiGTA1's recorded dump.
   - The nav byte grid (`gta_nav.c`) is derived from the map at runtime, not stored, so it moves to M3.
-- [ ] Style. Ref: AmiGTA1 `gta_style.c` (GRY v325), Carnage3D `StyleData.cpp` (G24 v336).
+- [x] Style. Ref: AmiGTA1 `gta_style.c` (GRY v325), Carnage3D `StyleData.cpp` (G24 v336). (`gfa_formats::style`, notes in `docs/FORMATS.md`)
   - Tiles, animations, CLUTs and palette indices, remaps.
   - Objects, car info (raw 16.16 physics), sprites, sprite numbers, deltas, HUD "arrow" sprites.
-- [ ] FXT (0xBF/0xA6 keys, 195 escape), FON (with its 768-byte palette), SDT/RAW (12-byte LE entries; 8-bit unsigned).
-- [ ] Front-end images (`F_*`, `F_PAL`, `CUT*.RAW/.ACT`), `PLAYER_A.DAT` (`gta_career.c`), `CDAUDIO.DAT`. Header probes for SMK2 and REP.
-- [ ] `MISSION.INI`: sections; typed declarations (5 trailing numbers, fixing AmiGTA1's bug); the command block. Ref: `gta_script.c`, `gta_script_run.c:244`, Carnage3D `docs/ped.txt`.
-- [ ] `gfa-tool info | export {tiles,sprites,fonts,frontend,cuts} | mission {list,dump}`. (`info` and `map [--at X,Y]` done)
-- [ ] Data tests, gated on `GFA_DATA`: parse every file in GTADATA and UK, assert counts (e.g. [1] has 575 declarations and 2116 commands), and write contact-sheet PNGs for review.
-- Exit: the whole Director's Cut set parses, and the exported art looks right. GRY and G24 agree on structure.
+  - All nine style files parse (GTADATA and UK, both formats). Each map names only tiles its style has. Contact sheets of tiles, sprites, remaps and deltas reviewed for STYLE001.
+  - GRY lid remaps (AmiGTA1's "unknown_b") are inferred, not yet proven; M2's renderer confirms them.
+- [x] FXT (0xBF/0xA6 keys, 195 escape), FON (with its 768-byte palette), SDT/RAW (12-byte LE entries; 8-bit unsigned). (`gfa_formats::{fxt, fon, sdt}`)
+  - All 22 FXTs, 191 FONs and 12 sound banks parse. Front-end bank `LEVEL000` is 16-bit, the rest 8-bit (measured).
+  - Mono or stereo for LEVEL000, London's two odd front-end samples, and `crimes` duplicate use stay open for M8.
+- [x] Front-end images (`F_*`, `F_PAL`, `CUT*.RAW/.ACT`), `PLAYER_A.DAT` (`gta_career.c`), `CDAUDIO.DAT`. Header probes for SMK2 and REP. (`gfa_formats::{screen, career, cue}`)
+  - All 140 front-end and briefing files parse; sizes found from the data and confirmed by eye.
+  - REP files look like `{tick, input}` change logs (attract mode, M8). London's saves have another layout (M11).
+- [x] `MISSION.INI`: sections; typed declarations (5 trailing numbers, fixing AmiGTA1's bug); the command block. Ref: `gta_script.c`, `gta_script_run.c:244`, Carnage3D `docs/ped.txt`. (`gfa_formats::mission`)
+  - All four mission files parse, including the `[1003]` header AmiGTA1's reader misses. [1] has 575 declarations and 2116 commands.
+  - Names stay strings here; the typed declaration and command tables belong to the VM (M7).
+- [x] `gfa-tool info | export {tiles,sprites,fonts,frontend,cuts} | mission {list,dump}`. As built: `info`, `map [--at X,Y]`, `style [--cars]`, `text [--key] [--grep]`, `mission [--section N] [--dump]`, `export <style|font|picture>`.
+- [x] Data tests, gated on `GFA_DATA`: parse every file in GTADATA and UK, assert counts (e.g. [1] has 575 declarations and 2116 commands), and write contact-sheet PNGs for review.
+  - 11 data tests. Not yet parsed, by design: `UK.MAP`/`MC.MAP`, `UK/AUDIO/*.PK` and London's saves (M11); `.REP` input bits (M8); `MOVIE.SMK` (M9); the `.WAV` voice-overs (standard RIFF, read by the audio crate).
+- Exit: the whole Director's Cut set parses, and the exported art looks right. GRY and G24 agree on structure (they do, except where `docs/FORMATS.md` records the differences).
 
 **M2: Static city renderer (native + web)**
 - [ ] City mesh. Ref: Carnage3D `GameMapHelpers::BuildMapMesh`, `MapRenderer`.
@@ -395,7 +404,7 @@ Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.m
 - **Attribution:** `docs/REFERENCE_MAP.md` maps each module to its Carnage3D and AmiGTA1 sources, and module headers credit them, as AmiGTA1 credits Carnage3D.
 - **Testing layers:** unit tests; data tests gated on `GFA_DATA`; golden renders and holecheck; replay hashes, native vs wasm; oracle traces; script expectations; mission coverage. Stretch goal: decode the original `.REP` replays as a fidelity oracle.
 - **Risks and open questions** (answers go in the decision log):
-  - G24 vs GRY as the default (G24 for colour and HD; GRY for oracle parity).
+  - ~~G24 vs GRY as the default~~: settled, G24 (see the decision log, 2026-11-20).
   - Extracting `gta_main.c` cleanly.
   - Whether the oracle needs trace hooks beyond a small patch.
   - WebGL2 texture budget for HD; Safari performance.
@@ -408,6 +417,12 @@ Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.m
 
 Newest first. Each entry: date, decision, why.
 
+- **2026-11-20. Front-end and briefing pictures come from the 24-bit `.RAW`.** It is the master; the `.RAT` is a quantised copy. This matches the G24 decision and gives HD upscaling the best source.
+- **2026-11-20. G24 is the default style format, for rendering and for the sim's tables.**
+  - The G24 is the richer file: 25 more HUD sprites, longer tile animations, and per-sprite CLUTs that HD requantization can target.
+  - The base game's car and object tables are identical in both formats, so the sim loses nothing.
+  - London's GRY carries the base game's car table, not London's, so only the G24 is correct there.
+  - The GRY is still parsed, for oracle parity with AmiGTA1 (which reads only GRY) and for cross-checks.
 - **2026-11-20. Parsers keep raw records; game rules decide later.** The CMP parser keeps the map column-compressed as in the file, keeps duplicate startup objects, and keeps ground and direction bits where the file puts them (one block up). The sim chooses Carnage3D's or AmiGTA1's interpretation, with AmiGTA1 winning on gameplay (Principle 1).
 - **2026-11-20. Unused-dependency warnings are kept on.** Cargo 1.100 warns on unused (workspace) dependencies. Crates gain dependencies when they first use them, rather than declaring them all up front.
 - **2026-11-20. Drawing pauses while the window is hidden.** On macOS an occluded window makes every acquire return `Occluded`. Without the pause, the loop spun at about 5,000 iterations per second. While hidden, the app probes four times a second and resumes on `WindowEvent::Occluded(false)`.
@@ -426,6 +441,28 @@ Newest first. Each entry: date, decision, why.
 
 Newest first.
 
+- **2026-11-20. M1 done: MISSION.INI.**
+  - `gfa_formats::mission`: sections, declarations with every number, commands. Handles the glued `-1[1003]` header, a flag touching its bracket, a full stop typed for a comma, backslash map paths and the DOS end-of-file byte. 2 unit tests.
+  - Data test over MISSION.INI, MISSUK.INI, missuke.ini and misse8.ini, matching AmiGTA1's counts for [1] and [203].
+  - Findings: the race texts belong to the multiplayer "Canonball Run" sections; MC.CMP is London 1961's deathmatch map.
+  - `gfa-tool mission`.
+  - Totals for M1: 11 parser modules, 24 unit tests, 11 data tests; clippy, wasm-check, test and data-test all green.
+- **2026-11-20. M1: pictures, saves, CD map, probes.**
+  - `gfa_formats::screen` (palettes, `.RAW`/`.RAT` with sizes found from the data), `career` (PLAYER_A.DAT, raw bytes and accessors), `cue` (CDAUDIO.DAT). 4 unit tests.
+  - Data tests: 140 pictures and palettes, the save, both cue sheets (every file they name exists).
+  - Probes: both MOVIE.SMK are 320×200 SMK2; the `.REP` demos are `{tick, input}` logs.
+  - `gfa-tool export` handles `.RAW`/`.RAT` pictures.
+- **2026-11-20. M1: texts, fonts, sound banks.**
+  - `gfa_formats::fxt` (cipher, NUL padding, `[]` end marker, first-wins duplicates, Windows-1252), `fon` (glyphs, own palette, Carnage3D's accent table) and `sdt` (index, bounds, contiguity). 6 unit tests.
+  - Data tests: every FXT, FON and SDT in GTADATA, GTADATA/UK and GTADOS/DATA parses; every bank tiles its RAW exactly.
+  - Glyph sheets confirm the accent mapping: 140-glyph fonts have both cases, 118-glyph fonts upper case only.
+  - The FXT is now an evidence source for PARITY.md: GOURANGA (8787), the big cards (4000–4005), respray refusals including the tank's, and race checkpoint lines.
+  - `gfa-tool text` and font export.
+- **2026-11-20. M1: style files.**
+  - `gfa_formats::style` reads GRY v325 and G24 v336: tiles, animations, colour (GRY palette, remap tables and lid remaps; G24 CLUTs and palette index), objects, cars, sprites with deltas, and sprite category counts. 3 unit tests.
+  - Data test: all nine style files parse, each map's tiles exist in its style, the base GRY/G24 pairs agree on objects and cars, and G24 CLUT counts match Carnage3D's integrity checks.
+  - Findings: STYLE003.GRY declares one animation more than it holds; London's GRY has the base game's car table; the G24s add 25 HUD sprites.
+  - `gfa-tool style <path> [--cars]` and `gfa-tool export <style>` (contact sheets of tiles, sprites, remaps and deltas, written to the gitignored `export/`).
 - **2026-11-20. M1: CMP parser.**
   - `gfa_formats::cmp` with 2 unit tests, plus data tests that parse all six Director's Cut maps (NYC, SANB, MIAMI, UK, MC, UKE) and validate every column.
   - `gfa-tool map <path> [--at X,Y]`.

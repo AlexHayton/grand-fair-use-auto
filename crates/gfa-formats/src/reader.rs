@@ -68,6 +68,10 @@ impl<'a> Reader<'a> {
         Ok(self.array::<1>()?[0])
     }
 
+    pub fn i8(&mut self) -> Result<i8, FormatError> {
+        Ok(self.u8()? as i8)
+    }
+
     pub fn u16(&mut self) -> Result<u16, FormatError> {
         Ok(u16::from_le_bytes(self.array()?))
     }
@@ -78,6 +82,10 @@ impl<'a> Reader<'a> {
 
     pub fn u32(&mut self) -> Result<u32, FormatError> {
         Ok(u32::from_le_bytes(self.array()?))
+    }
+
+    pub fn i32(&mut self) -> Result<i32, FormatError> {
+        Ok(i32::from_le_bytes(self.array()?))
     }
 
     /// A section length from a header, as `usize`.
@@ -92,6 +100,26 @@ impl<'a> Reader<'a> {
             pos: 0,
             what,
         })
+    }
+}
+
+impl Reader<'_> {
+    pub fn is_empty(&self) -> bool {
+        self.remaining() == 0
+    }
+
+    /// Fails unless every byte has been consumed. Walking a variable-length
+    /// section to the exact byte is the main check that a record layout is
+    /// right.
+    pub fn expect_end(&self) -> Result<(), FormatError> {
+        if self.is_empty() {
+            Ok(())
+        } else {
+            Err(FormatError::invalid(
+                self.what,
+                format!("{} bytes left over at byte {}", self.remaining(), self.pos),
+            ))
+        }
     }
 }
 
