@@ -4,6 +4,7 @@
 //! milestones add headless rendering, script runs and mission coverage.
 
 mod export;
+mod render;
 mod sheet;
 
 use std::path::PathBuf;
@@ -78,9 +79,62 @@ enum Command {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+    /// Draw a map offscreen to a PNG. Holes (nothing drawn) show magenta.
+    Render {
+        /// Game path of a map, e.g. GTADATA/NYC.CMP.
+        path: String,
+        /// Block under the centre of the picture.
+        #[arg(long, value_parser = parse_xy_f, default_value = "128,128")]
+        at: (f32, f32),
+        /// Eye height in blocks (the ground is mostly at 2, roofs up to 6).
+        #[arg(long, default_value_t = 10.0)]
+        height: f32,
+        /// Degrees of tilt from straight down.
+        #[arg(long, default_value_t = 0.0)]
+        pitch: f32,
+        /// Heading in degrees (0: north up).
+        #[arg(long, default_value_t = 0.0)]
+        yaw: f32,
+        /// Picture size.
+        #[arg(long, value_parser = parse_xy, default_value = "1280,800")]
+        size: (usize, usize),
+        /// Debug tint: faces or flat.
+        #[arg(long)]
+        debug: Option<String>,
+        /// Seconds of tile animation.
+        #[arg(long, default_value_t = 0.0)]
+        time: f64,
+        /// Style to use instead of the map's own (G24 by default), e.g.
+        /// GTADATA/STYLE001.GRY.
+        #[arg(long)]
+        style: Option<String>,
+        /// Output file. Defaults to export/render/<map>_<x>_<y>.png.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+    /// Count undrawn pixels at AmiGTA1's eight inland viewpoints (holecheck.sh).
+    Holecheck {
+        /// Game path of a map. Defaults to GTADATA/NYC.CMP.
+        #[arg(default_value = "GTADATA/NYC.CMP")]
+        path: String,
+        /// Eye height in blocks.
+        #[arg(long, default_value_t = 10.0)]
+        height: f32,
+        /// Also write each view to export/holecheck/.
+        #[arg(long)]
+        save: bool,
+    },
 }
 
 fn parse_xy(s: &str) -> Result<(usize, usize), String> {
+    let (x, y) = s.split_once(',').ok_or("expected X,Y")?;
+    Ok((
+        x.trim().parse().map_err(|e| format!("{e}"))?,
+        y.trim().parse().map_err(|e| format!("{e}"))?,
+    ))
+}
+
+fn parse_xy_f(s: &str) -> Result<(f32, f32), String> {
     let (x, y) = s.split_once(',').ok_or("expected X,Y")?;
     Ok((
         x.trim().parse().map_err(|e| format!("{e}"))?,
@@ -102,6 +156,88 @@ fn main() -> Result<()> {
             dump,
         } => mission(&src, &path, section, dump),
         Command::Text { path, key, grep } => text(&src, &path, key.as_deref(), grep.as_deref()),
+        Command::Render {
+            path,
+            at,
+            height,
+            pitch,
+            yaw,
+            size,
+            debug,
+            time,
+            style,
+            out,
+        } => {
+            use gfa_render::city::DebugView;
+            let debug = match debug.as_deref() {
+                None => DebugView::Normal,
+                Some("faces") => DebugView::Faces,
+                Some("flat") => DebugView::Flat,
+                Some(d) => anyhow::bail!("unknown debug view {d:?} (faces, flat)"),
+            };
+            let size = (size.0 as u32, size.1 as u32);
+            let mut scene = render::Scene::load(&src, &path, style.as_deref(), size)?;
+            println!("{path} with {}: {}", scene.style_path, scene.mesh_summary());
+            println!("{}", scene.sprite_summary);
+            let view = render::View {
+                at,
+                height,
+                pitch,
+                yaw,
+            };
+            let rgba = scene.render(&view, debug, time);
+            let stem = path
+                .rsplit('/')
+                .next()
+                .unwrap_or(&path)
+                .to_ascii_lowercase();
+            let stem = stem.split('.').next().unwrap_or("map");
+            let out = out.unwrap_or_else(|| {
+                PathBuf::from(format!("export/render/{stem}_{}_{}.png", at.0, at.1))
+            });
+            render::write_png(&out, size, &rgba)?;
+            let d = scene.last_draw();
+            println!(
+                "wrote {} ({} chunks, {} draws, {} triangles; {} holes)",
+                out.display(),
+                d.chunks,
+                d.draws,
+                d.triangles,
+                render::holes(&rgba)
+            );
+            Ok(())
+        }
+        Command::Holecheck { path, height, save } => {
+            let mut scene = render::Scene::load(&src, &path, None, (640, 400))?;
+            scene.show_sprites = false;
+            let mut total = 0;
+            for &at in &render::HOLECHECK_POSITIONS {
+                let view = render::View {
+                    at,
+                    height,
+                    pitch: 0.0,
+                    yaw: 0.0,
+                };
+                let rgba = scene.render(&view, gfa_render::city::DebugView::Normal, 0.0);
+                let n = render::holes(&rgba);
+                println!(
+                    "block {},{}  uncovered {n} of {}",
+                    at.0,
+                    at.1,
+                    rgba.len() / 4
+                );
+                if save {
+                    let out = PathBuf::from(format!("export/holecheck/{}_{}.png", at.0, at.1));
+                    render::write_png(&out, scene.size(), &rgba)?;
+                }
+                total += n;
+            }
+            println!("--- total uncovered pixels: {total} ---");
+            if total > 0 {
+                anyhow::bail!("{total} uncovered pixels");
+            }
+            Ok(())
+        }
         Command::Export { path, out } => {
             let file = path
                 .rsplit('/')

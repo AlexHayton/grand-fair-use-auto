@@ -41,6 +41,12 @@ Carnage3D `GameMapManager.cpp` and AmiGTA1 `gta_map.c`.
 - Ground and direction bits describe the block *below* the one that draws them (cds.doc; Carnage3D `FixShiftedBits`). The parser keeps the raw records; the sim decides (M3, following AmiGTA1's `gta_map_ground_type`).
 - Empty district records are kept: roadblock route type *n* refers to district index *n* (AmiGTA1).
 - Startup objects contain duplicate car records. Carnage3D removes them; we keep the raw list and leave that choice to the sim.
+- Startup object fields (settled in M2, by rendering them):
+  - `x`, `y` are map pixels (64 per block) at the object's centre.
+  - `z` counts **down** from the top of the six-layer map: the height is `383 − z` pixels, so 255 is the ground at 128 (Carnage3D inverts the layer the same way). NYC: 2,863 of 3,015 objects are at 255.
+  - `rotation` is 1024 steps a turn, clockwise from north: 256 is east (Carnage3D's reading). Parked cars on the south side of an east–west road have 256, so they face east, with the traffic.
+  - A `remap` of 128 or more marks a car: `kind` is the car's **model** number (the car record whose `model` matches) and `remap − 128` its colour remap (0 is none). Otherwise `kind` indexes the style's object table.
+- The game's car, people and object art faces **south** when unrotated, so a sprite heading `h` is drawn turned by `h` plus half a turn (AmiGTA1 `GTA_SPRITE_ART_SOUTH`, proved there with a test picture).
 - The routes section is read in full. AmiGTA1 caps nodes per route at 24; we keep all of them.
 
 What our data test sees in the Director's Cut:
@@ -65,6 +71,11 @@ like an uncompressed editor-format map. Not needed to play; investigate in M11.
 ## Style files: GRY (v325) and G24 (v336) (`gfa_formats::style`)
 
 Sources: Carnage3D `StyleData.cpp` (G24) and AmiGTA1 `gta_style.c` (GRY).
+
+A map's header names its style by number; the file beside the map is
+`STYLE00n.G24` for GTA and London 1969, but `STY00n.G24` for London 1961,
+whose folder holds both (Carnage3D `GetStyleFileName`). `gfa_assets::level`
+picks by game, and works out a map's game from which mission file names it.
 The two formats share every section except the header, the colour data and
 the sprite record. Sections follow the header in this order:
 
@@ -97,9 +108,14 @@ graphics and inside its sprite.
   (`v << 2 | v >> 4`). Remap tables 1..43 are the vehicles' (a car's
   `remap8` bytes are table numbers) and 128..187 the pedestrians'. The 1,024
   bytes AmiGTA1 calls "unknown_b" are **lid remaps**: per lid tile, the remap
-  table for each of the map's four lid remaps. Inferred from the pattern (entry
-  3 equals entry 0 in all but one row, as in the G24 palette index); the
-  renderer will confirm it in M2.
+  table for each of the map's four lid remaps. Entry 0 is table 0, the
+  identity. **Confirmed in M2 by measurement:** for every lid and remaps 1
+  and 2, the change in a tile's mean colour under the GRY table points the
+  same way as under the G24 palette. STYLE001: 302 of 306 agree, and
+  swapping the two remaps agrees with only 2 (the two remaps differ there).
+  STYLE002: 319 of 334. STYLE003: 262 of 286. In those two the swapped
+  remaps agree too (303 and 213), because both remaps shift colour the same
+  way, so the swap tells nothing there.
 - **Deltas** are runs of `u16 skip, u8 len, len pixels`. The cursor advances
   in units of the **256-pixel page width**, not the sprite width, and
   positions are relative to the sprite's top-left. The contact sheets show

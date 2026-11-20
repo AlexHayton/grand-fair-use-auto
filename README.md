@@ -25,9 +25,24 @@ roadmap, decision log and progress log.
 ## Running
 
 ```sh
-cargo run -p gfa-native              # the game (window opens; levels arrive in M2)
-cargo run -p gfa-tool -- info        # what's in your data folder
+cargo run --release -p gfa-native                         # Liberty City, level [1]
+cargo run --release -p gfa-native -- --level 102          # San Andreas (202: Vice City)
+cargo run --release -p gfa-native -- --game london69 --level 2
+cargo run -p gfa-tool -- info                             # what's in your data folder
 ```
+
+Until the player arrives (M3) the game is a fly-over of the city:
+
+| Key | Does |
+|---|---|
+| Arrows or WASD (Shift: faster) | pan |
+| Scroll wheel, `+` / `-` | zoom |
+| F | free look: drag with the right mouse button to tilt and turn |
+| R | look straight down again |
+| F1 | debug overlay: frame rate, camera, draw counts, the block under the cursor |
+| Esc | quit |
+
+`--screenshot shot.png` saves the first frame and quits.
 
 Inspecting the data (`gfa-tool --help` lists everything):
 
@@ -37,6 +52,8 @@ cargo run -p gfa-tool -- style GTADATA/STYLE001.G24 --cars  # a style and its ve
 cargo run -p gfa-tool -- mission GTADATA/MISSION.INI        # the level scripts
 cargo run -p gfa-tool -- text GTADATA/ENGLISH.FXT --grep gouranga
 cargo run -p gfa-tool -- export GTADATA/STYLE001.G24        # contact sheets in export/ (gitignored)
+cargo run -p gfa-tool -- render GTADATA/NYC.CMP --at 64,64  # the city drawn offscreen, to export/render/
+cargo run -p gfa-tool -- holecheck GTADATA/NYC.CMP          # undrawn pixels at 8 viewpoints (expect 0)
 ```
 
 Web (needs `cargo install trunk`):
@@ -44,6 +61,12 @@ Web (needs `cargo install trunk`):
 ```sh
 cd crates/gfa-web && trunk serve     # http://127.0.0.1:8080
 ```
+
+The page asks for the folder that contains `GTADATA`. It reads the files it
+needs in the browser and keeps them in the browser's storage (IndexedDB), so
+later visits start straight away; nothing is uploaded. "Game data" (bottom
+right) chooses another folder or forgets the saved one. `?level=102` or
+`?game=london69&level=2` picks the level.
 
 ## Checks
 

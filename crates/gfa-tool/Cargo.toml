@@ -13,6 +13,8 @@ workspace = true
 [dependencies]
 gfa-assets.workspace = true
 gfa-formats.workspace = true
+gfa-render.workspace = true
+pollster.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 png.workspace = true

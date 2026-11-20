@@ -11,9 +11,15 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+gfa-formats.workspace = true
+bytemuck.workspace = true
+glam.workspace = true
 log.workspace = true
 thiserror.workspace = true
 wgpu.workspace = true
+
+[dev-dependencies]
+gfa-assets.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wgpu = { workspace = true, features = ["webgl"] }

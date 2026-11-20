@@ -6,11 +6,173 @@
     <title>Grand Fair Use Auto</title>
     <link data-trunk rel="rust" data-wasm-opt="2" />
     <style>
-      html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+      :root {
+        --bg: #000;
+        --panel: #15171c;
+        --text: #e8e6e1;
+        --muted: #9a978f;
+        --accent: #f2c14e;
+        --line: #2b2e36;
+      }
+      html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden;
+        font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--text); }
       canvas { display: block; width: 100vw; height: 100vh; outline: none; }
+      #data-panel { position: fixed; inset: 0; display: grid; place-items: center; padding: 16px; }
+      #data-panel[hidden] { display: none; }
+      .card { max-width: 440px; background: var(--panel); border: 1px solid var(--line);
+        border-radius: 10px; padding: 24px; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+      .card h1 { margin: 0 0 8px; font-size: 20px; }
+      .card p { margin: 0 0 12px; color: var(--muted); }
+      .card code { color: var(--text); }
+      .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+      button, label.button { font: inherit; cursor: pointer; border-radius: 6px; padding: 8px 14px;
+        border: 1px solid var(--line); background: #22252d; color: var(--text); }
+      label.button.primary { background: var(--accent); color: #111; border-color: var(--accent); font-weight: 600; }
+      button:focus-visible, label.button:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+      #status { min-height: 1.4em; margin-top: 14px; color: var(--text); }
+      #data-button { position: fixed; right: 12px; bottom: 12px; opacity: .6; }
+      #data-button:hover { opacity: 1; }
+      #data-button[hidden] { display: none; }
     </style>
   </head>
   <body>
     <canvas id="gfa-canvas" tabindex="0"></canvas>
+
+    <div id="data-panel">
+      <div class="card">
+        <h1>Grand Fair Use Auto</h1>
+        <p>Choose the folder from your own copy of the game: the one that contains
+          <code>GTADATA</code>. Your files are read in this browser and kept in its
+          storage; nothing is uploaded.</p>
+        <div class="row">
+          <label class="button primary">Choose game folder
+            <input id="folder" type="file" webkitdirectory multiple hidden />
+          </label>
+          <button id="forget" type="button" hidden>Forget saved files</button>
+        </div>
+        <div id="status" role="status"></div>
+      </div>
+    </div>
+    <button id="data-button" type="button" hidden>Game data</button>
+
+    <script>
+      "use strict";
+      // The page's half of loading game data: pick a folder, keep the files
+      // the engine needs in IndexedDB, and hand them to Rust
+      // (gfa_add_file, gfa_files_done in crates/gfa-app/src/web.rs).
+
+      // What the engine reads so far: maps, styles, mission scripts, texts, fonts.
+      const NEEDED = /\.(cmp|g24|gry|ini|fxt|fon)$/i;
+      const DB = "gfa", STORE = "files";
+
+      const panel = document.getElementById("data-panel");
+      const status = document.getElementById("status");
+      const forget = document.getElementById("forget");
+      const dataButton = document.getElementById("data-button");
+
+      // "Some/Where/GTA/GTADATA/UK/x.cmp" -> "GTADATA/UK/x.cmp"; null if unwanted.
+      function gamePath(rel) {
+        const parts = rel.split("/");
+        const i = parts.findIndex((p) => p.toUpperCase() === "GTADATA");
+        if (i < 0 || !NEEDED.test(rel)) return null;
+        const rest = parts.slice(i);
+        if (rest.some((p) => p.toUpperCase() === "AUDIO")) return null;
+        return rest.join("/");
+      }
+
+      function openDb() {
+        return new Promise((resolve, reject) => {
+          const req = indexedDB.open(DB, 1);
+          req.onupgradeneeded = () => req.result.createObjectStore(STORE, { keyPath: "path" });
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        });
+      }
+
+      function tx(db, mode, fn) {
+        return new Promise((resolve, reject) => {
+          const t = db.transaction(STORE, mode);
+          const out = fn(t.objectStore(STORE));
+          t.oncomplete = () => resolve(out && "result" in out ? out.result : undefined);
+          t.onerror = () => reject(t.error);
+        });
+      }
+
+      const cache = {
+        async all() {
+          try { return (await tx(await openDb(), "readonly", (s) => s.getAll())) || []; }
+          catch (e) { console.warn("IndexedDB unavailable", e); return []; }
+        },
+        async replace(entries) {
+          try {
+            await tx(await openDb(), "readwrite", (s) => {
+              s.clear();
+              for (const e of entries) s.put(e);
+            });
+          } catch (e) { console.warn("could not save the game files", e); }
+        },
+        async clear() {
+          try { await tx(await openDb(), "readwrite", (s) => s.clear()); } catch (e) {}
+        },
+      };
+
+      // Hand files to the engine: [{path, bytes: ArrayBuffer}].
+      async function loadEntries(entries) {
+        const wasm = await wasmReady;
+        for (const e of entries) wasm.gfa_add_file(e.path, new Uint8Array(e.bytes));
+        wasm.gfa_files_done();
+        panel.hidden = true;
+        dataButton.hidden = false;
+        document.getElementById("gfa-canvas").focus();
+      }
+
+      const wasmReady = new Promise((resolve) => {
+        if (window.wasmBindings) return resolve(window.wasmBindings);
+        addEventListener("TrunkApplicationStarted", () => resolve(window.wasmBindings), { once: true });
+      });
+
+      document.getElementById("folder").addEventListener("change", async (ev) => {
+        const files = [...ev.target.files]
+          .map((f) => ({ f, path: gamePath(f.webkitRelativePath || f.name) }))
+          .filter((x) => x.path);
+        if (!files.some((x) => /^GTADATA\/MISSION\.INI$/i.test(x.path) || /MISSUKE?\.INI$/i.test(x.path))) {
+          status.textContent = "That folder has no GTADATA/MISSION.INI. Choose the folder that contains GTADATA.";
+          return;
+        }
+        status.textContent = `Reading ${files.length} files…`;
+        const entries = await Promise.all(
+          files.map(async (x) => ({ path: x.path, bytes: await x.f.arrayBuffer() })));
+        status.textContent = "Saving them in this browser…";
+        await cache.replace(entries);
+        status.textContent = "";
+        await loadEntries(entries);
+      });
+
+      forget.addEventListener("click", async () => {
+        await cache.clear();
+        forget.hidden = true;
+        status.textContent = "Saved files forgotten.";
+      });
+
+      dataButton.addEventListener("click", () => {
+        panel.hidden = false;
+        forget.hidden = false;
+        status.textContent = "";
+      });
+
+      (async () => {
+        const saved = await cache.all();
+        if (saved.length) {
+          status.textContent = "Loading your saved game files…";
+          forget.hidden = false;
+          await loadEntries(saved);
+          status.textContent = "";
+        }
+      })();
+
+      // For tests and tools: load files without the picker.
+      window.gfaLoadEntries = loadEntries;
+      window.gfaCache = cache;
+    </script>
   </body>
 </html>

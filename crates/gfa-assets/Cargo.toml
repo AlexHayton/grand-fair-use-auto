@@ -11,9 +11,8 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+gfa-formats.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 toml.workspace = true
 
-[dev-dependencies]
-gfa-formats.workspace = true

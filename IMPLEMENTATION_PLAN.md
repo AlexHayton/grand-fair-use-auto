@@ -4,7 +4,7 @@ A living document. Tick boxes as work lands, add a dated line to the
 **progress log**, and record every non-obvious choice in the **decision log**
 (newest first). When a milestone's exit criterion is met, say so in the log.
 
-**Status:** M0 and M1 complete (2026-11-20). Next: M2, the static city renderer.
+**Status:** M0, M1 and M2 complete (2026-11-20), except a Safari check of the web build. Next: M3, the deterministic sim foundation.
 
 ## Goal
 
@@ -205,18 +205,29 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
 - Exit: the whole Director's Cut set parses, and the exported art looks right. GRY and G24 agree on structure (they do, except where `docs/FORMATS.md` records the differences).
 
 **M2: Static city renderer (native + web)**
-- [ ] City mesh. Ref: Carnage3D `GameMapHelpers::BuildMapMesh`, `MapRenderer`.
+- [x] City mesh. Ref: Carnage3D `GameMapHelpers::BuildMapMesh`, `MapRenderer`. (`gfa_render::city_mesh`)
   - Faces, lid rotation and flips, slopes 1–44, flat/transparent faces.
-  - 22×22 chunks with frustum culling.
-- [ ] Palette-indexed textures in WGSL via `textureLoad`.
-  - R8Uint tile array; palette, palette-index and remap tables.
-  - Animated-tile lookup table.
-  - Ref: `gamedata/shaders/city_mesh.glsl`, `sprites.glsl`.
-- [ ] Follow camera: perspective, FOV 55°, height zoom, lead-ahead. Free-look debug camera. The egui overlay shows fps, camera position and a block inspector.
-- [ ] Sprite batcher: instanced quads, height/draw-order sort. Particles are drawn as quads.
-- [ ] `gfa-tool render`: headless offscreen PNG. Holecheck: clear to a sentinel colour and count leftover pixels at 8 fixed viewpoints (AmiGTA1 `holecheck.sh`).
-- [ ] Web: `<input webkitdirectory>` folder picker into WebSource; cache in IndexedDB.
+  - 16×16-block chunks (256 / 16 divides evenly; Carnage3D uses 22×22) with frustum culling; neighbouring visible chunks merge into one draw.
+  - 12-byte vertices in map pixels. NYC: 138,327 faces, 553,308 vertices. Flat blocks: 11,041, exactly AmiGTA1's count.
+- [x] Palette-indexed textures in WGSL via `textureLoad`. (`gfa_render::{style_tables, city}`, `shaders/city.wgsl`)
+  - One 2048-wide R8Uint tile atlas instead of a texture array (WebGL2 allows 256 layers; styles have ~400 tiles).
+  - RGBA palette texture (8 palettes per row); per-tile palette table for the four lid remaps (Rgba16Uint); animated-tile table (R16Uint), rewritten when a frame changes.
+  - GRY and G24 share one path: GRY's palettes are its remap tables applied to its palette.
+- [x] Follow camera: perspective, FOV 55°, height zoom, lead-ahead. Free-look debug camera. The egui overlay shows fps, camera position and a block inspector. (`gfa_render::camera`, `gfa_app::{controls, overlay}`)
+  - Until M3 brings a player, the camera follows a point panned with the keys. F1 toggles the overlay; F toggles free look.
+  - `gfa --screenshot <png>` saves the first frame and quits: a smoke test of the app itself.
+- [x] Sprite batcher: instanced quads, height/draw-order sort. (`gfa_render::sprites`, `shaders/sprites.wgsl`)
+  - Shelf-packed sprite atlas (NYC's style: 2048×594); car remaps from G24 remap CLUTs or GRY tables.
+  - Draws the map's startup objects (render-side until M3 spawns them): all 3,015 in NYC have a sprite.
+  - Particles come with effects in M6; they will be instances of the same batcher.
+- [x] `gfa-tool render`: headless offscreen PNG. Holecheck: clear to a sentinel colour and count leftover pixels at 8 fixed viewpoints (AmiGTA1 `holecheck.sh`).
+  - The sentinel is alpha 0, which no face writes. Options: `--at`, `--height`, `--pitch`, `--yaw`, `--debug faces|flat`, `--time`, `--style`.
+- [x] Web: `<input webkitdirectory>` folder picker into a `MemSource`; cache in IndexedDB.
+  - The page's script owns the picker and the cache and hands files to Rust (`gfa_add_file`, `gfa_files_done`); `?game=` and `?level=` choose the level.
+  - Tested in Chrome: 180 files (41 MB) restored from IndexedDB on reload; the city at 2560×1600, 120 fps.
+- [ ] Safari check of the web build (needs a person at a Mac; Chrome is tested).
 - Exit: NYC, SANB and MIAMI render at Retina resolution on macOS and in Chrome and Safari; holecheck = 0.
+  - Met except Safari: native and Chrome render at 2560×1600; holecheck is 0 on all six maps (NYC, SANB, MIAMI, UK, MC, UKE).
 
 **M3: Deterministic sim foundation**
 - [ ] `gfa-fixed` ports AmiGTA1's formats, trig and RNGs (`gta_trig.c`).
@@ -417,6 +428,24 @@ Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.m
 
 Newest first. Each entry: date, decision, why.
 
+- **2026-11-20. Colour 0 is see-through only on flat blocks** (Carnage3D), not on every side face (AmiGTA1). Drawn in 3D, AmiGTA1's rule opens holes through solid walls, whose windows use colour 0 for black: the first NYC render showed them at block 64,64. AmiGTA1's 2D painter drew the ground first, so the holes never showed there.
+- **2026-11-20. Sloped side faces lose their top rows rather than squashing the tile.** The face keeps the tile's scale, as a wall cut by a ramp would. Carnage3D squashes; AmiGTA1 draws full-height walls. To check against the original if it ever looks wrong.
+- **2026-11-20. Flat blocks are plates whose two sides run the same way in the world**, and a missing side borrows the other's tile (AmiGTA1). Back-face culling decides which side shows, as the original's straight-down camera did. Signs read correctly; a flat block nudges half a pixel towards the eye to win against the wall it shares a plane with.
+- **2026-11-20. Sprites are drawn at heading + half a turn.** The art faces south (AmiGTA1's `GTA_SPRITE_ART_SOUTH`). The map's startup rotation is clockwise from north (Carnage3D), which puts parked cars facing along the traffic.
+- **2026-11-20. Tile animations count the original's 25 Hz frames** (AmiGTA1's reading; Carnage3D uses 24). Render-side, so it cannot affect the sim. Each animation shows its own tile, then its aux frames (Carnage3D).
+- **2026-11-20. One 2048-wide atlas per kind of art, plus small table textures**, read with `textureLoad` and coloured in the shader. It keeps to WebGL2's limits (256 array layers, 2048² textures) and needs no samplers. HD packs (M10) will split atlases when they outgrow 2048².
+- **2026-11-20. The city camera works in map pixels with `x` east, `y` south, `z` up**, flipping `y` only inside the view matrix. Map, sim and renderer then share one frame.
+- **2026-11-20. London 1961 uses `STY00n` styles; GTA and London 1969 use `STYLE00n`** (Carnage3D `GetStyleFileName`). A map's game is the one whose mission file names it.
+- **2026-11-20. The web page owns the folder picker and IndexedDB cache; Rust receives files through two exported functions.** DOM and IndexedDB are far simpler in the page's script than through `web-sys`, and the engine still sees a synchronous `MemSource`.
+- **2026-11-20. This is a source port: it runs the original game from the player's own copy, and recreates none of its content.**
+  - What it is: our own engine code, plus knowledge from the MIT-licensed Carnage3D and AmiGTA1, reading the 1997 game's `GTADATA` files at runtime. The art, maps, missions, text, sound and video all come from the player's files.
+  - What it never does: put game files or anything derived from them in the repo (Principle 6), redraw the game's art, rewrite its levels or missions, or copy its text into code. HD packs are generated locally from the player's files and stay local.
+  - Why: a port that needs the original data adds a way to play a game people already own without copying it, like Carnage3D, OpenMW and OpenRCT2. A clone that rebuilt the game's content would copy it instead. Midway through M2 work stopped over this question; the owner confirmed the source-port intent and work resumed.
+  - Target data: the 1997 game's `GTADATA` folder, as in a Director's Cut install. The 2021 "Definitive Edition" is the 3D trilogy, with other formats, and is out of scope.
+- **2026-11-20. The app is called Grand Fair Use Auto; the exe is `gfa`.** The window title is "Grand Fair Use Auto", plus the level's name once one is loaded.
+  - Never titled "Grand Theft Auto": that is Take-Two's trademark, and the app must not look official. Compatibility is described by naming what it runs ("plays Grand Theft Auto (1997) from your own copy"), with the non-affiliation notice in the README.
+  - The name riffs on the trademark. If the project is ever published widely, consider a more distinct name before then.
+
 - **2026-11-20. Front-end and briefing pictures come from the 24-bit `.RAW`.** It is the master; the `.RAT` is a quantised copy. This matches the G24 decision and gives HD upscaling the best source.
 - **2026-11-20. G24 is the default style format, for rendering and for the sim's tables.**
   - The G24 is the richer file: 25 more HUD sprites, longer tile animations, and per-sprite CLUTs that HD requantization can target.
@@ -441,6 +470,14 @@ Newest first. Each entry: date, decision, why.
 
 Newest first.
 
+- **2026-11-20. M2 done, except Safari.**
+  - `gfa_render`: `city_mesh` (faces, slopes, lid rotation, flips, flat blocks, 16×16 chunks), `style_tables` (tile atlas, palettes, remap and animation tables for GRY and G24), `city` and `city.wgsl`, `sprites` and `sprites.wgsl`, `camera` (perspective, frustum, follow), `offscreen`.
+  - `gfa_assets::level`: finds a section's map and the style beside it, by game.
+  - `gfa-app`: loads `--game`/`--level`, flies the debug camera, draws the city and startup sprites, egui overlay with a block inspector, `--screenshot`. Web: folder picker, IndexedDB cache, `?game=&level=`.
+  - `gfa-tool render` and `gfa-tool holecheck`: 0 uncovered pixels on all six maps.
+  - Settled from the data: GRY lid remaps (FORMATS.md), startup object height and rotation, sprite art facing south, London 1961's style name.
+  - Midway through, work stopped over whether a source port counts as recreating the game; the owner confirmed the source-port intent (decision log), and work resumed.
+  - Totals: 38 unit tests, 12 data tests; clippy, wasm-check, test, data-test and a release Trunk build (6.8 MB wasm) all green.
 - **2026-11-20. M1 done: MISSION.INI.**
   - `gfa_formats::mission`: sections, declarations with every number, commands. Handles the glued `-1[1003]` header, a flag touching its bracket, a full stop typed for a comma, backslash map paths and the DOS end-of-file byte. 2 unit tests.
   - Data test over MISSION.INI, MISSUK.INI, missuke.ini and misse8.ini, matching AmiGTA1's counts for [1] and [203].

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Parser;
-use gfa_assets::DataPath;
+use gfa_assets::{DataPath, Dataset};
 
 /// Grand Fair Use Auto: the 1997 game, played from your own data.
 #[derive(Parser)]
@@ -13,12 +13,27 @@ struct Args {
     /// Folder containing GTADATA/. Overrides GFA_DATA and gfa.local.toml.
     #[arg(long)]
     data: Option<PathBuf>,
-    /// Mission script section to start in, e.g. 1, 102, 202.
-    #[arg(long)]
-    level: Option<u32>,
+    /// Which game: gta, london69 or london61.
+    #[arg(long, default_value = "gta", value_parser = parse_game)]
+    game: Dataset,
+    /// Mission script section to start in, e.g. 1, 102, 202 (London: 2, 3, 4).
+    #[arg(long, default_value_t = 1)]
+    level: u32,
     /// Ignore HD packs and draw the original art.
     #[arg(long)]
     nohd: bool,
+    /// Save the first frame as a PNG and quit (a smoke test).
+    #[arg(long)]
+    screenshot: Option<PathBuf>,
+}
+
+fn parse_game(s: &str) -> Result<Dataset, String> {
+    match s.to_ascii_lowercase().as_str() {
+        "gta" => Ok(Dataset::Gta),
+        "london69" | "london" => Ok(Dataset::London69),
+        "london61" => Ok(Dataset::London61),
+        _ => Err(format!("unknown game {s:?}: gta, london69 or london61")),
+    }
 }
 
 fn main() -> ExitCode {
@@ -41,13 +56,12 @@ fn main() -> ExitCode {
             None
         }
     };
-    if let Some(level) = args.level {
-        log::info!("--level {level}: levels load from milestone M2");
-    }
-
     let config = gfa_app::AppConfig {
         data,
+        game: args.game,
+        level: args.level,
         no_hd: args.nohd,
+        screenshot: args.screenshot,
     };
     match gfa_app::run_native(config) {
         Ok(()) => ExitCode::SUCCESS,

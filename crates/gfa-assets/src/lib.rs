@@ -5,9 +5,11 @@
 //! - [`source`] reads files by their original DOS-style names, ignoring case,
 //!   so `GTADATA/NYC.CMP` finds `gtadata/nyc.cmp` on any filesystem.
 //! - [`dataset`] detects which games are present: GTA, London 1969, London 1961.
+//! - [`level`] finds and loads a level's map and style.
 
 pub mod datapath;
 pub mod dataset;
+pub mod level;
 pub mod source;
 
 pub use datapath::{DataPath, DataPathError, DataPathOrigin};

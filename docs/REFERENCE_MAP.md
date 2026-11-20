@@ -16,8 +16,13 @@ relative to sibling checkouts `../carnage3d` and `../AmiGTA1`.
 | `gfa-formats::screen` | | `native/gta_front.h` (screen split) | done |
 | `gfa-formats::mission` | | `native/gta_script.c`, `gta_script_run.c` (layout) | done |
 | `gfa-formats::career` | | `native/gta_career.c`, `gta_career.h` | done |
-| `gfa-render` city mesh | `src/GameMapHelpers.cpp`, `src/MapRenderer.cpp` | `native/gta_render.c` | M2 |
-| `gfa-render` shaders | `gamedata/shaders/*.glsl` | | M2 |
+| `gfa-render::city_mesh` | `src/GameMapHelpers.cpp` (`PutBlockFace`), `src/MapRenderer.cpp` (chunks) | `native/gta_render.c` (`draw_block`: flat blocks, lids), `tools/gtabake.c` (lid rotation) | done |
+| `gfa-render::style_tables` | `src/SpriteManager.cpp` (palette tables, `InitBlocksAnimations`) | `native/gta_main.c` (25 Hz frame, door note) | done |
+| `gfa-render::city`, `shaders/city.wgsl` | `gamedata/shaders/city_mesh.glsl` | | done |
+| `gfa-render::sprites`, `shaders/sprites.wgsl` | `src/SpriteBatch.cpp`, `gamedata/shaders/sprites.glsl`, `src/StyleData.cpp` (`GetSpritePaletteIndex`), `src/GameObjectsManager.cpp` (`CreateStartupObjects`) | `native/gta_player.h` (`GTA_SPRITE_ART_SOUTH`), `native/gta_render.c` (sprite rotation) | done |
+| `gfa-render::camera` | `src/FollowCameraController.cpp` | | done |
+| `gfa-assets::level` | `src/GameMapManager.cpp` (`GetStyleFileName`) | | done |
+| `gfa-tool holecheck` | | `tools/bin/holecheck.sh` | done |
 | `gfa-fixed` | | `native/gta_trig.c` | M3 |
 | `gfa-sim` vehicles | | `native/gta_vehphys.c`, `gta_car.c` | M4 |
 | `gfa-sim` traffic, police | | `native/gta_traffic.c`, `gta_route.c` | M5–M6 |
