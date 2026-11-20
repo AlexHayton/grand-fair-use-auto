@@ -9,6 +9,8 @@
 //! - [`world`]: the state and its tick.
 //! - [`map`]: who may stand where, ramps, fences, ground height.
 //! - [`player`]: the player on foot.
+//! - [`vehicle`]: the driven car's physics; [`cars`]: parked cars, getting
+//!   in and out, ramps, jumps and walls.
 //! - [`clock`]: the tick and the subsystems' slower clocks.
 //! - [`view`]: the fixed area that counts as on screen.
 //! - [`input`]: buttons per tick, and recordings of them.
@@ -16,6 +18,7 @@
 //! - [`script_world`]: what the mission VM may ask of the world.
 #![deny(clippy::float_arithmetic)]
 
+pub mod cars;
 pub mod clock;
 pub mod hash;
 pub mod input;
@@ -24,6 +27,7 @@ pub mod player;
 pub mod replay;
 pub mod script;
 pub mod script_world;
+pub mod vehicle;
 pub mod view;
 pub mod world;
 

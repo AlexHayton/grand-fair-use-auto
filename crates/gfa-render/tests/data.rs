@@ -63,7 +63,7 @@ fn every_map_builds_and_fits_webgl2() {
         let atlas = SpriteAtlas::new(&style);
         assert!(atlas.height <= max, "{path}: sprite atlas too tall");
         let mut batch = SpriteBatch::default();
-        let skipped = push_startup_objects(&map, &style, &atlas, &mut batch);
+        let skipped = push_startup_objects(&map, &style, &atlas, &mut batch, |_| true);
         assert_eq!(skipped, 0, "{path}: startup objects with no sprite");
         assert_eq!(batch.len(), map.objects.len());
     }

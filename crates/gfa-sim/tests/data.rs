@@ -48,9 +48,19 @@ fn every_level_is_walkable() {
             if !src.exists(&files.map) {
                 continue;
             }
-            let (map, _, _) = load_map(&src, &files.map, dataset).unwrap();
+            let (map, _, style) = load_map(&src, &files.map, dataset).unwrap();
             let gta = dataset == Dataset::Gta;
-            let build = || level_world(map.clone(), section, gta, SimView::GAME, None).unwrap();
+            let build = || {
+                level_world(
+                    map.clone(),
+                    style.cars.clone(),
+                    section,
+                    gta,
+                    SimView::GAME,
+                    None,
+                )
+                .unwrap()
+            };
             let mut world = build();
             let start = world.drain_log();
             let p = &world.player;
@@ -93,4 +103,43 @@ fn every_level_is_walkable() {
         }
     }
     assert!(levels >= 6, "only {levels} levels found");
+}
+
+/// The car physics the simulation reads from the G24 style must equal the
+/// GRY's, which AmiGTA1 (the oracle) reads.
+#[test]
+#[ignore = "needs game data (cargo data-test)"]
+fn g24_and_gry_cars_agree() {
+    use gfa_formats::style::Style;
+    let src = data();
+    for n in 1..=3 {
+        let g24 = Style::parse(&src.read(&format!("GTADATA/STYLE00{n}.G24")).unwrap()).unwrap();
+        let gry = Style::parse(&src.read(&format!("GTADATA/STYLE00{n}.GRY")).unwrap()).unwrap();
+        assert_eq!(g24.cars.len(), gry.cars.len(), "style {n}");
+        for (i, (a, b)) in g24.cars.iter().zip(&gry.cars).enumerate() {
+            // Colours differ by design (HLS for 24-bit, tables for 8-bit),
+            // and so may the sprite numbering; physics and doors must not.
+            let physics = |c: &gfa_formats::style::CarInfo| {
+                (
+                    (c.width, c.length, c.vert, c.model, c.vtype, c.cx, c.cy),
+                    (
+                        c.moment,
+                        c.mass,
+                        c.thrust,
+                        c.tyre_adhesion_x,
+                        c.tyre_adhesion_y,
+                    ),
+                    (
+                        c.handbrake_friction,
+                        c.turn_ratio,
+                        c.drive_wheel_offset,
+                        c.steering_wheel_offset,
+                    ),
+                    (c.max_speed, c.min_speed, c.doors.clone()),
+                )
+            };
+            assert_eq!(physics(a), physics(b), "style {n} car {i}");
+        }
+        println!("style {n}: {} cars agree", g24.cars.len());
+    }
 }

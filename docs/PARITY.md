@@ -40,10 +40,13 @@ AmiGTA1 references are to `native/` in a sibling `../AmiGTA1` checkout.
 
 | Feature | Original | AmiGTA1 | GFA | M | Evidence / notes |
 |---|---|---|---|---|---|
-| Car handling (two-tyre body, style physics) | ✓ | full | — | M4 | `gta_vehphys.c` |
-| Wall resolve, ramps, layers, jumps | ✓ | full | — | M4 | `gta_vehphys.c`, `gta_main.c:790-805` |
-| Damage deltas, fire, explosions, wrecks | ✓ | full | — | M4 | |
-| Enter/exit by door, drag out driver, bikes | ✓ | full | — | M4 | |
+| Car handling (two-tyre body, style physics) | ✓ | full | done | M4 | `gta_vehphys.c`; oracle traces match |
+| Wall resolve, ramps, layers, jumps | ✓ | full | done | M4 | `gta_vehphys.c`, `gta_main.c:790-805`; NYC jump at x 91 lands |
+| Damage deltas, burning, write-offs | ✓ | full | done | M4 | `gta_car.c` (`gta_car_panel_delta`), `gta_main.c` (fuse) |
+| Explosions harming what is near, burnt wrecks | ✓ | full | — | M4/M6 | `gta_weapon.c` (`gta_weapons_wreck_car`) |
+| Enter/exit by door, bikes | ✓ | full | done | M4 | `gta_main.c` (door point, enter and exit steps) |
+| Vault over a car | ✓ | full | — | M4 | |
+| Drag out the driver | ✓ | full | — | M5 | the driver needs M5's peds |
 | Tank: handling | ✓ | full | — | M4 | engine cut, `gta_vehphys.c:395` |
 | Tank: turret and cannon | ✓? | none | — | M4 | not modelled anywhere in AmiGTA1 |
 | Boats: driving on water | ✓? | none | — | M4 | placed as an object only, `gta_traffic.c:1152` |
@@ -52,11 +55,11 @@ AmiGTA1 references are to `native/` in a sibling `../AmiGTA1` checkout.
 | RC car / map-placed specials | ? | partial | — | M4 | `gta_traffic.c:1152` |
 | Trains: routes, stops, boarding, crush | ✓ | partial | — | M4 | cuts corners on the chord, not the bogie path |
 | Trams | ✓ (static) | full | — | M4 | the original's trams stand still |
-| Horn / pull-over look-ahead | ✓ | none | — | M4 | `gta_main.c:3957` NOT PORTED |
-| Bombs: timed, speed | ✓ | full | — | M4 | `gta_main.c:4266` |
-| Bombs: tanker (type 4, five blasts) | ✓ | none | — | M4 | `gta_main.c:4272` |
-| Chain explosions of wrecks | ✓? | none | — | M4 | `gta_weapon.h:34` |
-| Siren/lights toggle in emergency vehicles | ? | partial | — | M4 | |
+| Horn / pull-over look-ahead | ✓ | none | — | M5 | `gta_main.c:3957` NOT PORTED |
+| Bombs: timed, speed | ✓ | full | — | M6 | `gta_main.c:4266` |
+| Bombs: tanker (type 4, five blasts) | ✓ | none | — | M6 | `gta_main.c:4272` |
+| Chain explosions of wrecks | ✓? | none | — | M6 | `gta_weapon.h:34` |
+| Siren/lights toggle in emergency vehicles | ? | partial | — | M5 | |
 
 ## Living city (M5)
 

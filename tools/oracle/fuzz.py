@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Random walks through the AmiGTA1 oracle and gfa-tool, diffed tick by tick.
+"""Random walks or drives through the AmiGTA1 oracle and gfa-tool, diffed
+tick by tick.
 
-    tools/oracle/fuzz.py [--seed N] [--count N] [--legs N]
+    tools/oracle/fuzz.py [--drive] [--seed N] [--count N] [--legs N]
 
-For each of GTA's three cities, writes `count` random walk scripts (a start
-block, then legs of random turns, steps and runs) and runs
-tools/oracle/compare.sh on each. The scripts are generated from the seed,
-so a failure can be reproduced; failing scripts are kept in
-tools/oracle/build/fuzz/.
+For each of GTA's three cities, writes `count` random scripts and runs
+tools/oracle/compare.sh on each. A walk is a start block and legs of random
+turns, steps and runs; a drive (--drive) puts the player in a random vehicle
+on a random block and holds random throttle, reverse, steering and handbrake.
+The scripts are generated from the seed, so a failure can be reproduced;
+failing scripts are kept in tools/oracle/build/fuzz/.
 """
 import argparse
 import os
@@ -29,8 +31,20 @@ def script(rng, section, legs):
     return "\n".join(lines) + "\n"
 
 
+def drive_script(rng, section, legs):
+    # Records 0..20 exist in every GTA style: cars, bikes, buses and odd ones.
+    lines = [f"# section: {section}",
+             f"drive {rng.randrange(21)} {rng.randrange(256)} {rng.randrange(256)} {rng.randrange(256)}"]
+    for _ in range(legs):
+        up = rng.choice([0, 1, 1, 1])
+        down = 0 if up else rng.choice([0, 1])
+        lines.append(f"run {rng.randrange(1, 90)} {up} {down} {rng.choice([-1, 0, 0, 1])} {rng.choice([0, 0, 0, 1])}")
+    return "\n".join(lines) + "\n"
+
+
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--drive", action="store_true", help="random drives instead of walks")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--count", type=int, default=10)
     ap.add_argument("--legs", type=int, default=30)
@@ -44,7 +58,8 @@ def main():
         for i in range(args.count):
             path = os.path.join(out, f"{section}_{i}.txt")
             with open(path, "w") as f:
-                f.write(script(rng, section, args.legs))
+                make = drive_script if args.drive else script
+                f.write(make(rng, section, args.legs))
             cmd = [os.path.join(HERE, "compare.sh"), path]
             if data:
                 cmd.append(os.path.join(data, "GTADATA", mapname))

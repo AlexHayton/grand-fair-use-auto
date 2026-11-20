@@ -1,0 +1,14 @@
+# The jump over the water at x = 91 in Liberty City.
+#
+# A ramp climbs south over y 100..105 on layer 3; y 106..107 is open water;
+# a ramp falling south starts at y 108. A car at full throttle from the road
+# at (91,90) climbs onto layer 3, leaves the ground at (91,105) and must
+# land on the far side, on layer 3, not in the water.
+#
+# section: 1
+# expect: car: layer 2 -> 3 at (91,92)
+# expect: car: jump from (91,105) layer 3
+# expect: car: landed at (91,
+# reject: fell short
+drive 0 91 90 128
+run 200 1 0 0 0

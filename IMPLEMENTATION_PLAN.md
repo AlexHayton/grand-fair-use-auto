@@ -244,7 +244,7 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
   - `TickInput` is the buttons held on a tick; `InputLog` records the ticks where it changes (`gfa-input 1` text format) and plays them back.
   - `Script` reads both AmiGTA1 formats in one file: orders (`autodrive.txt`) and walk legs (`gtadump walk`), with `start`, and `# section:`, `# expect:` and `# reject:` headers. Every order is recognised; fixtures for later milestones log "not supported yet".
 - [x] `gfa-tool run --section N --script f --ticks T [--hash-every K]` checks the expected-log lines from the script header.
-  - Also `--trace` (per-tick player state, the oracle's format), `--out` (PNGs for `dump`/`film`, with the player drawn), `--record` (save the input) and `--amigta1-view`.
+  - Also `--trace` (per-tick player state, the oracle's format), `--out` (PNGs for `dump`/`film`, with the player drawn), `--record` (save the input) and `--oracle` (AmiGTA1's view size and no parked cars, as its harnesses run).
   - Scripts live in `tools/scripts/`.
 - [x] Player on foot. Ref: `gta_player.c`.
   - Run by default, Shift walks; turning, backing up at half pace, sliding along walls, fences, ramps between layers (NYC's bridge at 19,44 lands on layer 3), the walk and run cycles.
@@ -262,23 +262,34 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
     - The three walk scripts and 24 random walks (about 43,000 ticks over NYC, San Andreas and Vice City) match AmiGTA1 tick for tick: position, layer, angle, animation frame and blocked flags.
 
 **M4: Vehicles.** Ref: `gta_vehphys.c/.h` (essay in the header), `gta_car.c`, `gta_train.c`, `gta_main.c:790-805` and around line 8960 (jump arc).
-- [ ] Two-tyre rigid body with the style's raw 16.16 values. Rear grip ×1.5; handbrake 0.6; road-snap assist.
-- [ ] Wall resolve with a 10-point outline and safe-position revert.
-- [ ] Ramps and layers; jumps.
+- [x] Two-tyre rigid body with the style's raw 16.16 values. Rear grip ×1.5; handbrake 0.6; road-snap assist.
+  - `gfa_sim::vehicle`: AmiGTA1's `gta_vehphys.c` in `i64`, which is its 64-bit host build's arithmetic (the oracle's). G24 and GRY car tables are checked equal by a data test.
+- [x] Wall resolve with a 10-point outline and safe-position revert.
+  - With fences and posts (the style's post tiles stop cars only), the wedge push-out after half a second, and wall damage (impact speed less a grace pixel).
+- [x] Ramps and layers; jumps.
+  - Layers change at the nose; the jump from AmiGTA1's main loop (lift, gravity, five-block cap, landing on the first surface at or below). `tools/scripts/drive_jump.txt`: the car leaves (91,105) and lands at (91,116) on layer 3.
 - [ ] Damage via sprite deltas; burning, exploding, wrecks.
+  - Done: a wall hit dents the panel it struck (AmiGTA1 `gta_car_panel_delta`); the sprite atlas also holds every sprite delta as its own image, drawn over the car; at 100 points the car is a write-off, shows every damage delta, burns 120 ticks with the fire object's frames, then blows up, throwing the player clear and leaving a wreck nobody can enter. Doors open and close on the art during get-in and get-out. The `damage` order.
+  - The blast's effect on what is around it, wrecks' burnt look and chain explosions moved to M6.
 - [ ] Door-by-door enter and exit; vault the car; drag out the driver; bikes and convertibles.
+  - Done: parked cars from the map's startup objects (trains and trams excepted) are sim-owned; RETURN walks to the nearest car's door within 48 px and runs the ten-step get-in; the get-out refuses above speed 5 and plays nine steps while the car rolls; bikes mount and dismount on their own frames; a walker cannot walk through a car.
+  - Also: a convertible shows its driver, a bike its rider.
+  - To do: the vault over the roof (a blocked door, or the far side). Dragging out a driver moved to M5.
 - [ ] Trains.
 - [ ] Use `tools/vehruler.c` as the measurement reference.
-- [ ] Close the M4 items in *Gaps beyond AmiGTA1*: tank, boats and water, specials, trains, pull-over, bombs, chain explosions.
+- [ ] Close the M4 items in *Gaps beyond AmiGTA1*: tank, boats and water, specials, trains. (Pull-over, the siren, bombs and chain explosions moved to M5 and M6.)
 - Exit: every class drives, including the tank and the boats; the (91,105..108) jump lands; vehicle traces match the oracle.
+  - So far: the jump lands; `tools/oracle/drivetrace.c` (AmiGTA1's physics, wall and layer code, with its main loop's glue restated) matches `gfa-tool run --trace` on `drive_oracle`, `drive_jump`, `drive_wall` and 24 random drives over the three cities with random vehicles (`fuzz.py --drive`).
 
 **M5: Living city.** Ref: `gta_traffic.c` (10.6k lines), `gta_route.c` (BFS: 48-block window, 700 nodes), `gta_nav.c`, `gta_peds.c`.
 - [ ] Fleet spawn and despawn on the logical view.
+  - Nothing may pop in or out where the player can see it. The camera's lead and any speed zoom become sim state (from position and speed only), the spawn and despawn rings follow them with AmiGTA1's margins (+2..+6 blocks spawn, +9 despawn), and in normal play the renderer never shows more ground than that view: zoom-out is capped and windows wider than 21:9 are pillarboxed. Free look, fly and extreme zoom are debug views where pop-in is accepted.
+  - A pop-in check, like the holecheck: run traffic and fail if anything spawns or despawns inside the visible ground at the largest allowed zoom and aspect.
 - [ ] AI driver: lanes, junctions, give way, queues, S-curve lane change, U-turn.
 - [ ] Traffic lights.
 - [ ] SAT `box_mtv` collisions with impulse and spin (`fleet_collide`, around `gta_traffic.c:8067`).
 - [ ] Peds on pavements, crossings, knockdowns, panic.
-- [ ] Close the M5 items in *Gaps beyond AmiGTA1*: counter-punch, gang roles, special ped groups, junction fidelity.
+- [ ] Close the M5 items in *Gaps beyond AmiGTA1*: counter-punch, gang roles, special ped groups, junction fidelity, pull-over, the siren, dragging out drivers.
 - Exit: the `drive` traces from `fullgate`/`litegate` (4 sites × 3 seeds × 12,000 ticks) match the oracle, with no deadlocks.
 
 **M6: Combat, police, services.** Ref: `gta_weapon.c`, `gta_pickup.c`, `gta_score.c` (heat thresholds such as LC 151/251/351/501), `gta_traffic.c:9681-10500` (cop dispatch, roadblocks), `gta_peds.c:1912-2066` (arrest, shooting), `gta_service.c`, `gta_marks.c`, plus the `gta_main.c` busted/wasted/siren code.
@@ -286,7 +297,7 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
 - [ ] Wanted levels, chases and rams, roadblocks, arrest; BUSTED and WASTED, lives, hospital.
 - [ ] Ambulance and fire engine. Spray and bomb shops.
 - [ ] Tyre marks, blood and oil for all cars. AmiGTA1 only marks the player's car.
-- [ ] Close the M6 items in *Gaps beyond AmiGTA1*: crates, armour, friendly fire, wall fires, power-ups, bonuses, police reasons, bust tally.
+- [ ] Close the M6 items in *Gaps beyond AmiGTA1*: crates, armour, friendly fire, wall fires, power-ups, bonuses, police reasons, bust tally, bombs, chain explosions, blast damage.
 - Exit: the bust, death and spray-escape loops work; the AmiGTA1 `car_*`, `bankblast` and `blood*` scripts pass.
 
 **M7: Mission VM, HUD, text.** Ref: `gta_script.c`, `gta_script_run.c` (`cmd_names[]` at lines 35-172; `step()` at 645; `gta_script_tick` at 2691), `gta_script.h:203-220` and `:459-663`, the `gta_main.c` callbacks (doors, cranes, bombs, the arrow), `gta_hud.c`, `gta_font.c`, `gta_text.c`, and `gta_main.c:2615-2830` (text displays).
@@ -373,6 +384,8 @@ Sources for this list:
 Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.md`. **(verify)** means: settle the original's behaviour first (Principle 8), because AmiGTA1 gives no answer.
 
 **M4 Vehicles**
+- Moved on 2026-11-20 because they need later systems: the horn and pull-over and the siren toggle to M5 (traffic), dragging a driver out to M5 (peds); bombs, chain explosions and blast damage to M6 (weapons).
+
 - [ ] **Tank** (model 0x25). AmiGTA1 has only its handling: the engine cut at top speed (`gta_vehphys.c:395`) and its turn rate. Add:
   - the rotating turret, aimed independently of the hull;
   - cannon shells on the fire key: projectile, explosion, wall and car damage;
@@ -389,18 +402,20 @@ Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.m
 - [ ] **Trains**: follow the bogie path table instead of cutting corners on the chord.
   - Trams stay still, as in the original.
   - Make train boarding, riding and IS_PLAYER_ON_TRAIN robust across all three cities.
-- [ ] **Horn and pull-over**: the original's look-ahead of up to five blocks for a car (`gta_main.c:3957`, NOT PORTED).
-- [ ] **Bombs**: the type-4 tanker bomb, whose wreck blows five times (`gta_main.c:4272`, not ported). Find the global that triggers it.
-- [ ] **Chain explosions**: a burning wreck sets off its neighbours (`gta_weapon.h:34`).
-- [ ] **Emergency vehicles the player drives**: the siren and light toggle in cop cars, ambulances and fire engines, and how traffic reacts to it.
 
 **M5 Living city**
+- [ ] **Horn and pull-over**: the original's look-ahead of up to five blocks for a car (`gta_main.c:3957`, NOT PORTED).
+- [ ] **Emergency vehicles the player drives**: the siren and light toggle in cop cars, ambulances and fire engines, and how traffic reacts to it.
+- [ ] **Dragging the driver out** when the player takes an occupied car, and the carjack's score (moved from M4: needs peds).
 - [ ] The victim's ped counter-punch (`gta_peds.c:1675`).
 - [ ] Settle the gang-role state machine (`gta_peds.c:1111`).
 - [ ] **Special ped groups** that the bonuses need: Hare Krishna lines; Elvis impersonators **(verify which levels)**. Spawn rules come from the style and ped tables.
 - [ ] Traffic fidelity issues AmiGTA1 lists as open: junction wobble (`gta_traffic.c:5871`) and corner landing error (`gta_traffic.c:5666`).
 
 **M6 Combat, police, services**
+- [ ] **Bombs**: the type-4 tanker bomb, whose wreck blows five times (`gta_main.c:4272`, not ported). Find the global that triggers it.
+- [ ] **Chain explosions**: a burning wreck sets off its neighbours (`gta_weapon.h:34`).
+- [ ] **Blast damage**: a car blowing up hurts the cars and people around it (`gta_weapons_wreck_car`); burnt-out wrecks look burnt (moved from M4).
 - [ ] Re-audit `gta_weapon.h:34`, since that list is partly stale, and finish whatever is still missing:
   - weapon crates;
   - friendly-fire groups;
@@ -446,6 +461,13 @@ Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.m
 ## Decision log
 
 Newest first. Each entry: date, decision, why.
+
+- **2026-11-20. M4 keeps only what vehicles need on their own.** Pull-over and the siren need traffic (to M5), dragging out a driver needs peds (to M5), and bombs, chain explosions and blast damage need weapons (to M6). Agreed with the owner, so M4 can close on trains, the vault, boats and water, the tank and the specials.
+
+- **2026-11-20. The map's parked vehicles belong to the simulation**, built from the startup objects with a remap byte of 128 or more (Carnage3D's `CreateStartupObjects` does the same); trains and trams stay render-side until their milestone. The renderer leaves those objects out of its static sprites and draws the simulation's cars instead. AmiGTA1 parks its own fleet cars near the start and ignores the map's; its oracle runs therefore use `--oracle`, which clears them.
+- **2026-11-20. Vehicle arithmetic is `i64`**, the arithmetic of AmiGTA1's 64-bit host build that serves as the oracle. AmiGTA1's fixed-point helpers keep intermediates inside 32 bits, so the Amiga agrees wherever AmiGTA1 has no overflow bug.
+- **2026-11-20. A door blocked by a building or a car refuses the exit for now.** AmiGTA1 climbs out over the roof; that waits for the vault.
+- **2026-11-20. `drive record bx by face` is our own script order**, putting the player straight into a car; it lasts a tick like AmiGTA1's fixture orders. A column with nowhere to stand puts the car on the street layer (2), as placing the player on foot does.
 
 - **2026-11-20. The oracle is our own small C harness linking AmiGTA1's modules, not a patched `gtadump`.** `gtadump walk` never builds the nav grid, so fences are off in it; our `walktrace.c` builds the grid and prints a per-tick trace. Nothing of AmiGTA1 is copied into this repo: the harness compiles its sources where they are, in the sibling checkout.
 - **2026-11-20. Fences on London's maps stop no one yet.** The solid flat-face tile lists are AmiGTA1's research into GTA's three styles; London's styles have none. Recorded in `docs/PARITY.md` until someone settles them.
@@ -496,6 +518,14 @@ Newest first. Each entry: date, decision, why.
 
 Newest first.
 
+- **2026-11-20. M4 stage 2: damage and wrecks.**
+  - Dented panels from wall hits, sprite deltas in the atlas (still within 2048 rows on every map), door art on the way in and out, write-offs that burn and blow up, convertible drivers, and a fix: the car being got into was not drawn during the get-in.
+  - Oracle and native-vs-wasm checks unchanged and green (nine scripts).
+- **2026-11-20. M4 stage 1: the driven car.**
+  - `gfa_sim::vehicle` (physics, wall resolve, layer rule), `gfa_sim::cars` (parked cars, door geometry, the per-tick drive with jumps), `World` state machine (on foot, entering, driving, exiting), `park` and `drive` orders.
+  - Rendering: parked and driven cars drawn from the simulation, interpolated between ticks; the camera follows the car.
+  - Oracle: `drivetrace.c`, `compare.sh` for driving scripts, `fuzz.py --drive`; native and wasm agree on all eight scripts.
+  - Totals: 59 unit tests, 14 data tests.
 - **2026-11-20. M3 done.**
   - `gfa-fixed`: trig, generators and 16.16 helpers. `gfa-sim`: `clock`, `map`, `player`, `world`, `view`, `input`, `script`, `replay`, `script_world`, `hash` (FNV-1a over a fixed encoding).
   - `gfa-app`: the player runs in the window at 50 Hz, drawn between ticks; the camera follows him; the overlay shows his tick, block, layer and ground.

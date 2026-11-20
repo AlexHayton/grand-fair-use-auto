@@ -9,9 +9,10 @@ use crate::input::{Buttons, InputLog, TickInput};
 use crate::map::{SimMap, WallTiles};
 use crate::script::{Order, Script};
 use crate::view::SimView;
-use crate::world::{LogLine, Start, World};
+use crate::world::{Doing, LogLine, Start, World};
 use gfa_formats::cmp::Cmp;
 use gfa_formats::mission::Section;
+use gfa_formats::style::{CarInfo, Style};
 use std::fmt::Write as _;
 
 /// What a tick asks of the caller besides simulating it.
@@ -126,6 +127,15 @@ impl Runner {
                         .with(Buttons::WALK, walk);
                 }
                 Order::Goto { bx, by, face } => world.teleport(bx, by, face),
+                Order::Drive {
+                    model,
+                    bx,
+                    by,
+                    face,
+                } => match usize::try_from(model) {
+                    Ok(model) => world.put_in_car(model, bx, by, face),
+                    Err(_) => world.say(format!("script: line {}: bad model", line.number)),
+                },
                 Order::Face(a) => {
                     world.player.angle = a & 255;
                     world.say(format!("player: face {}", a & 255));
@@ -135,12 +145,17 @@ impl Runner {
                 Order::Enter => self.tap = Buttons::ENTER,
                 Order::Jump => self.tap = Buttons::HANDBRAKE,
                 Order::Dump | Order::Film(_) => {}
-                Order::Fixture { ref name, .. } => {
-                    world.say(format!(
+                Order::Fixture { ref name, ref args } => match (name.as_str(), args.as_slice()) {
+                    ("damage", &[points]) => world.damage_car(points),
+                    ("park", &[model, dx, dy, face]) => match usize::try_from(model) {
+                        Ok(model) => world.park(model, dx, dy, face),
+                        Err(_) => world.say(format!("script: line {}: bad model", line.number)),
+                    },
+                    _ => world.say(format!(
                         "script: line {}: `{name}` is not supported yet",
                         line.number
-                    ));
-                }
+                    )),
+                },
             }
             self.left = line.order.ticks();
             if self.left > 0 {
@@ -280,9 +295,30 @@ pub fn check(script: &Script, log: &[LogLine]) -> Vec<String> {
     failures
 }
 
-/// One line of the per-tick player trace, in the format the AmiGTA1 oracle
-/// harness (`tools/oracle/walktrace.c`) prints, so the two can be diffed.
+/// One line of the per-tick trace, in the format the AmiGTA1 oracle
+/// harnesses print, so the two can be diffed: the player on foot
+/// (`tools/oracle/walktrace.c`), or his car (`drivetrace.c`).
 pub fn trace_line(world: &World) -> String {
+    if let (Doing::Driving, Some(d)) = (world.doing, &world.driven) {
+        let v = &d.veh;
+        let air = d.air.map_or(0, |a| a.z);
+        return format!(
+            "c {} x {} y {} v {} {} a {} w {} s {} o {} {} z {} air {} d {}",
+            world.tick,
+            v.x,
+            v.y,
+            v.vx,
+            v.vy,
+            v.ang16,
+            v.omega,
+            v.steer16,
+            v.ox,
+            v.oy,
+            d.layer,
+            air,
+            v.damage
+        );
+    }
     let p = &world.player;
     format!(
         "t {} x {:08x} y {:08x} z {} a {} anim {} f {} {} b {}{} g {}",
@@ -306,6 +342,7 @@ pub fn trace_line(world: &World) -> String {
 /// known yet.
 pub fn level_world(
     map: Cmp,
+    cars: Vec<CarInfo>,
     section: &Section,
     gta: bool,
     view: SimView,
@@ -321,7 +358,7 @@ pub fn level_world(
             .ok_or_else(|| format!("section [{}] has no PLAYER", section.id))?,
     };
     let walls = WallTiles::for_map(map.style_number, gta);
-    Ok(World::new(SimMap::new(map, walls), view, start))
+    Ok(World::new(SimMap::new(map, walls), cars, view, start))
 }
 
 impl Report {
@@ -339,10 +376,11 @@ impl Report {
     }
 }
 
-/// A whole run from file contents: the map, the mission file, the section
-/// to play and the script. What the wasm determinism check runs.
+/// A whole run from file contents: the map, its style, the mission file,
+/// the section to play and the script. What the wasm determinism check runs.
 pub fn run_bytes(
     cmp: &[u8],
+    style: &[u8],
     mission_ini: &[u8],
     section: u32,
     gta: bool,
@@ -356,6 +394,7 @@ pub fn run_bytes(
         .find(|s| s.id == section)
         .ok_or_else(|| format!("no section [{section}]"))?;
     let map = Cmp::parse(cmp).map_err(|e| e.to_string())?;
-    let mut world = level_world(map, section, gta, SimView::GAME, script.start)?;
+    let cars = Style::parse(style).map_err(|e| e.to_string())?.cars;
+    let mut world = level_world(map, cars, section, gta, SimView::GAME, script.start)?;
     Ok(run(&mut world, &script, opts, |_, _| {}))
 }

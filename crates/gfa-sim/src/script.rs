@@ -49,6 +49,15 @@ pub enum Order {
     Face(i32),
     /// Press the enter key for a tick.
     Enter,
+    /// Put the player straight into a car of table record `model`, centred
+    /// on block `(bx, by)` facing `face`, on that column's lowest standable
+    /// layer. Ours, for the vehicle oracle; not an AmiGTA1 order.
+    Drive {
+        model: i32,
+        bx: i32,
+        by: i32,
+        face: i32,
+    },
     /// Hold fire for `ticks`.
     Fire(u32),
     /// Press jump (the handbrake key) for a tick.
@@ -117,7 +126,9 @@ impl fmt::Display for ParseError {
 impl std::error::Error for ParseError {}
 
 /// AmiGTA1 fixtures and how many numbers each takes (the first count that
-/// matches wins, longest first). None of them can run before M4.
+/// matches wins, longest first). `park` with four numbers (an empty car:
+/// record, dx, dy, facing) and `damage` run; the rest wait for later
+/// milestones.
 const FIXTURES: &[(&str, &[usize])] = &[
     ("park", &[5, 4]),
     ("weapon", &[2]),
@@ -214,6 +225,12 @@ impl Script {
                 }
                 ("face", Some(&[a]), _) => Order::Face(a),
                 ("enter", Some(&[]), _) => Order::Enter,
+                ("drive", Some(&[model, bx, by, face]), _) => Order::Drive {
+                    model,
+                    bx,
+                    by,
+                    face,
+                },
                 ("fire", Some(&[t]), _) => {
                     Order::Fire(ticks(t).ok_or_else(|| err("negative ticks"))?)
                 }

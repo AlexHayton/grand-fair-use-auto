@@ -19,12 +19,22 @@ pub fn section_map(mission_ini: &[u8], section: u32) -> Result<String, String> {
         .ok_or_else(|| format!("no map for section [{section}]"))
 }
 
+/// The style number a map asks for (`STYLE00n`).
+#[wasm_bindgen]
+pub fn map_style(cmp: &[u8]) -> Result<u8, String> {
+    gfa_formats::cmp::Cmp::parse(cmp)
+        .map(|m| m.style_number)
+        .map_err(|e| e.to_string())
+}
+
 /// Run `script` on a level and return the log and hashes as text, exactly
 /// as `gfa-tool run` prints them. `ticks` below 0 runs the whole script;
 /// `hash_every` 0 records no hashes.
 #[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
 pub fn replay(
     cmp: &[u8],
+    style: &[u8],
     mission_ini: &[u8],
     section: u32,
     gta: bool,
@@ -36,5 +46,5 @@ pub fn replay(
         ticks: u32::try_from(ticks).ok(),
         hash_every: (hash_every > 0).then_some(hash_every),
     };
-    run_bytes(cmp, mission_ini, section, gta, script, opts).map(|r| r.to_text())
+    run_bytes(cmp, style, mission_ini, section, gta, script, opts).map(|r| r.to_text())
 }

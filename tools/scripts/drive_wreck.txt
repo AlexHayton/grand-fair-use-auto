@@ -1,0 +1,13 @@
+# A car past 100 points of damage is a write-off: its panels all show
+# damage, it burns for 120 ticks, then blows up with the player thrown
+# clear, leaving a wreck nobody can get into.
+#
+# section: 1
+# expect: car: a write-off - get out
+# expect: car: blew up at
+# expect: car: no car within reach
+drive 0 62 60 128
+damage 100
+wait 130
+enter
+wait 5

@@ -134,9 +134,10 @@ enum Command {
         /// Print the player's state every tick (the oracle's trace format).
         #[arg(long)]
         trace: bool,
-        /// Use AmiGTA1's sim view size, to compare with the oracle.
+        /// Run as AmiGTA1's harnesses do, to compare with the oracle: its
+        /// view size, and no parked cars from the map.
         #[arg(long)]
-        amigta1_view: bool,
+        oracle: bool,
         /// Write a PNG for each `dump`/`film` tick: PREFIX000.png, …
         #[arg(long)]
         out: Option<PathBuf>,
@@ -246,7 +247,7 @@ fn main() -> Result<()> {
             ticks,
             hash_every,
             trace,
-            amigta1_view,
+            oracle,
             out,
             record,
         } => run::run(
@@ -258,7 +259,7 @@ fn main() -> Result<()> {
                 ticks,
                 hash_every,
                 trace,
-                amigta1_view,
+                oracle,
                 out,
                 record,
             },

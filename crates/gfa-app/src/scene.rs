@@ -55,7 +55,10 @@ impl Scene {
         let sprites =
             SpriteRenderer::new(&gpu.device, &gpu.queue, format, &atlas, city.palette_view());
         let mut statics = SpriteBatch::default();
-        let skipped = push_startup_objects(&level.map, &level.style, &atlas, &mut statics);
+        let skipped = push_startup_objects(&level.map, &level.style, &atlas, &mut statics, |o| {
+            // The simulation owns the parked vehicles and draws them itself.
+            gfa_sim::cars::sim_vehicle(o, &level.style.cars).is_none()
+        });
         if skipped > 0 {
             log::warn!("{skipped} startup objects have no sprite");
         }
@@ -76,6 +79,49 @@ impl Scene {
         let style = &self.level.style;
         let sprite = style.sprite_index(SpriteCategory::Ped, usize::from(frame))?;
         own_sprite(style, &self.atlas, sprite, pos, angle)
+    }
+    /// The simulation's sprites this frame: standing cars, the player's
+    /// car (dents, door, fire) and the player.
+    pub fn game_sprites(&self, game: &crate::game::Game) -> Vec<SpriteInstance> {
+        use gfa_render::sprites::{from_sim, push_car, sim_angle};
+        let world = &game.world;
+        let frame = game.frame();
+        let style = &self.level.style;
+        let mut out = Vec::with_capacity(world.parked.len() + 8);
+        for c in world.standing_cars() {
+            let angle = sim_angle(c.face + 128);
+            push_car(
+                &mut out,
+                style,
+                &self.atlas,
+                c.model,
+                c.remap,
+                from_sim(c.pos),
+                angle,
+                c.deltas,
+            );
+        }
+        if let (Some((pose, model, remap)), Some((deltas, fuse))) = (frame.car, world.driven_look())
+        {
+            let pos = pose.pos.to_array();
+            push_car(
+                &mut out,
+                style,
+                &self.atlas,
+                model,
+                remap,
+                pos,
+                pose.draw_angle,
+                deltas,
+            );
+            if fuse > 0 {
+                out.extend(fire_sprite(style, &self.atlas, fuse, pos));
+            }
+        }
+        if let Some((pose, f)) = frame.player {
+            out.extend(self.ped_sprite(f, pose.pos.to_array(), pose.draw_angle));
+        }
+        out
     }
 
     /// Draw the city, its objects and `extra` sprites.
@@ -156,6 +202,21 @@ impl Scene {
         }
         None
     }
+}
+
+/// The flames on a burning car: the fire object's seven frames, a frame
+/// every three ticks of the fuse (AmiGTA1).
+pub fn fire_sprite(
+    style: &gfa_formats::style::Style,
+    atlas: &SpriteAtlas,
+    fuse: i32,
+    pos: [f32; 3],
+) -> Option<SpriteInstance> {
+    const FIRE: usize = 0x2e;
+    let frame = ((fuse / 3) % 7) as usize;
+    // A pixel above the car, so the flames win against its roof.
+    let pos = [pos[0], pos[1], pos[2] + 1.0];
+    gfa_render::sprites::object_sprite(style, atlas, FIRE, frame, pos, 0.0)
 }
 
 /// Behind everything: only visible past the map's edge.

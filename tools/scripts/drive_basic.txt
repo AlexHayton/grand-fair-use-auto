@@ -1,0 +1,20 @@
+# Get into a car, drive it down the street, stop and get out.
+#
+# A car (record 0, a one-door saloon) is parked 20 px east of the player
+# on the plain road at (62,60), facing south. RETURN walks him to its door
+# and in; then full throttle south, the reverse gear to stop, and out.
+#
+# section: 1
+# expect: car: in - model 0
+# expect: car: out at
+# reject: no car within reach
+# reject: too fast to get out
+start 62 60
+park 0 20 0 128
+enter
+wait 100
+run 150 1 0 0 0
+run 120 0 1 0 0
+wait 60
+enter
+wait 60

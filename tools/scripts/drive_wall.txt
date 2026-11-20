@@ -1,0 +1,13 @@
+# Drive into a building at speed, keep pushing, then back out.
+#
+# From the road at (66,59) heading south, the building at (66,62) is three
+# blocks ahead. The car must stop against it (and take damage), never end a
+# tick inside it, and reverse away when told.
+#
+# section: 1
+# expect: car: wall hit
+drive 0 66 57 128
+run 120 1 0 0 0
+run 60 1 0 1 0
+run 100 0 1 0 0
+wait 40

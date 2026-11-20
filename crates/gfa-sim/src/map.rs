@@ -64,16 +64,26 @@ pub mod nav {
 pub const WALL_W: u8 = 1;
 /// A thin wall on a block's north edge.
 pub const WALL_N: u8 = 2;
+/// A post in the middle of a block's west edge (stops cars only).
+pub const POST_W: u8 = 4;
+/// A post in the middle of a block's north edge.
+pub const POST_N: u8 = 8;
 
 /// The flat-face tiles that stop a person, for one style.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WallTiles {
     pub solid: &'static [u8],
+    /// Flat-face tiles that are posts: an 8×8 px square in the middle of the
+    /// edge that stops a car, and nothing else.
+    pub post: &'static [u8],
 }
 
 impl WallTiles {
     /// No thin walls: fences can be walked through.
-    pub const NONE: WallTiles = WallTiles { solid: &[] };
+    pub const NONE: WallTiles = WallTiles {
+        solid: &[],
+        post: &[],
+    };
 
     /// The lists for GTA's three cities, by the map's style number. From
     /// AmiGTA1's research into the original (`gta_nav.c`, MIT).
@@ -87,12 +97,12 @@ impl WallTiles {
             69, 70, 100, 101, 102, 106, 124, 125, 155, 156, 159, 160, 161, 162, 163, 164, 169, 170,
             184, 185, 186, 197,
         ];
-        let solid = match style {
-            2 => STYLE2,
-            3 => STYLE3,
-            _ => STYLE1,
+        let (solid, post): (&[u8], &[u8]) = match style {
+            2 => (STYLE2, &[21, 180]),
+            3 => (STYLE3, &[140]),
+            _ => (STYLE1, &[97]),
         };
-        WallTiles { solid }
+        WallTiles { solid, post }
     }
 
     /// The list for a map: GTA's by style number; none for London's maps
@@ -107,6 +117,11 @@ impl WallTiles {
 
     fn is_solid(&self, tile: u8) -> bool {
         tile != 0 && self.solid.contains(&tile)
+    }
+
+    /// A solid tile is a wall, not a post, even where the lists meet.
+    fn is_post(&self, tile: u8) -> bool {
+        tile != 0 && !self.is_solid(tile) && self.post.contains(&tile)
     }
 }
 
@@ -134,7 +149,7 @@ pub struct SimMap {
     ground: Vec<u8>,
     /// AmiGTA1's navigation byte per cell.
     nav: Vec<u8>,
-    /// [`WALL_W`] | [`WALL_N`] per cell.
+    /// [`WALL_W`], [`WALL_N`], [`POST_W`] and [`POST_N`] per cell.
     walls: Vec<u8>,
 }
 
@@ -212,10 +227,71 @@ impl SimMap {
     #[inline]
     pub fn wall(&self, x: i32, y: i32, z: i32) -> u8 {
         if in_map(x, y, z) {
-            self.walls[cell(x, y, z)]
+            self.walls[cell(x, y, z)] & (WALL_W | WALL_N)
         } else {
             0
         }
+    }
+
+    /// The post bits at `(x, y, z)`, as [`WALL_W`] and [`WALL_N`].
+    #[inline]
+    pub fn post(&self, x: i32, y: i32, z: i32) -> u8 {
+        if in_map(x, y, z) {
+            self.walls[cell(x, y, z)] >> 2
+        } else {
+            0
+        }
+    }
+
+    /// The ground type in the nav byte at `(x, y, z)`: like
+    /// [`ground_type`](Self::ground_type), but railway blocks are air and
+    /// dirt roads are road. What vehicles go by.
+    #[inline]
+    pub fn nav_ground(&self, x: i32, y: i32, z: i32) -> u8 {
+        nav::ground(self.nav(x, y, z))
+    }
+
+    /// The lowest layer of column `(x, y)` with road, pavement or field in
+    /// its nav byte, if any (AmiGTA1 `stand_layer`).
+    pub fn stand_layer(&self, x: i32, y: i32) -> Option<i32> {
+        (0..LAYERS).find(|&z| ground::walkable(self.nav_ground(x, y, z)))
+    }
+
+    /// Does a car's box touch a post on layer `z`? The box: centre `(cx, cy)`
+    /// (16.16), unit heading `f` and right `r` in Q14, half length `hl` and
+    /// half width `hw` in whole pixels (AmiGTA1 `gta_nav_post_hit`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn post_hit(
+        &self,
+        z: i32,
+        cx: i32,
+        cy: i32,
+        f: (i32, i32),
+        r: (i32, i32),
+        hl: i32,
+        hw: i32,
+    ) -> bool {
+        let (px, py) = (cx >> FP, cy >> FP);
+        let reach = hl.max(hw) + 4;
+        let inside = |qx: i32, qy: i32| {
+            let (dx, dy) = (i64::from(qx - px), i64::from(qy - py));
+            let a = ((dx * i64::from(f.0) + dy * i64::from(f.1)) >> 14).abs();
+            let b = ((dx * i64::from(r.0) + dy * i64::from(r.1)) >> 14).abs();
+            a <= i64::from(hl + 2) && b <= i64::from(hw + 2)
+        };
+        let block = 1 << BLOCK_SHIFT;
+        for y in ((py - reach) >> BLOCK_SHIFT)..=((py + reach) >> BLOCK_SHIFT) + 1 {
+            for x in ((px - reach) >> BLOCK_SHIFT)..=((px + reach) >> BLOCK_SHIFT) + 1 {
+                let w = self.post(x, y, z);
+                if w & WALL_W != 0 && inside(x * block, y * block + block / 2) {
+                    return true;
+                }
+                if w & WALL_N != 0 && inside(x * block + block / 2, y * block) {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// The slope value (0 flat, 1..=44 ramps) at `(x, y, z)`.
@@ -351,12 +427,19 @@ impl SimMap {
         if !b.is_flat() {
             return 0;
         }
+        let (west, north) = (b.face(Face::West), b.face(Face::North));
         let mut w = 0;
-        if self.walls_from.is_solid(b.face(Face::West)) {
+        if self.walls_from.is_solid(west) {
             w |= WALL_W;
         }
-        if self.walls_from.is_solid(b.face(Face::North)) {
+        if self.walls_from.is_solid(north) {
             w |= WALL_N;
+        }
+        if self.walls_from.is_post(west) {
+            w |= POST_W;
+        }
+        if self.walls_from.is_post(north) {
+            w |= POST_N;
         }
         w
     }

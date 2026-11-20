@@ -28,7 +28,9 @@ use crate::style_tables::ATLAS_WIDTH;
 /// Where each sprite sits in the atlas: `[x, y, width, height]`.
 pub type AtlasRect = [u16; 4];
 
-/// All of a style's sprites, packed into one 8-bit image.
+/// All of a style's sprites, packed into one 8-bit image, and each sprite's
+/// deltas (dents, open doors) as images of their own: the delta's pixels on
+/// colour 0, so one drawn over the sprite patches it.
 #[derive(Debug, Clone)]
 pub struct SpriteAtlas {
     /// [`ATLAS_WIDTH`] wide.
@@ -36,47 +38,78 @@ pub struct SpriteAtlas {
     pub height: usize,
     /// Per sprite index.
     pub rects: Vec<AtlasRect>,
+    /// Per sprite index, per delta.
+    pub deltas: Vec<Vec<AtlasRect>>,
 }
 
 impl SpriteAtlas {
-    /// Shelf-pack every sprite, tallest first, with one pixel between them so
-    /// nothing bleeds.
+    /// Shelf-pack every sprite and delta, tallest first, with one pixel
+    /// between them so nothing bleeds.
     pub fn new(style: &Style) -> Self {
         const GAP: usize = 1;
-        let mut order: Vec<usize> = (0..style.sprites.len()).collect();
-        order.sort_by_key(|&i| {
-            let s = &style.sprites[i];
-            (std::cmp::Reverse(s.height), std::cmp::Reverse(s.width), i)
+        // (sprite, delta) pairs; `None` is the sprite itself.
+        let mut items: Vec<(usize, Option<usize>)> = Vec::new();
+        for (i, sp) in style.sprites.iter().enumerate() {
+            items.push((i, None));
+            items.extend((0..sp.deltas.len()).map(|k| (i, Some(k))));
+        }
+        let size = |i: usize| {
+            let sp = &style.sprites[i];
+            (sp.width as usize, sp.height as usize)
+        };
+        let mut order: Vec<usize> = (0..items.len()).collect();
+        order.sort_by_key(|&n| {
+            let (w, h) = size(items[n].0);
+            (std::cmp::Reverse(h), std::cmp::Reverse(w), n)
         });
-        let mut rects = vec![[0u16; 4]; style.sprites.len()];
+        let mut placed = vec![[0u16; 4]; items.len()];
         let (mut x, mut y, mut shelf) = (0usize, 0usize, 0usize);
-        for &i in &order {
-            let s = &style.sprites[i];
-            let (w, h) = (s.width as usize, s.height as usize);
+        for &n in &order {
+            let (w, h) = size(items[n].0);
             if x + w > ATLAS_WIDTH {
                 x = 0;
                 y += shelf + GAP;
                 shelf = 0;
             }
-            rects[i] = [x as u16, y as u16, w as u16, h as u16];
+            placed[n] = [x as u16, y as u16, w as u16, h as u16];
             x += w + GAP;
             shelf = shelf.max(h);
         }
         let height = (y + shelf).max(1);
         let mut pixels = vec![0u8; ATLAS_WIDTH * height];
-        for (i, r) in rects.iter().enumerate() {
-            let Some(img) = style.sprite(i) else {
+        let mut rects = vec![[0u16; 4]; style.sprites.len()];
+        let mut deltas: Vec<Vec<AtlasRect>> = style
+            .sprites
+            .iter()
+            .map(|sp| vec![[0u16; 4]; sp.deltas.len()])
+            .collect();
+        for (n, &(i, delta)) in items.iter().enumerate() {
+            let r = placed[n];
+            let (w, h) = size(i);
+            let image = match delta {
+                None => {
+                    rects[i] = r;
+                    style.sprite(i).map(|img| img.to_vec())
+                }
+                Some(k) => {
+                    deltas[i][k] = r;
+                    let mut img = vec![0u8; w * h];
+                    style.apply_delta(i, k, &mut img).ok().map(|()| img)
+                }
+            };
+            let Some(image) = image else {
                 continue;
             };
-            for row in 0..img.height {
+            for row in 0..h {
                 let at = (r[1] as usize + row) * ATLAS_WIDTH + r[0] as usize;
-                pixels[at..at + img.width].copy_from_slice(img.row(row));
+                pixels[at..at + w].copy_from_slice(&image[row * w..(row + 1) * w]);
             }
         }
         SpriteAtlas {
             pixels,
             height,
             rects,
+            deltas,
         }
     }
 }
@@ -212,18 +245,87 @@ pub fn own_sprite(
     })
 }
 
-/// The map's startup objects as sprites: parked cars and street furniture.
-/// Render-side and temporary: from M3 the simulation spawns these and the
-/// renderer draws what the simulation holds. Returns how many were skipped
-/// for want of a sprite.
+/// A vehicle: car table record `car` in colour remap `remap` (0 for its
+/// own colours) at `pos`, turned `angle` radians clockwise.
+pub fn car_sprite(
+    style: &Style,
+    atlas: &SpriteAtlas,
+    car: usize,
+    remap: u8,
+    pos: [f32; 3],
+    angle: f32,
+) -> Option<SpriteInstance> {
+    let mut out = Vec::new();
+    push_car(&mut out, style, atlas, car, remap, pos, angle, 0);
+    out.first().copied()
+}
+
+/// A vehicle with its deltas shown: bit `n` of `deltas` draws delta `n`
+/// (dents, an open door) over it, in the car's own colours. Pushes nothing
+/// if the model has no sprite.
+#[allow(clippy::too_many_arguments)]
+pub fn push_car(
+    out: &mut Vec<SpriteInstance>,
+    style: &Style,
+    atlas: &SpriteAtlas,
+    car: usize,
+    remap: u8,
+    pos: [f32; 3],
+    angle: f32,
+    deltas: u32,
+) {
+    let Some(sprite) = style.cars.get(car).and_then(|c| style.car_sprite(c)) else {
+        return;
+    };
+    let Some(&rect) = atlas.rects.get(sprite) else {
+        return;
+    };
+    let palette = sprite_palette(style, sprite, SpriteColours::Car { car, remap });
+    let at = [pos[0], pos[1], pos[2], angle];
+    out.push(SpriteInstance {
+        pos: at,
+        rect,
+        palette_flags: [palette, 0],
+    });
+    // Same place and height, added after: drawn on top of the car.
+    for (k, &rect) in atlas.deltas[sprite].iter().enumerate().take(32) {
+        if deltas & (1 << k) != 0 {
+            out.push(SpriteInstance {
+                pos: at,
+                rect,
+                palette_flags: [palette, 0],
+            });
+        }
+    }
+}
+
+/// Map object `object`'s sprite, frame `frame` of it (fires and other
+/// animated objects keep their frames in a run of sprites).
+pub fn object_sprite(
+    style: &Style,
+    atlas: &SpriteAtlas,
+    object: usize,
+    frame: usize,
+    pos: [f32; 3],
+    angle: f32,
+) -> Option<SpriteInstance> {
+    let sprite = style.object_sprite(style.objects.get(object)?)? + frame;
+    own_sprite(style, atlas, sprite, pos, angle)
+}
+
+/// The map's startup objects that `keep` accepts, as sprites: street
+/// furniture, and the vehicles the simulation does not own (trains and
+/// trams, until it does). Returns how many were skipped for want of a
+/// sprite.
 pub fn push_startup_objects(
     map: &gfa_formats::cmp::Cmp,
     style: &Style,
     atlas: &SpriteAtlas,
     batch: &mut SpriteBatch,
+    keep: impl Fn(&gfa_formats::cmp::StartupObject) -> bool,
 ) -> usize {
     let mut skipped = 0;
-    for o in &map.objects {
+    for o in map.objects.iter().filter(|o| keep(o)) {
         // A remap byte of 128 and up marks a car whose model is `kind`.
         let found = if o.remap >= 128 {
             style

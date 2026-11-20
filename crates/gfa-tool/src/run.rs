@@ -25,7 +25,7 @@ pub struct RunArgs {
     pub ticks: Option<u32>,
     pub hash_every: Option<u32>,
     pub trace: bool,
-    pub amigta1_view: bool,
+    pub oracle: bool,
     pub out: Option<PathBuf>,
     pub record: Option<PathBuf>,
 }
@@ -41,27 +41,29 @@ pub fn run(src: &dyn AssetSource, args: RunArgs) -> Result<()> {
         args.game, files.name, files.map
     );
 
-    // The style is only needed for pictures.
-    let (map, mut scene) = match &args.out {
-        Some(_) => {
-            let level = Level::load(src, files.clone())?;
-            let scene = render::Scene::load(src, &files.map, Some(&level.style_path), (640, 400))?;
-            (level.map, Some(scene))
-        }
-        None => {
-            let map = gfa_formats::cmp::Cmp::parse(&src.read(&files.map)?)
-                .with_context(|| format!("parsing {}", files.map))?;
-            (map, None)
-        }
+    // The style gives the car table; the picture scene is only for --out.
+    let level = Level::load(src, files.clone())?;
+    let mut scene = match &args.out {
+        Some(_) => Some(render::Scene::load_for_sim(
+            src,
+            &files.map,
+            Some(&level.style_path),
+            (640, 400),
+        )?),
+        None => None,
     };
-    let view = if args.amigta1_view {
+    let view = if args.oracle {
         SimView::AMIGTA1
     } else {
         SimView::GAME
     };
     let gta = files.dataset == Dataset::Gta;
-    let mut world = replay::level_world(map, &files.mission, gta, view, script.start)
+    let cars = level.style.cars.clone();
+    let mut world = replay::level_world(level.map, cars, &files.mission, gta, view, script.start)
         .map_err(anyhow::Error::msg)?;
+    if args.oracle {
+        world.parked.clear();
+    }
     if args.trace {
         println!("{}", trace_line(&world));
     }
@@ -120,7 +122,6 @@ fn picture_path(out: &Path, n: usize) -> PathBuf {
 /// The view from above the player, with him in it.
 fn picture(scene: &mut render::Scene, world: &World, path: &Path) -> Result<()> {
     let p = &world.player;
-    let pos = world.player_pos();
     let block = |v: i32| v as f32 / 65536.0 / 32.0;
     let view = render::View {
         at: (block(p.x), block(p.y)),
@@ -128,8 +129,7 @@ fn picture(scene: &mut render::Scene, world: &World, path: &Path) -> Result<()> 
         pitch: 0.0,
         yaw: 0.0,
     };
-    let sprite = scene.ped_sprite(p.ped_frame(), pos, p.draw_angle());
-    let extra: Vec<_> = sprite.into_iter().collect();
+    let extra = world_sprites(scene, world);
     let rgba = scene.render_with(
         &view,
         DebugView::Normal,
@@ -140,4 +140,30 @@ fn picture(scene: &mut render::Scene, world: &World, path: &Path) -> Result<()> 
         std::fs::create_dir_all(dir)?;
     }
     render::write_png(path, scene.size(), &rgba)
+}
+
+/// The simulation's sprites: standing cars, the player's car, the player.
+fn world_sprites(scene: &render::Scene, world: &World) -> Vec<gfa_render::sprites::SpriteInstance> {
+    let mut out = Vec::new();
+    for c in world.standing_cars() {
+        scene.push_car(&mut out, c.model, c.remap, c.pos, c.face + 128, c.deltas);
+    }
+    if let (Some(d), Some((deltas, _))) = (&world.driven, world.driven_look()) {
+        let v = &d.veh;
+        let z = d.z(&world.map) as i32;
+        let pos = [v.ox as i32, v.oy as i32, z];
+        scene.push_car(
+            &mut out,
+            v.model,
+            v.remap.unwrap_or(0),
+            pos,
+            v.angle() + 128,
+            deltas,
+        );
+    }
+    if let Some(frame) = world.player_frame() {
+        let p = &world.player;
+        out.extend(scene.ped_sprite(frame, world.player_pos(), p.draw_angle()));
+    }
+    out
 }

@@ -188,7 +188,7 @@ impl App {
         };
         let started = Instant::now();
         let game = Game::new(&level);
-        self.controls.jump_to(game.player().pos);
+        self.controls.jump_to(game.frame().follow.pos);
         self.game = Some(game);
         self.scene = Some(Scene::new(gpu, surface.format(), surface.size(), level));
         log::info!("city uploaded in {} ms", started.elapsed().as_millis());
@@ -204,13 +204,13 @@ impl App {
         let now = Instant::now();
         let elapsed = now - self.last_frame;
         self.last_frame = now;
-        let player = self.game.as_mut().map(|g| {
+        let follow = self.game.as_mut().map(|g| {
             g.advance(elapsed.as_micros() as u64, self.controls.input());
-            g.player()
+            g.frame().follow
         });
         let dt = elapsed.as_secs_f32().min(0.1);
         self.controls
-            .update(dt, player.map(|p| (p.pos, p.velocity)));
+            .update(dt, follow.map(|p| (p.pos, p.velocity)));
 
         let Some((gpu, surface)) = self.gfx.as_mut() else {
             return;
@@ -232,11 +232,8 @@ impl App {
             }
             _ => None,
         };
-        let extra: Vec<_> = match (scene.as_ref(), player) {
-            (Some(s), Some(p)) => s
-                .ped_sprite(p.frame, p.pos.to_array(), p.draw_angle)
-                .into_iter()
-                .collect(),
+        let extra: Vec<_> = match (scene.as_ref(), self.game.as_ref()) {
+            (Some(s), Some(g)) => s.game_sprites(g),
             _ => Vec::new(),
         };
         let player_line = self
@@ -312,13 +309,11 @@ impl App {
                 });
         let camera = self.controls.camera();
         let seconds = self.started.elapsed().as_secs_f64();
-        let extra: Vec<_> = self
+        let extra = self
             .game
             .as_ref()
-            .map(Game::player)
-            .and_then(|p| scene.ped_sprite(p.frame, p.pos.to_array(), p.draw_angle))
-            .into_iter()
-            .collect();
+            .map(|g| scene.game_sprites(g))
+            .unwrap_or_default();
         scene.draw(
             gpu,
             &mut encoder,

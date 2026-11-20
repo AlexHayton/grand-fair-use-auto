@@ -1,0 +1,12 @@
+# The car against the AmiGTA1 oracle: accelerate, turn, a handbrake turn,
+# reverse with full lock, coast to rest. tools/oracle/compare.sh diffs every
+# tick of position, velocity, heading, spin, steering, layer and damage.
+#
+# section: 1
+# expect: car: in - model 0 at (62,60) layer 2
+drive 0 62 60 128
+run 100 1 0 0 0
+run 40 1 0 1 0
+run 60 1 0 0 1
+run 80 0 1 -1 0
+wait 50

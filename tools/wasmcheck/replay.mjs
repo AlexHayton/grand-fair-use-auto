@@ -39,9 +39,18 @@ for (const script of scripts) {
   const text = fs.readFileSync(script, "utf8");
   const m = text.match(/^#\s*section:\s*(\d+)/m);
   const section = m ? Number(m[1]) : 1;
-  const map = read("GTADATA/" + sim.section_map(missionIni, section));
+  const mapPath = "GTADATA/" + sim.section_map(missionIni, section);
+  const map = read(mapPath);
+  // The style beside the map, G24 first, as gfa_assets::level::style_path.
+  const dir = mapPath.slice(0, mapPath.lastIndexOf("/"));
+  const n = String(sim.map_style(map)).padStart(3, "0");
+  const stems = game === "london61" ? ["STY", "STYLE"] : ["STYLE"];
+  const stylePath = stems
+    .flatMap((s) => ["G24", "GRY"].map((e) => `${dir}/${s}${n}.${e}`))
+    .find((p) => files.has(p.toLowerCase()));
+  const style = read(stylePath);
   console.log(`== ${path.basename(script)}`);
   process.stdout.write(
-    sim.replay(map, missionIni, section, game === "gta", text, -1, Number(hashEvery)),
+    sim.replay(map, style, missionIni, section, game === "gta", text, -1, Number(hashEvery)),
   );
 }

@@ -31,13 +31,15 @@ cargo run --release -p gfa-native -- --game london69 --level 2
 cargo run -p gfa-tool -- info                             # what's in your data folder
 ```
 
-You start on foot at the level's starting point. Cars, people and missions
-arrive in later milestones.
+You start on foot at the level's starting point. The cars parked around the
+city can be driven; traffic, people and missions arrive in later milestones.
 
 | Key | Does |
 |---|---|
-| Arrows or WASD | run forward or back, turn |
+| Arrows or WASD | on foot: run forward or back, turn. In a car: accelerate, reverse, steer |
 | Shift | walk instead of run |
+| Return | get into the nearest car, or out of yours |
+| Space | handbrake |
 | Scroll wheel, `+` / `-` | zoom |
 | F | free look: drag with the right mouse button to tilt and turn |
 | R | look straight down again |
@@ -85,11 +87,12 @@ cargo data-test           # tests against your game data
 cargo wasm-check          # everything that ships to the web builds for wasm32
 cargo clippy --workspace --all-targets
 tools/oracle/compare.sh tools/scripts/walk_ramp.txt   # player traces against AmiGTA1 (../AmiGTA1)
-tools/oracle/fuzz.py                                  # ...for random walks on all three cities
+tools/oracle/compare.sh tools/scripts/drive_jump.txt  # the car's traces against AmiGTA1
+tools/oracle/fuzz.py [--drive]                        # ...for random walks (or drives) on all three cities
 tools/wasmcheck/compare.sh                            # native and wasm (Node) give the same hashes
 ```
 
-The oracle builds AmiGTA1's own walking code from a sibling `../AmiGTA1`
+The oracle builds AmiGTA1's own walking and driving code from a sibling `../AmiGTA1`
 checkout (or `$AMIGTA1`) with clang and diffs its per-tick trace against
 ours; nothing of AmiGTA1 is copied into this repo. The wasm check needs Node
 and the wasm-bindgen CLI that matches `Cargo.lock` (Trunk's cached copy is

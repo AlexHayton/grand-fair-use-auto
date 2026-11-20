@@ -43,25 +43,69 @@ impl Pacer {
     }
 }
 
-/// The player as the renderer draws him.
+/// Something drawn between two ticks.
 #[derive(Debug, Clone, Copy)]
-pub struct PlayerPose {
+pub struct Pose {
     /// Render pixels (64 to a block).
     pub pos: Vec3,
     /// Radians clockwise, for the sprite (the art faces south).
     pub draw_angle: f32,
-    /// Ped sprite frame within the style's ped category.
-    pub frame: u16,
     /// Render pixels per second, for the camera's lead.
     pub velocity: Vec3,
+}
+
+/// What to draw of the simulation this frame, and what the camera follows.
+#[derive(Debug, Clone, Copy)]
+pub struct Frame {
+    /// The player and his ped sprite frame, unless he is hidden in a car.
+    pub player: Option<(Pose, u16)>,
+    /// The player's car: pose, car table record and colour remap.
+    pub car: Option<(Pose, usize, u8)>,
+    pub follow: Pose,
+}
+
+/// Positions (16.16, z included) and headings (256 steps) at a tick.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Snapshot {
+    player: ([i32; 3], i32),
+    car: Option<([i32; 3], i32)>,
+}
+
+impl Snapshot {
+    fn of(world: &World) -> Self {
+        Snapshot {
+            player: (world.player_pos(), world.player.angle),
+            car: world.driven.as_ref().map(|d| {
+                let v = &d.veh;
+                (
+                    [v.ox as i32, v.oy as i32, d.z(&world.map) as i32],
+                    v.angle(),
+                )
+            }),
+        }
+    }
+}
+
+/// Between `before` and `now`, `alpha` of the way, turning the short way.
+fn between(before: ([i32; 3], i32), now: ([i32; 3], i32), alpha: f32) -> Pose {
+    let b = Vec3::from(gfa_render::sprites::from_sim(before.0));
+    let n = Vec3::from(gfa_render::sprites::from_sim(now.0));
+    let turn = ((now.1 - before.1 + 128) & 255) - 128;
+    let angle = before.1 as f32 + turn as f32 * alpha;
+    Pose {
+        pos: b.lerp(n, alpha),
+        // The art faces south: draw half a turn round from the heading.
+        draw_angle: (angle + 128.0) * std::f32::consts::TAU / 256.0,
+        velocity: (n - b) * gfa_sim::clock::SIM_HZ as f32,
+    }
 }
 
 /// A running level.
 pub struct Game {
     pub world: World,
     pacer: Pacer,
-    /// The player's position and angle before the last tick.
-    prev: ([i32; 3], i32),
+    /// Where things were before the last tick.
+    prev: Snapshot,
     /// Every tick's input since the level started.
     pub recording: InputLog,
 }
@@ -81,11 +125,16 @@ impl Game {
             }
         });
         let walls = WallTiles::for_map(level.map.style_number, level.files.dataset == Dataset::Gta);
-        let mut world = World::new(SimMap::new(level.map.clone(), walls), SimView::GAME, start);
+        let mut world = World::new(
+            SimMap::new(level.map.clone(), walls),
+            level.style.cars.clone(),
+            SimView::GAME,
+            start,
+        );
         for line in world.drain_log() {
             log::info!("{}", line.text);
         }
-        let prev = (world.player_pos(), world.player.angle);
+        let prev = Snapshot::of(&world);
         Game {
             world,
             pacer: Pacer::default(),
@@ -99,7 +148,7 @@ impl Game {
     pub fn advance(&mut self, elapsed_us: u64, input: TickInput) -> u32 {
         let n = self.pacer.ticks(elapsed_us);
         for _ in 0..n {
-            self.prev = (self.world.player_pos(), self.world.player.angle);
+            self.prev = Snapshot::of(&self.world);
             self.recording.record(self.world.tick, input);
             self.world.step(input);
             for line in self.world.drain_log() {
@@ -109,23 +158,26 @@ impl Game {
         n
     }
 
-    /// The player between the last two ticks.
-    pub fn player(&self) -> PlayerPose {
+    /// The player and his car between the last two ticks.
+    pub fn frame(&self) -> Frame {
         let alpha = self.pacer.alpha();
-        let p = &self.world.player;
-        let now = gfa_render::sprites::from_sim(self.world.player_pos());
-        let before = gfa_render::sprites::from_sim(self.prev.0);
-        let (now, before) = (Vec3::from(now), Vec3::from(before));
-        // Turn the short way round.
-        let turn = ((p.angle - self.prev.1 + 128) & 255) - 128;
-        let angle = self.prev.1 as f32 + turn as f32 * alpha;
-        // The art faces south: draw half a turn round from the heading.
-        let draw = (angle + 128.0) * std::f32::consts::TAU / 256.0;
-        PlayerPose {
-            pos: before.lerp(now, alpha),
-            draw_angle: draw,
-            frame: p.ped_frame(),
-            velocity: (now - before) * gfa_sim::clock::SIM_HZ as f32,
+        let now = Snapshot::of(&self.world);
+        let player = between(self.prev.player, now.player, alpha);
+        let car = now.car.map(|c| {
+            // Just got in: no previous car pose to come from.
+            let before = self.prev.car.unwrap_or(c);
+            let d = self
+                .world
+                .driven
+                .as_ref()
+                .map(|d| (d.veh.model, d.veh.remap.unwrap_or(0)));
+            let (model, remap) = d.unwrap_or_default();
+            (between(before, c, alpha), model, remap)
+        });
+        Frame {
+            player: self.world.player_frame().map(|f| (player, f)),
+            car,
+            follow: car.map_or(player, |c| c.0),
         }
     }
 }

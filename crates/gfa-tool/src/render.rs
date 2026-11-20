@@ -77,6 +77,27 @@ impl Scene {
         style: Option<&str>,
         size: (u32, u32),
     ) -> Result<Scene> {
+        Scene::load_with(src, map_path, style, size, false)
+    }
+
+    /// As [`load`](Self::load), for drawing a simulation: the map's parked
+    /// vehicles are left out, because the simulation draws them.
+    pub fn load_for_sim(
+        src: &dyn AssetSource,
+        map_path: &str,
+        style: Option<&str>,
+        size: (u32, u32),
+    ) -> Result<Scene> {
+        Scene::load_with(src, map_path, style, size, true)
+    }
+
+    fn load_with(
+        src: &dyn AssetSource,
+        map_path: &str,
+        style: Option<&str>,
+        size: (u32, u32),
+        sim: bool,
+    ) -> Result<Scene> {
         let (map, style_path, style) = match style {
             None => {
                 let dataset = gfa_assets::level::dataset_for_map(src, map_path);
@@ -116,7 +137,10 @@ impl Scene {
             city.palette_view(),
         );
         let mut batch = SpriteBatch::default();
-        let skipped = gfa_render::sprites::push_startup_objects(&map, &style, &atlas, &mut batch);
+        let skipped =
+            gfa_render::sprites::push_startup_objects(&map, &style, &atlas, &mut batch, |o| {
+                !sim || gfa_sim::cars::sim_vehicle(o, &style.cars).is_none()
+            });
         let sprite_summary = format!(
             "{} startup objects as sprites ({} without one); sprite atlas 2048x{}",
             batch.len(),
@@ -226,6 +250,28 @@ impl Scene {
         )
     }
 
+    /// A vehicle from the simulation with its deltas, as
+    /// [`gfa_render::sprites::push_car`], at a simulation position and angle.
+    pub fn push_car(
+        &self,
+        out: &mut Vec<SpriteInstance>,
+        car: usize,
+        remap: u8,
+        pos16: [i32; 3],
+        draw_angle: i32,
+        deltas: u32,
+    ) {
+        gfa_render::sprites::push_car(
+            out,
+            &self.style,
+            &self.atlas,
+            car,
+            remap,
+            gfa_render::sprites::from_sim(pos16),
+            gfa_render::sprites::sim_angle(draw_angle),
+            deltas,
+        );
+    }
     pub fn last_draw(&self) -> gfa_render::city::DrawStats {
         self.city.last_draw
     }
