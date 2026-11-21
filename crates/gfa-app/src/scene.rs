@@ -87,7 +87,7 @@ impl Scene {
         let world = &game.world;
         let frame = game.frame();
         let style = &self.level.style;
-        let mut out = Vec::with_capacity(world.parked.len() + 8);
+        let mut out = Vec::with_capacity(world.traffic.n + 8);
         for c in world.standing_cars() {
             let angle = sim_angle(c.face + 128);
             push_car(
@@ -100,6 +100,26 @@ impl Scene {
                 angle,
                 c.deltas,
             );
+        }
+        for t in game.traffic() {
+            push_car(
+                &mut out,
+                style,
+                &self.atlas,
+                t.model,
+                t.remap,
+                t.pose.pos.to_array(),
+                t.pose.draw_angle,
+                t.deltas,
+            );
+            if t.fuse > 0 {
+                out.extend(fire_sprite(
+                    style,
+                    &self.atlas,
+                    t.fuse,
+                    t.pose.pos.to_array(),
+                ));
+            }
         }
         if let (Some((pose, model, remap)), Some((deltas, fuse))) = (frame.car, world.driven_look())
         {

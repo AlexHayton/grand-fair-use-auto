@@ -60,6 +60,7 @@ fn every_level_is_walkable() {
                     gta,
                     SimView::GAME,
                     None,
+                    true,
                 )
                 .unwrap()
             };

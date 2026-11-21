@@ -274,6 +274,13 @@ impl Veh {
         }
     }
 
+    /// The 7/15 accumulator after the last tick, 0..15: a physics step
+    /// happened on a tick that left it below 7, `accum / 7` ticks before
+    /// the tick's end. For drawing the car on the physics clock.
+    pub fn phase(&self) -> i32 {
+        self.accum
+    }
+
     /// The heading in whole steps.
     pub fn angle(&self) -> i32 {
         ((self.ang16 >> 16) & 255) as i32

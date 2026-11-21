@@ -32,8 +32,11 @@ cargo run --release -p gfa-native -- --game london69 --level 2
 cargo run -p gfa-tool -- info                             # what's in your data folder
 ```
 
-You start on foot at the level's starting point. The cars parked around the
-city can be driven; traffic, people and missions arrive in later milestones.
+You start on foot at the level's starting point. Traffic drives the streets,
+and any car can be taken: the ones parked around the city, or one out of the
+traffic. Your car rams traffic and traffic shunts back. People and missions
+arrive in later milestones; until the people do, nobody is thrown out of a car
+you take.
 
 ### Choosing a city
 
@@ -130,11 +133,14 @@ cargo wasm-check    # everything that ships to the web builds for wasm32
 cargo clippy --workspace --all-targets
 ```
 
-`cargo oracle-test` builds AmiGTA1's own walking, driving and train code from
-a sibling `../AmiGTA1` checkout (or `$AMIGTA1`) with clang, runs the scripts in
-`tools/scripts/` marked `# oracle: walk` or `# oracle: drive`, 48 random walks
-and drives over the three cities, and 12,000 ticks of every city's trains
-through both, and compares every tick. Nothing of AmiGTA1 is copied into this
+`cargo oracle-test` builds AmiGTA1's own walking, driving, train and traffic
+code from a sibling `../AmiGTA1` checkout (or `$AMIGTA1`) with clang, runs the
+scripts in `tools/scripts/` marked `# oracle: walk` or `# oracle: drive`, 48
+random walks and drives over the three cities (with the traffic and trains
+around the player, every car compared), 12,000 ticks of every city's
+trains, and AmiGTA1's traffic test (four Liberty City sites, three seeds,
+3,000 ticks each; `GFA_TRAFFIC_TICKS` changes the length) through both, and
+compares every tick. Nothing of AmiGTA1 is copied into this
 repo. It also runs the scripts natively and as wasm in Node and compares their
 logs and state hashes; that needs Node and the wasm-bindgen CLI matching
 `Cargo.lock` (Trunk's cached copy is used if present).

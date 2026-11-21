@@ -115,6 +115,11 @@ fn world(b: &CmpBuilder, start: Start) -> World {
     w
 }
 
+/// The `i`th car standing in the street.
+fn standing(w: &World, i: usize) -> gfa_sim::traffic::Car {
+    w.traffic.standing().nth(i).unwrap().clone()
+}
+
 fn press(b: Buttons) -> TickInput {
     TickInput::new(b)
 }
@@ -310,19 +315,22 @@ fn get_into_a_parked_car_and_out() {
     assert!(matches!(w.doing, Doing::Entering(e) if e.over.is_none()));
     run(&mut w, Buttons::NONE, 100);
     assert_eq!(w.doing, Doing::Driving);
-    assert!(w.parked.is_empty());
+    assert_eq!(w.traffic.standing().count(), 0);
     w.step(press(Buttons::ENTER));
     assert!(matches!(w.doing, Doing::Exiting(_)));
     run(&mut w, Buttons::NONE, 60);
     assert_eq!(w.doing, Doing::OnFoot);
-    assert_eq!(w.parked.len(), 1, "the car is parked again");
+    assert_eq!(w.traffic.standing().count(), 1, "the car is parked again");
     // And he cannot walk through it.
-    let car = w.parked[0];
-    w.player.x = car.x - (40 << 16);
-    w.player.y = car.y;
+    let car = standing(&w, 0);
+    w.player.x = (car.x - (40 << 16)) as i32;
+    w.player.y = car.y as i32;
     w.player.angle = 64;
     run(&mut w, Buttons::UP, 60);
-    assert!(w.player.x < car.x - (8 << 16), "held off the car's side");
+    assert!(
+        i64::from(w.player.x) < car.x - (8 << 16),
+        "held off the car's side"
+    );
 }
 
 #[test]
@@ -349,7 +357,7 @@ fn a_write_off_burns_then_blows_up() {
     run(&mut w, Buttons::NONE, 130);
     assert!(w.driven.is_none());
     assert_eq!(w.doing, Doing::OnFoot);
-    assert!(w.parked.iter().any(|c| c.wrecked));
+    assert!(w.traffic.standing().any(|c| c.wrecked));
     // A wreck cannot be got into.
     w.step(press(Buttons::ENTER));
     assert!(log_has(&mut w, "car: no car within reach"));
@@ -368,7 +376,7 @@ fn getting_in_from_the_far_side_goes_over_the_roof() {
     // Facing south, a saloon's door is on its east flank; he stands 20 px
     // to its west.
     w.park(0, 20, 0, 128);
-    let car = w.parked[0];
+    let car = standing(&w, 0);
     w.step(press(Buttons::ENTER));
     assert!(log_has(&mut w, "car: far side - will vault heading 64"));
     let mut vaulted = false;
@@ -387,11 +395,7 @@ fn getting_in_from_the_far_side_goes_over_the_roof() {
         "{log:?}"
     );
     let v = &w.driven.as_ref().unwrap().veh;
-    assert_eq!(
-        (v.ox, v.oy),
-        (i64::from(car.x), i64::from(car.y)),
-        "the car has not moved"
-    );
+    assert_eq!((v.ox, v.oy), (car.x, car.y), "the car has not moved");
 }
 
 #[test]
@@ -409,7 +413,7 @@ fn a_blocked_door_puts_him_out_over_the_roof() {
         "car: door blocked by a car - over the roof, heading 192"
     ));
     assert!(matches!(w.doing, Doing::Vaulting(_)));
-    assert_eq!(w.parked.len(), 2, "his car is parked first");
+    assert_eq!(w.traffic.standing().count(), 2, "his car is parked first");
     assert!(vault_frame(&w));
     run(&mut w, Buttons::NONE, 80);
     assert_eq!(w.doing, Doing::OnFoot);
@@ -432,9 +436,12 @@ fn jump_while_running_vaults_a_low_car() {
     w.player.angle = 64;
     // Facing north, 30 px east of him: he runs into its flank.
     w.park(0, 30, 0, 0);
-    let car = w.parked[0];
+    let car = standing(&w, 0);
     run(&mut w, Buttons::UP, 40);
-    assert!(w.player.x < car.x - (9 << 16), "held off the flank");
+    assert!(
+        i64::from(w.player.x) < car.x - (9 << 16),
+        "held off the flank"
+    );
     // Jump does nothing while standing.
     run(&mut w, Buttons::NONE, 1);
     w.step(press(Buttons::HANDBRAKE));
@@ -446,7 +453,10 @@ fn jump_while_running_vaults_a_low_car() {
     run(&mut w, Buttons::UP, 60);
     assert_eq!(w.doing, Doing::OnFoot);
     assert!(log_has(&mut w, "player: landed after state 3"));
-    assert!(w.player.x > car.x + (7 << 16), "over to the far side");
+    assert!(
+        i64::from(w.player.x) > car.x + (7 << 16),
+        "over to the far side"
+    );
 }
 
 #[test]
@@ -457,7 +467,7 @@ fn jump_under_a_bus_slides_him_out() {
     w.player.angle = 64;
     // A bus parked over him, facing north: he is under its middle.
     w.park(1, 0, 0, 0);
-    let bus = w.parked[0];
+    let bus = standing(&w, 0);
     run(&mut w, Buttons::UP, 1);
     w.step(press(Buttons::UP.with(Buttons::HANDBRAKE, true)));
     assert!(log_has(&mut w, "player: jump - sliding under car 0"));
@@ -465,7 +475,10 @@ fn jump_under_a_bus_slides_him_out() {
     run(&mut w, Buttons::NONE, 80);
     assert_eq!(w.doing, Doing::OnFoot);
     assert!(log_has(&mut w, "player: out from under"));
-    assert!(w.player.x > bus.x + (8 << 16), "out on the east side");
+    assert!(
+        i64::from(w.player.x) > bus.x + (8 << 16),
+        "out on the east side"
+    );
 }
 
 #[test]
@@ -587,7 +600,7 @@ fn a_recording_replays_the_run() {
         hash_every: Some(50),
     };
     let mut live = world(&b, south(10, 10));
-    assert_eq!(live.parked.len(), 1);
+    assert_eq!(live.traffic.standing().count(), 1);
     let mut rec = InputLog::default();
     let report = replay::run_recorded(&mut live, &script, opts, &mut rec, |_, _| {});
     assert!(report.log.iter().any(|l| l.text.contains("car: in")));

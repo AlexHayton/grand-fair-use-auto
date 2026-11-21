@@ -30,13 +30,18 @@ relative to sibling checkouts `../carnage3d` and `../AmiGTA1`.
 | `gfa-sim::view` | | `native/gta_main.c` (`gta_peds_set_view`, `gta_traffic_set_view_blocks`) | done |
 | `gfa-sim::script`, `gfa-sim::replay` | | `native/gta_main.c` (autodrive orders), `tools/gtadump.c` (`cmd_walk`) | done |
 | `gfa-sim::script_world` | | `native/gta_script.h` (`gta_script_world`) | skeleton |
-| `tools/oracle/walktrace.c` | | links `native/gta_map.c`, `gta_nav.c`, `gta_player.c`, `gta_trig.c` | done |
+| `tools/oracle/walktrace.c` | | links `native/gta_map.c`, `gta_nav.c`, `gta_player.c`, `gta_trig.c`, `gta_style.c`, and the fleet (`fleet.h`) | done |
+| `tools/oracle/fleet.h` | | links `native/gta_traffic.c`, `gta_route.c`, `gta_car.c`, `gta_train.c`; restates `gta_main.c`'s `fleet_car_at`/`ped_car_block` and `gta_weapon.c`'s `wreck_sweep` | done |
 | `gfa-sim::vehicle` | | `native/gta_vehphys.c`, `gta_vehphys.h` | done |
 | `gfa-sim::cars` | `src/GameObjectsManager.cpp` (`CreateStartupObjects`) | `native/gta_main.c` (`car_door_point`, `car_door_pos`, enter and exit, the jump, `ped_car_block`, `car_body_hit`, the vault and the slide) | wip |
-| `tools/oracle/drivetrace.c` | | links `native/gta_vehphys.c`, `gta_style.c`, `gta_nav.c`, `gta_map.c`, `gta_trig.c` | done |
+| `tools/oracle/drivetrace.c` | | links `native/gta_vehphys.c`, `gta_style.c`, `gta_nav.c`, `gta_map.c`, `gta_trig.c`, and the fleet (`fleet.h`); restates the ram glue in `gta_main.c` | done |
 | `gfa-sim::trains` | | `native/gta_train.c`, `gta_train.h` | done |
 | `tools/oracle/traintrace.c` | | links `native/gta_train.c`, `gta_map.c`, `gta_trig.c` | done |
 | `gfa-sim` boats, tank, specials | | `native/gta_car.c`, `gta_traffic.c:1152` | M4 |
-| `gfa-sim` traffic, police | | `native/gta_traffic.c`, `gta_route.c` | M5–M6 |
+| `gfa-sim::traffic` (fleet, driving, junction bookings, lights, collisions between cars) | | `native/gta_traffic.c`, `gta_traffic.h` | wip (M5) |
+| `gfa-sim::traffic::contact` (cars put into the fleet, taken out of it, the ram, walkers held off, write-offs) | | `native/gta_traffic.c` (`car_place`, `gta_traffic_abandon`, `_leave_wreck`, `_grab_car`, `_rename_car`, `_box_free`, `_sweep_box`, `_ram`), `gta_main.c` (`fleet_car_at`, `ped_car_block`, `leave_car`), `gta_weapon.c` (`wreck_sweep`) | done |
+| `gfa-sim::route` | | `native/gta_route.c`, `gta_route.h` | done |
+| `tools/oracle/traffictrace.c` | | links `native/gta_traffic.c`, `gta_route.c`, `gta_nav.c`, `gta_map.c`, `gta_car.c`, `gta_style.c`, `gta_trig.c`, `gta_vehphys.c` | done |
+| `gfa-sim` police | | `native/gta_traffic.c:9681-10500` | M6 |
 | `gfa-sim` peds | | `native/gta_peds.c` | M5 |
 | `gfa-sim` mission VM | | `native/gta_script*.c`, `gta_trig.c` | M7 |

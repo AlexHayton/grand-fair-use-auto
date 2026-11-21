@@ -5,7 +5,9 @@
 //! small harnesses; each test runs the same script through a harness and
 //! through gfa-sim and compares every tick's state. Scripts in
 //! `tools/scripts/` take part when their header says `# oracle: walk` or
-//! `# oracle: drive` (they may use only the orders the harness knows). Needs the game data,
+//! `# oracle: drive` (they may use only the orders the harness knows). The
+//! walk and drive harnesses also run the fleet and the trains around the
+//! player, and the whole fleet is compared after every tick. Needs the game data,
 //! the AmiGTA1 checkout and a C compiler, so these are ignored by plain
 //! `cargo test`: run them with `cargo oracle-test`.
 
@@ -18,6 +20,8 @@ use std::sync::OnceLock;
 use gfa_fixed::rng::NrLcg;
 use gfa_sim::replay::{self, RunOptions, trace_line};
 use gfa_sim::script::Script;
+use gfa_sim::traffic::Traffic;
+use gfa_sim::world::Start;
 
 /// The harnesses, built once per test run.
 fn harnesses() -> &'static Path {
@@ -64,18 +68,41 @@ fn oracle_lines(harness: &str, args: &[&Path], extra: &[&str], prefix: &str) -> 
 }
 
 /// Run a script in gfa-sim as the oracle runs it and keep the trace lines
-/// starting with `prefix`.
+/// starting with `prefix`, each followed by the fleet after that tick (the
+/// harness prints the fleet only on ticks it traces).
 fn our_lines(script: &Script, prefix: &str) -> Vec<String> {
     let lv = common::level(&common::data(), script.section.unwrap_or(1));
     let mut w = common::world(&lv, script, true);
-    let mut lines = vec![trace_line(&w)];
+    let mut lines = Vec::new();
+    let first = trace_line(&w);
+    if first.starts_with(prefix) {
+        lines.push(first);
+    }
     replay::run(&mut w, script, RunOptions::default(), |w, _| {
-        lines.push(trace_line(w))
+        let l = trace_line(w);
+        if l.starts_with(prefix) {
+            lines.push(l);
+            lines.extend(w.traffic.trace_lines(u64::from(w.tick)));
+        }
     });
     lines
-        .into_iter()
-        .filter(|l| l.starts_with(prefix))
-        .collect()
+}
+
+/// The harness's lines for the player (`prefix`) and the fleet, in order.
+fn their_lines(harness: &str, args: &[&Path], prefix: &str) -> Vec<String> {
+    let mut lines = oracle_lines(harness, args, &[], "");
+    lines.retain(|l| l.starts_with(prefix) || l.starts_with("f "));
+    lines
+}
+
+/// Where the level starts the player, which the fleet is parked around.
+fn start_of(script: &Script) -> (i32, i32) {
+    if let Some(s) = script.start {
+        return s;
+    }
+    let lv = common::level(&common::data(), script.section.unwrap_or(1));
+    let s = Start::from_section(&lv.files.mission).expect("a PLAYER");
+    (s.bx, s.by)
 }
 
 /// Panic at the first tick that differs, showing both.
@@ -120,9 +147,13 @@ fn script_file(name: &str, text: &str) -> PathBuf {
 
 fn check_walk(name: &str, text: &str) {
     let script = Script::parse(text).unwrap();
+    let section = script.section.unwrap_or(1);
     let path = script_file(name, text);
-    let map = map_of(script.section.unwrap_or(1));
-    let theirs = oracle_lines("walktrace", &[&map, &path], &[], "t ");
+    let theirs = their_lines(
+        "walktrace",
+        &[&map_of(section), &gry_of(section), &path],
+        "t ",
+    );
     same(name, &our_lines(&script, "t "), &theirs);
 }
 
@@ -130,10 +161,11 @@ fn check_drive(name: &str, text: &str) {
     let script = Script::parse(text).unwrap();
     let section = script.section.unwrap_or(1);
     let path = script_file(name, text);
-    let theirs = oracle_lines(
+    let (bx, by) = start_of(&script);
+    let (bx, by) = (PathBuf::from(bx.to_string()), PathBuf::from(by.to_string()));
+    let theirs = their_lines(
         "drivetrace",
-        &[&map_of(section), &gry_of(section), &path],
-        &[],
+        &[&map_of(section), &gry_of(section), &path, &bx, &by],
         "c ",
     );
     same(name, &our_lines(&script, "c "), &theirs);
@@ -235,5 +267,62 @@ fn oracle_trains() {
         let ticks = TICKS.to_string();
         let theirs = oracle_lines("traintrace", &[&map_of(section)], &[&ticks], "r ");
         same(&format!("trains [{section}]"), &ours, &theirs);
+    }
+}
+
+/// The fleet run as `traffictrace` runs it: parked out to 8 blocks around
+/// `(bx, by)`, then ticked with the camera held there.
+fn our_traffic(section: u32, bx: i32, by: i32, ticks: u64, seed: u64, view: i32) -> Vec<String> {
+    let script = Script::parse(&format!("# section: {section}\n")).unwrap();
+    let lv = common::level(&common::data(), section);
+    let w = common::world(&lv, &script, true);
+    let mut t = Traffic::new(&w.map, seed);
+    t.set_view_blocks(view);
+    let cap = t.fleet_cap;
+    t.park(&w.map, &w.cars, bx, by, 8, cap);
+    let mut lines: Vec<String> = t.trace_lines(0).collect();
+    let cam_x = i64::from(bx * 32 + 16) << 16;
+    let cam_y = i64::from(by * 32 + 16) << 16;
+    for tick in 1..=ticks {
+        t.step(&w.map, &w.cars, cam_x, cam_y);
+        lines.extend(t.trace_lines(tick));
+    }
+    lines
+}
+
+fn check_traffic(section: u32, bx: i32, by: i32, ticks: u64, seed: u64) {
+    let ours = our_traffic(section, bx, by, ticks, seed, 5);
+    let args = [
+        bx.to_string(),
+        by.to_string(),
+        ticks.to_string(),
+        seed.to_string(),
+    ];
+    let extra: Vec<&str> = args.iter().map(String::as_str).collect();
+    let theirs = oracle_lines(
+        "traffictrace",
+        &[&map_of(section), &gry_of(section)],
+        &extra,
+        "f ",
+    );
+    same(
+        &format!("traffic [{section}] ({bx},{by}) seed {seed}"),
+        &ours,
+        &theirs,
+    );
+}
+
+/// AmiGTA1's traffic gate sites on Liberty City (`fullgate.sh`).
+#[test]
+#[ignore = "needs game data and ../AmiGTA1 (cargo oracle-test)"]
+fn oracle_traffic() {
+    let ticks: u64 = std::env::var("GFA_TRAFFIC_TICKS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(3000);
+    for seed in [1, 2, 3] {
+        for (bx, by) in [(64, 64), (61, 52), (108, 228), (106, 114)] {
+            check_traffic(1, bx, by, ticks, seed);
+        }
     }
 }

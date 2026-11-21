@@ -3,12 +3,13 @@
 use crate::cars::{
     self, BIKE_ENTER_FIRST, BIKE_EXIT_FIRST, BIKE_FRAMES, BIKE_SIT, Driven, ENTER_SEQ, ENTER_TICKS,
     EXIT_FIRST, EXIT_FRAMES, EXIT_TICKS, PED_CAR_MARGIN, Parked, REACH, body_hit, door_point,
-    door_pos, lerp_angle, lerp_fp,
+    door_pos, lerp_angle, lerp_fp, panel_delta,
 };
 use crate::hash::{SimHash, StateHasher};
 use crate::input::{Buttons, TickInput};
 use crate::map::{SimMap, ground};
 use crate::player::{Anim, Player, RUN_SPEED, Stick};
+use crate::traffic::{self, Traffic};
 use crate::trains::{Carriage, TrainEvent, Trains};
 use crate::vehicle::{CLASS_BIKE, Pedals, Veh};
 use crate::view::SimView;
@@ -71,6 +72,11 @@ pub struct Entering {
     pub bike: bool,
     /// Coming from the far side: over the roof first.
     pub over: Option<Over>,
+    /// The car's fleet serial, whether a mission had marked it, and
+    /// whether somebody was at the wheel.
+    pub serial: u64,
+    pub mission: bool,
+    pub driver: bool,
 }
 
 /// Going over a car's roof at running pace along a fixed heading. Every
@@ -175,9 +181,10 @@ pub struct World {
     pub doing: Doing,
     /// The player's car, while he drives it or gets out of it.
     pub driven: Option<Driven>,
-    /// Vehicles standing in the streets.
-    pub parked: Vec<Parked>,
     pub trains: Trains,
+    /// Every car but his: the traffic, and the cars standing in the
+    /// street (the map's parked ones, the ones he left, wrecks).
+    pub traffic: Traffic,
     /// AmiGTA1's `player_health`: 100 full, wasted at 0.
     pub health: i32,
     /// Where the level put him, for the stopgap respawn.
@@ -189,12 +196,35 @@ pub struct World {
 
 impl World {
     pub fn new(map: SimMap, cars: Vec<CarInfo>, view: SimView, start: Start) -> Self {
+        World::with_map_cars(map, cars, view, start, true)
+    }
+
+    /// As [`World::new`]; `map_cars` false leaves the map's parked cars
+    /// out, as AmiGTA1 does (its harnesses compare without them).
+    pub fn with_map_cars(
+        map: SimMap,
+        cars: Vec<CarInfo>,
+        view: SimView,
+        start: Start,
+        map_cars: bool,
+    ) -> Self {
         let (mut player, found) = Player::place(&map, start.bx, start.by);
         if let Some(a) = start.angle {
             player.angle = a & 255;
         }
-        let parked = cars::parked_from_map(&map, &cars);
         let trains = Trains::new(&map);
+        let mut traffic = Traffic::new(&map, u64::from(gfa_fixed::rng::TRAFFIC_SEED));
+        traffic.set_view_blocks(view.half_w);
+        // The map's parked cars stand in the fleet for the whole level,
+        // placed first so the traffic starts round them.
+        if map_cars {
+            for car in cars::parked_from_map(&map, &cars) {
+                traffic.place_resident(&cars, &car);
+            }
+        }
+        // The traffic starts parked around the level start, as in AmiGTA1.
+        let cap = traffic.fleet_cap;
+        traffic.park(&map, &cars, start.bx, start.by, 8, cap);
         let mut world = World {
             tick: 0,
             map,
@@ -203,8 +233,8 @@ impl World {
             player,
             doing: Doing::OnFoot,
             driven: None,
-            parked,
             trains,
+            traffic,
             health: FULL_HEALTH,
             start,
             prev: Buttons::NONE,
@@ -284,7 +314,14 @@ impl World {
             };
             self.drive(pedals);
         }
+        self.run_traffic();
         self.run_trains();
+        self.burn();
+        let mut lines = Vec::new();
+        self.traffic.wreck_sweep(&mut |s| lines.push(s));
+        for l in lines {
+            self.say(l);
+        }
         self.harm();
         self.prev = b;
         self.tick += 1;
@@ -342,18 +379,43 @@ impl World {
         }
     }
 
+    /// The fleet's tick, with the view on the player (or his car). The
+    /// player is an obstacle the fleet stops for; it does not hit him yet.
+    fn run_traffic(&mut self) {
+        let p = &self.player;
+        let (x, y, speed, hl) = match &self.driven {
+            Some(d) if self.doing == Doing::Driving || matches!(self.doing, Doing::Exiting(_)) => {
+                let v = &d.veh;
+                (v.ox, v.oy, v.vx.abs().max(v.vy.abs()), v.len / 2)
+            }
+            _ => {
+                let moving = matches!(p.anim, Anim::Run | Anim::Walk);
+                let speed = if moving { i64::from(RUN_SPEED) } else { 0 };
+                (i64::from(p.x), i64::from(p.y), speed, 3)
+            }
+        };
+        let layer = p.layer;
+        self.traffic.set_player(true, x, y, speed, layer, hl);
+        self.traffic.set_view_blocks(self.view.half_w);
+        self.traffic.step(&self.map, &self.cars, x, y);
+    }
+
     /// The trains' tick, and what it did to the world.
     fn run_trains(&mut self) {
-        let on_foot = matches!(
-            self.doing,
-            Doing::OnFoot | Doing::Entering(_) | Doing::Vaulting(_) | Doing::Sliding(_)
-        );
+        // Not in a car and not aboard (AmiGTA1's `!in_car && pl_on < 0`):
+        // getting out and drowning count as on foot.
+        let on_foot = !matches!(self.doing, Doing::Driving | Doing::Riding(_));
         let p = &self.player;
         let player = on_foot.then(|| (i64::from(p.x), i64::from(p.y), p.layer));
-        let cars: Vec<_> = self
-            .parked
+        let slots: Vec<usize> = (0..self.traffic.n)
+            .filter(|&i| !self.traffic.cars[i].done)
+            .collect();
+        let cars: Vec<_> = slots
             .iter()
-            .map(|c| (i64::from(c.x), i64::from(c.y), c.layer))
+            .map(|&i| {
+                let c = &self.traffic.cars[i];
+                (c.x, c.y, c.layer)
+            })
             .collect();
         for event in self.trains.tick(player, &cars) {
             match event {
@@ -373,35 +435,32 @@ impl World {
                     ));
                 }
                 TrainEvent::Crushed(i) => {
-                    let c = &mut self.parked[i];
-                    if c.damage < cars::WRECKED {
+                    // 20 points; at 100 the fleet's own sweep burns it.
+                    let c = &mut self.traffic.cars[slots[i]];
+                    if !c.invuln && c.damage < cars::WRECKED {
                         c.damage = (c.damage + 20).min(cars::WRECKED);
-                    }
-                    if c.damage >= cars::WRECKED && !c.wrecked {
-                        c.wrecked = true;
-                        c.dmg_bits |= cars::DAMAGE_MASK;
                     }
                     let (x, y) = (c.x >> 21, c.y >> 21);
                     self.say(format!("train: hit a car at ({x},{y})"));
                 }
                 TrainEvent::Wrecked(t, carriages) => {
-                    // Each carriage becomes a burnt-out wreck of the train's
-                    // (model 11) or tram's (12) record.
+                    // Each carriage is left in the fleet as a write-off of
+                    // the train's (model 11) or tram's (12) record, which
+                    // then burns out.
                     let id = if self.trains.trains[t].tram { 12 } else { 11 };
                     let model = self.cars.iter().position(|c| c.model == id);
                     for (x, y, face, layer) in carriages {
                         if let Some(model) = model {
-                            self.parked.push(Parked {
+                            self.traffic.abandon(
+                                &self.cars,
                                 model,
-                                x: x as i32,
-                                y: y as i32,
+                                x,
+                                y,
                                 face,
                                 layer,
-                                remap: 0,
-                                damage: cars::WRECKED,
-                                dmg_bits: cars::DAMAGE_MASK,
-                                wrecked: true,
-                            });
+                                -1,
+                                cars::WRECKED,
+                            );
                         }
                     }
                     if self.doing == Doing::Riding(t) {
@@ -511,18 +570,15 @@ impl World {
         self.doing = Doing::OnFoot;
     }
 
-    /// Is a parked car's body at `(px, py)` on `layer`, grown by `margin`?
+    /// Is a car's body at `(px, py)` on `layer`, grown by `margin`?
     fn car_at(&self, px: i64, py: i64, layer: i32, margin: i32) -> bool {
         self.car_hit(px, py, layer, margin).is_some()
     }
 
-    /// The first parked car whose body is at `(px, py)` on `layer`, grown
-    /// by `margin`.
+    /// The fleet slot of the first car whose body is at `(px, py)` on
+    /// `layer`, grown by `margin`.
     fn car_hit(&self, px: i64, py: i64, layer: i32, margin: i32) -> Option<usize> {
-        self.parked.iter().position(|c| {
-            let (hl, hw) = cars::half_size(&self.cars[c.model]);
-            c.layer == layer && body_hit(c.x.into(), c.y.into(), c.face, hl, hw, px, py, margin)
-        })
+        self.traffic.car_at(&self.cars, px, py, layer, margin)
     }
 
     /// SPACE on foot: running at a car with its body 3 px ahead, go over a
@@ -541,7 +597,7 @@ impl World {
         let Some(i) = self.car_hit(ahead.0, ahead.1, p.layer, 1) else {
             return;
         };
-        if cars::vaultable(&self.cars[self.parked[i].model]) {
+        if cars::vaultable(&self.cars[self.traffic.cars[i].model]) {
             self.doing = Doing::Vaulting(Vault::new(p.angle));
             self.say(format!("player: jump - vaulting car {i}"));
         } else {
@@ -652,27 +708,25 @@ impl World {
         }
     }
 
-    /// RETURN on foot: walk to the nearest car's door within reach.
+    /// RETURN on foot: take the nearest car within reach out of the fleet,
+    /// standing or moving, and walk to its door.
     fn try_enter(&mut self) {
         let p = &self.player;
-        let reach = i64::from(REACH) << 16;
-        let mut best: Option<(usize, i64)> = None;
-        for (i, c) in self.parked.iter().enumerate() {
-            if c.layer != p.layer || c.wrecked || !cars::enterable(&self.cars[c.model]) {
-                continue;
-            }
-            let d = (i64::from(c.x) - i64::from(p.x))
-                .abs()
-                .max((i64::from(c.y) - i64::from(p.y)).abs());
-            if d < best.map_or(reach, |b| b.1) {
-                best = Some((i, d));
-            }
-        }
-        let Some((i, _)) = best else {
+        let Some(t) = self.traffic.grab(p.x.into(), p.y.into(), p.layer, REACH) else {
             self.say("car: no car within reach".into());
             return;
         };
-        let car = self.parked.remove(i);
+        let car = Parked {
+            model: t.model,
+            x: t.x as i32,
+            y: t.y as i32,
+            face: t.face,
+            layer: t.layer,
+            remap: (t.remap + 1) as u8,
+            damage: t.damage,
+            dmg_bits: t.dmg_bits,
+            wrecked: false,
+        };
         let ci = &self.cars[car.model];
         let mut door = door_point(ci, car.x.into(), car.y.into(), car.face);
         let (px, py) = (i64::from(self.player.x), i64::from(self.player.y));
@@ -707,12 +761,19 @@ impl World {
             tick: 0,
             bike,
             over,
+            serial: t.serial,
+            mission: t.mission,
+            driver: t.had_driver,
         };
         self.say(format!(
             "car: going for model {model} at ({},{})",
             car.x >> 21,
             car.y >> 21
         ));
+        if t.had_driver {
+            // Thrown out by the peds' side, which comes later in M5.
+            self.say("car: somebody is at the wheel".into());
+        }
         if let Some(o) = over {
             self.say(format!(
                 "car: far side - will vault heading {}, over {width} px",
@@ -813,6 +874,8 @@ impl World {
             air: None,
             // The door is still swinging shut as he sits down.
             door_tick: if e.bike { -1 } else { total },
+            serial: e.serial,
+            mission: e.mission,
         });
         self.player.anim = Anim::Stand;
         self.player.frame = 0;
@@ -934,23 +997,31 @@ impl World {
         ));
     }
 
-    /// Leave the driven car standing where it is, facing `face`.
+    /// Leave the driven car standing in the fleet where it is, facing
+    /// `face`, under the serial it had before (AmiGTA1's `leave_car`). Its
+    /// dents go with it, which AmiGTA1 drops.
     fn park_driven(&mut self, face: i32) {
         let Some(d) = self.driven.take() else {
             return;
         };
         let v = &d.veh;
-        self.parked.push(Parked {
-            model: v.model,
-            x: v.ox as i32,
-            y: v.oy as i32,
-            face,
-            layer: d.layer,
-            remap: v.remap.unwrap_or(0),
-            damage: v.damage,
-            dmg_bits: v.dmg_bits,
-            wrecked: false,
-        });
+        let remap = i32::from(v.remap.unwrap_or(0)) - 1;
+        let (x, y) = (v.ox, v.oy);
+        let Some(mut serial) = self
+            .traffic
+            .abandon(&self.cars, v.model, x, y, face, d.layer, remap, v.damage)
+        else {
+            self.say("car: fleet full, car lost".into());
+            return;
+        };
+        if d.serial != 0 {
+            self.traffic.rename_car(serial, d.serial);
+            serial = d.serial;
+        }
+        if let Some(c) = self.traffic.car_mut(serial) {
+            c.dmg_bits = v.dmg_bits;
+            c.mission |= d.mission;
+        }
     }
 
     fn drive(&mut self, pedals: Pedals) {
@@ -964,9 +1035,62 @@ impl World {
             }
         }
         let mut lines = Vec::new();
-        let water = d.tick(&self.map, &self.cars[d.veh.model], pedals, &mut |s| {
-            lines.push(s)
-        });
+        let (ox0, oy0, ang0) = (d.veh.ox, d.veh.oy, d.veh.ang16);
+        let ci = &self.cars[d.veh.model];
+        let water = d.tick(&self.map, ci, pedals, &mut |s| lines.push(s));
+        if water.is_none() {
+            // The fleet: stopped at the contact rather than inside a car,
+            // then the ram (AmiGTA1's main loop).
+            let v = &mut d.veh;
+            let (hl, hw) = (traffic::half_len(ci), traffic::half_wid(ci));
+            let mut pos = (v.ox, v.oy, v.ang16);
+            if self
+                .traffic
+                .sweep_box(&self.cars, ox0, oy0, ang0, &mut pos, hl, hw, d.layer)
+            {
+                v.x += pos.0 - v.ox;
+                v.y += pos.1 - v.oy;
+                v.ox = pos.0;
+                v.oy = pos.1;
+                v.ang16 = pos.2;
+            }
+            let r = self.traffic.ram(
+                &self.cars,
+                v.ox,
+                v.oy,
+                v.angle(),
+                v.len / 2,
+                v.wid / 2,
+                v.vx,
+                v.vy,
+                v.mass,
+                d.layer,
+            );
+            if r.dvx != 0 || r.dvy != 0 || r.dyaw != 0 {
+                v.vx += r.dvx;
+                v.vy += r.dvy;
+                v.ang16 = (v.ang16 + r.dyaw) & 0xFF_FFFF;
+            }
+            v.x += r.dpx;
+            v.ox += r.dpx;
+            v.y += r.dpy;
+            v.oy += r.dpy;
+            if r.hits > 0 {
+                v.damage += r.damage;
+                // The push points out of the other car: the dent is the
+                // other way.
+                let (hx, hy) = (v.ox - r.dpx * 8, v.oy - r.dpy * 8);
+                v.dmg_bits |= 1 << panel_delta(ci, v.ox, v.oy, v.angle(), hx, hy);
+                lines.push(format!(
+                    "car: ram x{} - player dv ({},{}) damage {} (+{} this crash)",
+                    r.hits,
+                    r.dvx >> 16,
+                    r.dvy >> 16,
+                    v.damage,
+                    r.damage
+                ));
+            }
+        }
         if self.doing == Doing::Driving {
             self.player.x = d.veh.ox as i32;
             self.player.y = d.veh.oy as i32;
@@ -978,9 +1102,7 @@ impl World {
         }
         if let Some(z) = water {
             self.sink(z);
-            return;
         }
-        self.burn();
     }
 
     /// The car is in the water: it sinks and is lost, and he drowns where
@@ -1000,6 +1122,9 @@ impl World {
     /// player is thrown clear to its right and it stays as a wreck
     /// (AmiGTA1's main loop; the blast's harm to others is M6).
     fn burn(&mut self) {
+        if self.doing != Doing::Driving {
+            return;
+        }
         let Some(d) = self.driven.as_mut() else {
             return;
         };
@@ -1018,19 +1143,10 @@ impl World {
             return;
         }
         let (x, y, face, layer) = (v.ox, v.oy, v.angle(), d.layer);
-        let wreck = Parked {
-            model: v.model,
-            x: x as i32,
-            y: y as i32,
-            face,
-            layer,
-            remap: v.remap.unwrap_or(0),
-            damage: v.damage,
-            dmg_bits: v.dmg_bits,
-            wrecked: true,
-        };
-        self.parked.push(wreck);
+        let (model, remap) = (v.model, i32::from(v.remap.unwrap_or(0)) - 1);
         self.driven = None;
+        self.traffic
+            .leave_wreck(&self.cars, model, x, y, face, layer, remap);
         // A Q14 unit times 48 is 12 px.
         self.player.x = (x + i64::from(cos(face)) * 48) as i32;
         self.player.y = (y + i64::from(sin(face)) * 48) as i32;
@@ -1042,8 +1158,8 @@ impl World {
         self.say(format!("car: blew up at ({},{})", x >> 16, y >> 16));
     }
 
-    /// The cars standing still this tick: the parked ones, and the one the
-    /// player is getting into, with its door.
+    /// The car the player is walking to or getting into, with its door
+    /// (it is out of the fleet meanwhile).
     pub fn standing_cars(&self) -> Vec<ShownCar> {
         let shown = |c: &Parked, extra: u32| ShownCar {
             model: c.model,
@@ -1053,7 +1169,7 @@ impl World {
             deltas: c.dmg_bits | extra,
             fuse: 0,
         };
-        let mut out: Vec<ShownCar> = self.parked.iter().map(|c| shown(c, 0)).collect();
+        let mut out = Vec::new();
         if let Doing::Entering(e) = self.doing {
             let t = e.step * ENTER_TICKS + e.tick;
             // No door until he is at it: not on the way, not on the roof.
@@ -1184,6 +1300,8 @@ impl World {
             layer,
             air: None,
             door_tick: -1,
+            serial: 0,
+            mission: false,
         });
         self.player.x = x;
         self.player.y = y;
@@ -1216,25 +1334,24 @@ impl World {
             self.say(format!("car: park - no model {model}"));
             return;
         }
-        let car = Parked {
-            model,
-            x: self.player.x + (dx << 16),
-            y: self.player.y + (dy << 16),
-            face: face & 255,
-            layer: self.player.layer,
-            remap: 0,
-            damage: 0,
-            dmg_bits: 0,
-            wrecked: false,
-        };
+        let x = i64::from(self.player.x) + (i64::from(dx) << 16);
+        let y = i64::from(self.player.y) + (i64::from(dy) << 16);
+        let face = face & 255;
+        let layer = self.player.layer;
+        if self
+            .traffic
+            .abandon(&self.cars, model, x, y, face, layer, -1, 0)
+            .is_none()
+        {
+            self.say("car: park - fleet full".into());
+            return;
+        }
         self.say(format!(
-            "car: parked model {} at ({},{}) facing {}",
+            "car: parked model {} at ({},{}) facing {face}",
             self.cars[model].model,
-            car.x >> 16,
-            car.y >> 16,
-            car.face
+            x >> 16,
+            y >> 16,
         ));
-        self.parked.push(car);
     }
 
     /// Add a line to the run log.
@@ -1268,6 +1385,9 @@ impl World {
                 for v in [e.from.2, e.walk_len, e.walk_t, e.step, e.tick] {
                     h.i32(v);
                 }
+                h.bytes(&e.serial.to_le_bytes());
+                h.bool(e.mission);
+                h.bool(e.driver);
                 match e.over {
                     None => h.u8(0),
                     Some(o) => {
@@ -1315,11 +1435,8 @@ impl World {
             Some(d) => d.sim_hash(&mut h),
             None => h.u8(0),
         }
-        h.u32(self.parked.len() as u32);
-        for c in &self.parked {
-            c.sim_hash(&mut h);
-        }
         self.trains.sim_hash(&mut h);
+        self.traffic.sim_hash(&mut h);
         h.i32(self.health);
         h.finish()
     }

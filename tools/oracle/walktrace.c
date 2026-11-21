@@ -8,9 +8,11 @@
  *
  * Unlike `gtadump walk`, it builds the navigation grid first, so fences
  * (thin walls) are in force as they are in AmiGTA1's game. It also restates
- * the walk into water and the drowning from gta_main.c's main loop.
+ * the walk into water and the drowning from gta_main.c's main loop, and
+ * runs the fleet and the trains around him (fleet.h), with every car held
+ * off him as he walks. The style is read for the fleet's car table.
  *
- *     walktrace <map.cmp> <script.txt>
+ *     walktrace <map.cmp> <style.gry> <script.txt>
  *
  * The script is the walk format: `start bx by`, then `turn forward walk
  * ticks` legs. `#` lines and blank lines are skipped.
@@ -23,23 +25,9 @@
 #include "gta_map.h"
 #include "gta_nav.h"
 #include "gta_player.h"
+#include "gta_style.h"
 #include "gta_trig.h"
-
-/* The player asks the tile set where the ped sprites start; a trace has no
- * use for sprites, so these stand in for gta_tiles.c. */
-int gta_tiles_sprite_base(const gta_tiles *t, int type)
-{
-    (void)t;
-    (void)type;
-    return 0;
-}
-
-int gta_tiles_sprite_count(const gta_tiles *t, int type)
-{
-    (void)t;
-    (void)type;
-    return 295;
-}
+#include "fleet.h"
 
 static const char *const ground_name[8] = {
     "air", "water", "road", "pavement", "field", "building", "?6", "?7"
@@ -70,6 +58,7 @@ int main(int argc, char **argv)
 {
     static gta_map map;
     static gta_nav nav;
+    static gta_style style;
     static gta_tiles tiles;
     gta_player pl;
     FILE *script;
@@ -77,8 +66,8 @@ int main(int argc, char **argv)
     int sx = 64, sy = 64, leg = 0, drown = 0, health = 100;
     long tick = 0;
 
-    if (argc != 3) {
-        fprintf(stderr, "usage: walktrace <map.cmp> <script.txt>\n");
+    if (argc != 4) {
+        fprintf(stderr, "usage: walktrace <map.cmp> <style.gry> <script.txt>\n");
         return 2;
     }
     if (gta_map_load(argv[1], &map) != 0)
@@ -87,9 +76,13 @@ int main(int argc, char **argv)
         fprintf(stderr, "walktrace: no memory for the nav grid\n");
         return 1;
     }
-    script = fopen(argv[2], "r");
+    if (gta_style_load(argv[2], &style) != 0)
+        return 1;
+    tiles.cars = style.cars;
+    tiles.n_cars = style.car_count;
+    script = fopen(argv[3], "r");
     if (!script) {
-        fprintf(stderr, "walktrace: cannot open %s\n", argv[2]);
+        fprintf(stderr, "walktrace: cannot open %s\n", argv[3]);
         return 1;
     }
     while (fgets(line, sizeof line, script)) {
@@ -100,6 +93,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "walktrace: the first line must be `start bx by`\n");
         return 1;
     }
+    fleet_start(&map, &nav, &tiles, sx, sy);
     gta_player_init(&pl, &map, &tiles, sx, sy);
     printf("player: start (%d,%d) layer %d angle %d ground %s\n", sx, sy,
            pl.layer, pl.angle, ground_name[pl.ground & 7]);
@@ -112,8 +106,11 @@ int main(int argc, char **argv)
         if (sscanf(line, "%d %d %d %d", &turn, &fwd, &walk, &ticks) != 4)
             continue;
         for (i = 0; i < ticks; i++) {
+            long speed;
             if (!drown) {
+                long ox = pl.x, oy = pl.y;
                 gta_player_update(&pl, &map, turn, fwd, walk);
+                fleet_hold_walker(&pl.x, &pl.y, pl.layer, ox, oy);
                 /* WATER IS NOT A WALL TO A MAN WHO WALKS INTO IT: the probe
                  * from gta_main.c's main loop, 10 px ahead while UP is held. */
                 if (fwd > 0) {
@@ -131,6 +128,12 @@ int main(int argc, char **argv)
                     }
                 }
             }
+            speed = pl.anim == GTA_ANIM_RUN || pl.anim == GTA_ANIM_WALK
+                  ? GTA_RUN_SPEED_FP : 0;
+            if (fleet_tick(pl.x, pl.y, speed, pl.angle, pl.layer, 3, 3, 1)) {
+                printf("player: run over by a train\n");
+                health = 0;
+            }
             /* gta_main.c: 3 health every other tick under water. */
             if (drown && (drown++ & 1))
                 health -= 3;
@@ -144,6 +147,7 @@ int main(int argc, char **argv)
                 health = 100;
             }
             trace(++tick, &pl);
+            fleet_dump(tick);
         }
         printf("leg %2d: turn %2d fwd %2d walk %d x%3d  ->  block (%3d,%3d) "
                "+%2ld.%02ld,%2ld.%02ld  layer %d  angle %3d  ground %-8s%s%s\n",

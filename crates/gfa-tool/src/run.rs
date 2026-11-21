@@ -26,6 +26,7 @@ pub struct RunArgs {
     pub hash_every: Option<u32>,
     pub trace: bool,
     pub trace_trains: bool,
+    pub trace_traffic: bool,
     pub oracle: bool,
     pub out: Option<PathBuf>,
     pub record: Option<PathBuf>,
@@ -60,11 +61,16 @@ pub fn run(src: &dyn AssetSource, args: RunArgs) -> Result<()> {
     };
     let gta = files.dataset == Dataset::Gta;
     let cars = level.style.cars.clone();
-    let mut world = replay::level_world(level.map, cars, &files.mission, gta, view, script.start)
-        .map_err(anyhow::Error::msg)?;
-    if args.oracle {
-        world.parked.clear();
-    }
+    let mut world = replay::level_world(
+        level.map,
+        cars,
+        &files.mission,
+        gta,
+        view,
+        script.start,
+        !args.oracle,
+    )
+    .map_err(anyhow::Error::msg)?;
     if args.trace {
         println!("{}", trace_line(&world));
     }
@@ -82,6 +88,11 @@ pub fn run(src: &dyn AssetSource, args: RunArgs) -> Result<()> {
         }
         if args.trace_trains {
             println!("{}", gfa_sim::trains::trace_line(w.tick, &w.trains));
+        }
+        if args.trace_traffic {
+            for line in w.traffic.trace_lines(u64::from(w.tick)) {
+                println!("{line}");
+            }
         }
         if let (true, Some(scene), Some(out)) = (dump, scene.as_mut(), &args.out) {
             let path = picture_path(out, pictures);
@@ -163,6 +174,12 @@ pub fn world_sprites(
     let mut out = Vec::new();
     for c in world.standing_cars() {
         scene.push_car(&mut out, c.model, c.remap, c.pos, c.face + 128, c.deltas);
+    }
+    for c in world.traffic.live() {
+        let (x, y) = (c.x as i32, c.y as i32);
+        let pos = [x, y, world.map.ground_z(x, y, c.layer)];
+        let remap = (c.remap + 1).clamp(0, 255) as u8;
+        scene.push_car(&mut out, c.model, remap, pos, c.face + 128, c.dmg_bits);
     }
     if let (Some(d), Some((deltas, _))) = (&world.driven, world.driven_look()) {
         let v = &d.veh;

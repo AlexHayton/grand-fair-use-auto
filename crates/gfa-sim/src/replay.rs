@@ -340,7 +340,8 @@ pub fn trace_line(world: &World) -> String {
 /// A level's world from its parsed files. The player starts at `start`
 /// (facing south, as AmiGTA1's walk harness does), or else at the section's
 /// `PLAYER`. `gta` is false for London's maps, whose fence tiles are not
-/// known yet.
+/// known yet. `map_cars` false leaves out the map's parked cars, as the
+/// AmiGTA1 oracle runs.
 pub fn level_world(
     map: Cmp,
     cars: Vec<CarInfo>,
@@ -348,6 +349,7 @@ pub fn level_world(
     gta: bool,
     view: SimView,
     start: Option<(i32, i32)>,
+    map_cars: bool,
 ) -> Result<World, String> {
     let start = match start {
         Some((bx, by)) => Start {
@@ -359,7 +361,13 @@ pub fn level_world(
             .ok_or_else(|| format!("section [{}] has no PLAYER", section.id))?,
     };
     let walls = WallTiles::for_map(map.style_number, gta);
-    Ok(World::new(SimMap::new(map, walls), cars, view, start))
+    Ok(World::with_map_cars(
+        SimMap::new(map, walls),
+        cars,
+        view,
+        start,
+        map_cars,
+    ))
 }
 
 impl Report {
@@ -396,6 +404,6 @@ pub fn run_bytes(
         .ok_or_else(|| format!("no section [{section}]"))?;
     let map = Cmp::parse(cmp).map_err(|e| e.to_string())?;
     let cars = Style::parse(style).map_err(|e| e.to_string())?.cars;
-    let mut world = level_world(map, cars, section, gta, SimView::GAME, script.start)?;
+    let mut world = level_world(map, cars, section, gta, SimView::GAME, script.start, true)?;
     Ok(run(&mut world, &script, opts, |_, _| {}))
 }

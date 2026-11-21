@@ -2,15 +2,19 @@
  *
  * Links AmiGTA1's own modules from a sibling ../AmiGTA1 checkout (build.sh):
  * the physics, wall resolve and layer rule (gta_vehphys.c), the GRY reader
- * for the car table (gta_style.c), the map and nav grid. The few lines of
- * per-tick glue that live in AmiGTA1's 11,000-line main loop (the road
- * flag, the jump off a ramp and its landing, the layer judged at the nose,
- * wall damage) are restated here, in the order gta_main.c runs them.
+ * for the car table (gta_style.c), the map and nav grid, and the fleet and
+ * trains around him (fleet.h). The few lines of per-tick glue that live in
+ * AmiGTA1's 11,000-line main loop (the road flag, the jump off a ramp and
+ * its landing, the layer judged at the nose, wall damage, stopping at a
+ * fleet car and ramming it) are restated here, in the order gta_main.c
+ * runs them.
  *
  * Prints one line per tick in the format of `gfa-tool run --trace` while
- * driving, so the two can be diffed tick for tick.
+ * driving, and the fleet after it, so the two can be diffed tick for tick.
  *
- *     drivetrace <map.cmp> <style.gry> <script.txt>
+ *     drivetrace <map.cmp> <style.gry> <script.txt> <bx> <by>
+ *
+ * (bx, by) is the level start, which the fleet is parked around.
  *
  * The script uses the order format: `drive record bx by face` once (it
  * lasts a tick, as fixture orders do), then `run ticks up down steer
@@ -19,6 +23,7 @@
  * Grand Fair Use Auto, MIT.
  */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "gta_map.h"
@@ -26,13 +31,11 @@
 #include "gta_style.h"
 #include "gta_tiles.h"
 #include "gta_vehphys.h"
+#include "fleet.h"
 
 #define LIFT     (1L << 16)
 #define GRAVITY  (1L << 16)
 #define Z_MAX    (160L << 16)
-
-int gta_tiles_sprite_base(const gta_tiles *t, int type) { (void)t; (void)type; return 0; }
-int gta_tiles_sprite_count(const gta_tiles *t, int type) { (void)t; (void)type; return 295; }
 
 static int stand_layer(const gta_nav *nav, int bx, int by)
 {
@@ -134,10 +137,49 @@ static void one_tick(int up, int down, int steer, int hb)
             printf("car: wall hit at %d px/step - damage %d\n", hit, veh.damage);
         }
     }
+    /* The fleet: back to the last clear point of the move if it ended
+     * inside a car, then the ram's share for this car. */
+    {
+        const gta_car_info *ci = &tiles.cars[veh.model];
+        long nx = veh.ox, ny = veh.oy, na = veh.ang16;
+        long rvx, rvy, ryaw, rpx, rpy;
+        int nhit;
+        if (gta_traffic_sweep_box(&fleet, ox0, oy0, a0, &nx, &ny, &na,
+                                  gta_car_world_len(ci) / 2,
+                                  gta_car_world_wid(ci) / 2, layer)) {
+            veh.x += nx - veh.ox;
+            veh.y += ny - veh.oy;
+            veh.ox = nx;
+            veh.oy = ny;
+            veh.ang16 = na;
+        }
+        nhit = gta_traffic_ram(&fleet, veh.ox, veh.oy, gta_veh_angle(&veh),
+                               veh.len / 2, veh.wid / 2, veh.vx, veh.vy,
+                               veh.mass, layer, &rvx, &rvy, &ryaw, &rpx, &rpy);
+        if (rvx || rvy || ryaw) {
+            veh.vx += rvx;
+            veh.vy += rvy;
+            veh.ang16 = (veh.ang16 + ryaw) & 0xFFFFFFL;
+        }
+        veh.x += rpx; veh.ox += rpx;
+        veh.y += rpy; veh.oy += rpy;
+        if (nhit) {
+            veh.damage += fleet.pl_damage;
+            printf("car: ram x%d - player dv (%ld,%ld) damage %d (+%d this crash)\n",
+                   nhit, rvx >> 16, rvy >> 16, veh.damage, fleet.pl_damage);
+        }
+    }
     tick++;
     printf("c %ld x %ld y %ld v %ld %ld a %ld w %ld s %ld o %ld %ld z %d air %ld d %d\n",
            tick, veh.x, veh.y, veh.vx, veh.vy, veh.ang16, veh.omega, veh.steer16,
            veh.ox, veh.oy, layer, air ? az : 0L, veh.damage);
+    {
+        long avx = veh.vx < 0 ? -veh.vx : veh.vx;
+        long avy = veh.vy < 0 ? -veh.vy : veh.vy;
+        fleet_tick(veh.ox, veh.oy, avx > avy ? avx : avy,
+                   gta_veh_angle(&veh), layer, veh.len / 2, veh.wid / 2, 0);
+        fleet_dump(tick);
+    }
 }
 
 int main(int argc, char **argv)
@@ -145,8 +187,8 @@ int main(int argc, char **argv)
     FILE *f;
     char line[256];
 
-    if (argc != 4) {
-        fprintf(stderr, "usage: drivetrace <map.cmp> <style.gry> <script.txt>\n");
+    if (argc != 6) {
+        fprintf(stderr, "usage: drivetrace <map.cmp> <style.gry> <script.txt> <bx> <by>\n");
         return 2;
     }
     if (gta_map_load(argv[1], &map) != 0 || gta_nav_build(&nav, &map) != 0)
@@ -155,6 +197,7 @@ int main(int argc, char **argv)
         return 1;
     tiles.cars = style.cars;
     tiles.n_cars = style.car_count;
+    fleet_start(&map, &nav, &tiles, atoi(argv[4]), atoi(argv[5]));
     f = fopen(argv[3], "r");
     if (!f) {
         fprintf(stderr, "drivetrace: cannot open %s\n", argv[3]);

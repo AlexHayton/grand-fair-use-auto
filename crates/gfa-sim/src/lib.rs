@@ -12,6 +12,7 @@
 //! - [`vehicle`]: the driven car's physics; [`cars`]: parked cars, getting
 //!   in and out, ramps, jumps and walls.
 //! - [`trains`]: the elevated lines and trams, built from the rail.
+//! - [`traffic`]: the fleet of driven cars; [`route`]: their routes.
 //! - [`clock`]: the tick and the subsystems' slower clocks.
 //! - [`view`]: the fixed area that counts as on screen.
 //! - [`input`]: buttons per tick, and recordings of them.
@@ -26,8 +27,10 @@ pub mod input;
 pub mod map;
 pub mod player;
 pub mod replay;
+pub mod route;
 pub mod script;
 pub mod script_world;
+pub mod traffic;
 pub mod trains;
 pub mod vehicle;
 pub mod view;

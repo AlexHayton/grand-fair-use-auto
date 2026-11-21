@@ -66,9 +66,12 @@ AmiGTA1 references are to `native/` in a sibling `../AmiGTA1` checkout.
 
 | Feature | Original | AmiGTA1 | GFA | M | Evidence / notes |
 |---|---|---|---|---|---|
-| Traffic spawn/despawn, lanes, junctions, lights | ✓ | full | — | M5 | view-dependent spawn ring to fix |
+| Traffic spawn/despawn, lanes, junctions, lights | ✓ | full | wip | M5 | `gfa_sim::traffic` matches AmiGTA1 car for car (`oracle_traffic`: 4 sites × 3 seeds × 3,000 ticks). The rings follow the fixed logical view, not the window; the pop-in check and the camera lead are still to do |
 | Junction wobble, corner landing error | ✓ | partial | — | M5 | `gta_traffic.c:5871`, `:5666` |
-| Collisions between cars (SAT + impulse) | ✓ | full | — | M5 | `gta_traffic.c:8067` |
+| Collisions between cars (SAT + impulse) | ✓ | full | done | M5 | `gta_traffic.c:8067`, `gta_traffic_ram`, `gta_traffic_sweep_box`; within the fleet and the player's car against it. Walk and drive oracles compare the fleet every tick (46 rams across the random drives) |
+| Traffic and the player: rams, taking a driven car | ✓ | full | wip | M5 | `gta_traffic_ram`, `gta_traffic_grab_car`, `gta_traffic_abandon`: done. The driver of a taken car is not thrown out until the peds arrive |
+| Traffic and the map's parked cars | ✓ | n/a | done | M5 | AmiGTA1 has no map-placed cars. Ours stand in the fleet all level (decision log); at rest they do not push each other |
+| Write-offs in the fleet burn out | ✓ | full | wip | M5/M6 | `gta_weapon.c` `wreck_sweep`; the blast's harm to others is M6 |
 | Peds: pavements, crossings, panic, knockdown | ✓ | full | — | M5 | |
 | Ped counter-punch | ✓ | none | — | M5 | `gta_peds.c:1675` |
 | Gang roles | ✓ | partial | — | M5 | `gta_peds.c:1111` |

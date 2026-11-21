@@ -346,6 +346,11 @@ pub struct Driven {
     pub air: Option<Air>,
     /// Ticks since the door began to open on the way in; -1 when shut.
     pub door_tick: i32,
+    /// The fleet serial it had before he got in, given back when he
+    /// leaves it (0 for a car that was never in the fleet), and whether a
+    /// mission had marked it.
+    pub serial: u64,
+    pub mission: bool,
 }
 
 impl SimHash for Driven {
@@ -353,6 +358,8 @@ impl SimHash for Driven {
         self.veh.sim_hash(h);
         h.i32(self.layer);
         h.i32(self.door_tick);
+        h.bytes(&self.serial.to_le_bytes());
+        h.bool(self.mission);
         match self.air {
             Some(a) => {
                 h.bytes(&a.z.to_le_bytes());

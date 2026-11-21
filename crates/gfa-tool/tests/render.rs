@@ -86,10 +86,11 @@ fn the_simulation_is_drawn() {
             true,
             SimView::GAME,
             Some((62, 60)),
+            false,
         )
         .unwrap();
         // Only what the test puts there.
-        world.parked.clear();
+        world.traffic.clear();
         world
     };
     let mut world = fresh();

@@ -69,17 +69,14 @@ pub fn world(lv: &LevelData, script: &Script, oracle: bool) -> World {
     } else {
         SimView::GAME
     };
-    let mut w = level_world(
+    level_world(
         lv.map.clone(),
         lv.cars.clone(),
         &lv.files.mission,
         true,
         view,
         script.start,
+        !oracle,
     )
-    .unwrap();
-    if oracle {
-        w.parked.clear();
-    }
-    w
+    .unwrap()
 }

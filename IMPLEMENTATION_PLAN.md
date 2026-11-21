@@ -244,7 +244,7 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
   - `TickInput` is the buttons held on a tick; `InputLog` records the ticks where it changes (`gfa-input 1` text format) and plays them back.
   - `Script` reads both AmiGTA1 formats in one file: orders (`autodrive.txt`) and walk legs (`gtadump walk`), with `start`, and `# section:`, `# expect:` and `# reject:` headers. Every order is recognised; fixtures for later milestones log "not supported yet".
 - [x] `gfa-tool run --section N --script f --ticks T [--hash-every K]` checks the expected-log lines from the script header.
-  - Also `--trace` (per-tick player state, the oracle's format), `--out` (PNGs for `dump`/`film`, with the player drawn), `--record` (save the input) and `--oracle` (AmiGTA1's view size and no parked cars, as its harnesses run).
+  - Also `--trace` (per-tick player state, the oracle's format), `--trace-traffic` (the fleet every tick, traffictrace's format), `--out` (PNGs for `dump`/`film`, with the player drawn), `--record` (save the input) and `--oracle` (AmiGTA1's view size and no parked cars, as its harnesses run).
   - Scripts live in `tools/scripts/`.
 - [x] Player on foot. Ref: `gta_player.c`.
   - Run by default, Shift walks; turning, backing up at half pace, sliding along walls, fences, ramps between layers (NYC's bridge at 19,44 lands on layer 3), the walk and run cycles.
@@ -289,9 +289,19 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
 - [ ] Fleet spawn and despawn on the logical view.
   - Nothing may pop in or out where the player can see it. The camera's lead and any speed zoom become sim state (from position and speed only), the spawn and despawn rings follow them with AmiGTA1's margins (+2..+6 blocks spawn, +9 despawn), and in normal play the renderer never shows more ground than that view: zoom-out is capped and windows wider than 21:9 are pillarboxed. Free look, fly and extreme zoom are debug views where pop-in is accepted.
   - A pop-in check, like the holecheck: run traffic and fail if anything spawns or despawns inside the visible ground at the largest allowed zoom and aspect.
-- [ ] AI driver: lanes, junctions, give way, queues, S-curve lane change, U-turn.
-- [ ] Traffic lights.
-- [ ] SAT `box_mtv` collisions with impulse and spin (`fleet_collide`, around `gta_traffic.c:8067`).
+  - Stage 1 (2026-11-21): the fleet's rings follow `SimView` (half-width 10 blocks in the game), centred on the player or his car, never on the window. The camera lead and zoom as sim state, the zoom cap and pillarbox, and the pop-in check remain.
+- [x] AI driver: lanes, junctions, give way, queues, S-curve lane change, U-turn.
+  - `gfa_sim::traffic` (with `route`): AmiGTA1's `gta_traffic.c` with its switches at their defaults. Routes by breadth-first search over the arrows, pure-pursuit lane keeping, turns on circular arcs, junction bookings and convoys, the occupancy table, following gaps, lane changes and U-turns when blocked, head-on backing off, escapes out of sight, cruising on clear straights, far cars driving at half or quarter rate.
+  - `tools/oracle/traffictrace.c` runs AmiGTA1's own traffic; `oracle_traffic` matches it car for car at the four `fullgate` sites, seeds 1 to 3, 3,000 ticks each.
+- [x] Traffic lights.
+  - The lights' clock and the stop line (the block's traffic hint). Drawing the lights waits for the renderer's sprite work.
+- [x] SAT `box_mtv` collisions with impulse and spin (`fleet_collide`, around `gta_traffic.c:8067`).
+  - Within the fleet, and (stage 2) the player's car against it: stopped at the contact by eight halvings of the move (`gta_traffic_sweep_box`), then the ram (`gta_traffic_ram`): both pushed apart by mass, the struck car knocked loose with a spin or leant on, bodywork charged on a real impact.
+- [x] The player and the fleet (stage 2, 2026-11-21).
+  - Every car but his is in the fleet: the traffic, the map's parked cars (kept all level), the cars he leaves (AmiGTA1's `gta_traffic_abandon`, under their old serial), wrecks, and train wrecks. The fleet has 192 slots, not AmiGTA1's 60, so Liberty City's 106 parked cars fit; AmiGTA1's own runs never reach 60, so the oracle is unchanged.
+  - RETURN takes the nearest car within reach out of the fleet, moving or standing (`gta_traffic_grab_car`). A moving car's driver is not thrown out yet: that needs the peds.
+  - On foot he is held off fleet cars (`ped_car_block`); the vault, the slide and the blocked door ask the fleet. Trains crush fleet cars (20 points), and write-offs in the fleet burn and burn out (`gta_weapon.c`'s sweep; the blast is M6).
+  - `walktrace.c` and `drivetrace.c` now run the fleet and the trains (`tools/oracle/fleet.h`), and the walk and drive oracles compare the whole fleet on every tick: 71 runs match, 11 of them with rams (46 in all).
 - [ ] Peds on pavements, crossings, knockdowns, panic.
 - [ ] Close the M5 items in *Gaps beyond AmiGTA1*: counter-punch, gang roles, special ped groups, junction fidelity, pull-over, the siren, dragging out drivers.
 - Exit: the `drive` traces from `fullgate`/`litegate` (4 sites × 3 seeds × 12,000 ticks) match the oracle, with no deadlocks.
@@ -490,6 +500,15 @@ Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.m
 
 Newest first. Each entry: date, decision, why.
 
+- **2026-11-21. Traffic is AmiGTA1's, with its switches at their defaults.** AmiGTA1 carries about twenty experimental switches (`opt_*`), most of them off after its author measured them; the port keeps what the defaults run and leaves out the rest, so there is one behaviour to match and to maintain.
+- **2026-11-21. Traffic keeps AmiGTA1's fixed array of 60 cars.** A new car is written into the next slot with only the fields AmiGTA1 sets, and keeps the rest from whatever car last used that slot (a lane change under way, a coast, a collision latch). Clearing them would be tidier but would part from the oracle in ways nobody could see the cause of.
+- **2026-11-21. The traffic generator's seed is 64 bits**, as in AmiGTA1's host build. The route wander draws `(seed >> 16) % n` without a mask, which a 32-bit seed answers differently, and the host build is the oracle we can run. (The trains keep 32 bits; their draws are masked.)
+- **2026-11-21. AmiGTA1 reads two locals before setting them** (`gta_traffic.c:5316`, the check that keeps a crossing's booking while a car waits just short of the junction). The result depends on whatever is on the stack. The oracle is built with them zeroed (`-ftrivial-auto-var-init=zero`) and the port treats them as zero, which turns that one test off. Worth reporting to AmiGTA1.
+- **2026-11-21. The map's parked cars live in the fleet for the whole level** (replacing the stage-1 entry that kept them outside it). AmiGTA1 has none; the original parks some. In the fleet they are what AmiGTA1's cars left by the player are: traffic stops for them, the player rams them, takes them, and is held off them on foot, and trains crush them. They are never despawned, until he takes one; left again, it is an ordinary abandoned car. A vehicle with no door (a boat, the RC car) is placed locked. Two of them at rest do not push each other: the map parks some rows a few pixels into each other, and the fleet's collision would slide them apart at the start of the level.
+- **2026-11-21. The fleet has 192 slots, not AmiGTA1's 60.** Liberty City parks 106 cars. AmiGTA1's 60 was memory on an Amiga; its own runs never come near it, so the oracle runs are identical (checked), and the stale-field reuse of a slot is unchanged below 60.
+- **2026-11-21. A car the player leaves keeps its dents.** AmiGTA1 keeps its damage points but clears its dented panels when it goes back into the fleet; the original shows the same car. No trace prints the panels.
+- **2026-11-21. The player's car is drawn on its physics clock.** It steps on 7 ticks in 15 (23.3 Hz); drawn between ticks it moved on one and stood on the next, which the owner saw as stutter. The app now notes when each step happened (from the 7/15 accumulator) and carries the car on at its last step's velocity and turn between steps, and gives the camera that velocity. Render only: the simulation never reads it. Measured at 60 Hz on a straight: a frame's move went from 0..35 render px to 7.6..8.2.
+
 - **2026-11-20. The vault is AmiGTA1's, including where it is thin.** The vault moves him without asking the map, so a car parked against a wall can drop him into it; and the slide under a tall vehicle only carries him while one is already over him, so SPACE at a bus approached on foot lies him down for four ticks and stands him up again (AmiGTA1 ports the original's state 0x92, which is a shove). Both are for M6b's probe to settle against the original before anything changes.
 
 - **2026-11-20. The tank, boats, helicopter and RC car leave M4 for a new M6b, measured from the original.** AmiGTA1 drives none of them beyond the tank's engine cut, so their behaviour has to come from the DOS original. The owner proposed running it under DOSBox-X with scripted key presses. The harness is built once and reused for every later **(verify)** item. M6b follows M6 because the tank's cannon needs its explosions. M4 keeps what AmiGTA1 has: the vault, cars sinking, drowning.
@@ -552,6 +571,21 @@ Newest first. Each entry: date, decision, why.
 ## Progress log
 
 Newest first.
+
+- **2026-11-21. M5 stage 2: the player and the fleet; smooth driving.**
+  - `gfa_sim::traffic::contact` (AmiGTA1's `car_place`, `abandon`, `leave_wreck`, `grab_car`, `rename_car`, `box_free`, `sweep_box`, `ram`, `gta_main.c`'s `fleet_car_at` and `gta_weapon.c`'s wreck sweep). `World` keeps no list of its own parked cars: every car but his is in the fleet. The fleet grows to 192 slots.
+  - In `World`: RETURN takes the nearest car out of the fleet, standing or moving; getting out leaves the car in the fleet under its old serial, with its dents; his car stops at fleet cars and rams them; walkers, the vault, the slide and the blocked door ask the fleet; trains crush fleet cars, and wrecked trains are left as write-offs that burn out; his write-off burns after the traffic and trains tick, as in AmiGTA1.
+  - Oracle: `tools/oracle/fleet.h` runs AmiGTA1's traffic and trains in `walktrace.c` and `drivetrace.c` (the drive harness also restates the contact stop and the ram), and the walk and drive oracles compare every fleet car on every tick. All 71 runs match; 11 drives ram traffic, 46 rams in all. `oracle_traffic` unchanged at 192 slots.
+  - The app draws the driven car on its physics clock (decision log); `the_car_moves_on_every_frame` measures it. `gfa-tool run --trace-traffic` prints the fleet every tick.
+  - Speed: Liberty City with all 106 parked cars in the fleet runs 5,000 ticks in 0.20 s (release), 40 µs a tick.
+  - Next: the peds, then the driver thrown out of a taken car, the pop-in check and camera lead, and drawing the lights.
+
+- **2026-11-21. M5 stage 1: traffic.**
+  - `gfa_sim::route` (AmiGTA1's `gta_route.c`) and `gfa_sim::traffic` (`gta_traffic.c`): the fleet is placed around the level start, tops itself up in a ring outside the view, drives its routes, books junctions, stops at red lights, follows, overtakes by changing lanes, turns round, and knocks other cars about when it hits them.
+  - In the world: ticked after the player, with the view on him or his car; he is an obstacle the fleet stops for. In the state hash. Drawn in the app between ticks and in `gfa-tool run` pictures.
+  - `tools/oracle/traffictrace.c` and `oracle_traffic`: AmiGTA1's traffic gate sites on Liberty City, seeds 1 to 3, 3,000 ticks each, every car's position, layer, heading and speed equal on every tick.
+  - Found in AmiGTA1: two locals read before they are set (decision log).
+  - Next: the player's car against the fleet and taking cars from it, then peds (done in stage 2).
 
 - **2026-11-21. M4 stage 5: water; Vice City in the README.**
   - On foot he walks into water and drowns; a car that falls short of a jump over water sinks. `World::health` (100, the drowning drains it), `Doing::Drowning`, and a stopgap wasted that starts him again at the level's start until M6.
