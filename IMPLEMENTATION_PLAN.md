@@ -281,8 +281,9 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
   - `tools/oracle/traintrace.c` runs AmiGTA1's own `gta_train.c`; `oracle_trains` matches 12,000 ticks of every city's trains. `tools/scripts/train_ride.txt` boards, rides, hijacks, hands back and gets off.
 - [ ] Use `tools/vehruler.c` as the measurement reference.
 - [ ] Close the M4 items in *Gaps beyond AmiGTA1*: trains; cars sinking and drowning. (Pull-over, the siren, bombs and chain explosions moved to M5 and M6; the tank, boats, helicopter and RC car to M6b.)
+  - Water done on 2026-11-21. Trains wait on a comparison with the original's path table.
 - Exit: every class AmiGTA1 drives (cars, bikes, buses, trains) drives; the (91,105..108) jump lands; vehicle traces match the oracle.
-  - So far: the jump lands; `tools/oracle/drivetrace.c` (AmiGTA1's physics, wall and layer code, with its main loop's glue restated) matches gfa-sim on `drive_oracle`, `drive_jump`, `drive_wall` and 24 random drives over the three cities with random vehicles (`oracle_drive_scripts`, `oracle_random_drives`).
+  - So far: the jump lands; `tools/oracle/drivetrace.c` (AmiGTA1's physics, wall and layer code, with its main loop's glue restated) matches gfa-sim on `drive_oracle`, `drive_jump`, `drive_wall`, `drive_sink` and 24 random drives over the three cities with random vehicles (`oracle_drive_scripts`, `oracle_random_drives`).
 
 **M5: Living city.** Ref: `gta_traffic.c` (10.6k lines), `gta_route.c` (BFS: 48-block window, 700 nodes), `gta_nav.c`, `gta_peds.c`.
 - [ ] Fleet spawn and despawn on the logical view.
@@ -312,6 +313,7 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
 - [ ] Boats: handling on water, getting on and off, what happens at the shore.
 - [ ] Tank: its handling against AmiGTA1's; the turret; the cannon; its armour; pushing cars; where it is found.
 - [ ] RC car and helicopter: whether either can be driven, and how. The escape helicopter's scripted flight is M7's.
+- [ ] Getting into a car, frame by frame against the original. The owner reports that ours looks as if he goes in through the wrong side of the door (2026-11-21). Check the door point, the walk-in path, the sprite frames and the door's opening delta.
 - Exit: each drives as measured; the numbers and the probe scripts that produced them are in the decision log.
 
 **M7: Mission VM, HUD, text.** Ref: `gta_script.c`, `gta_script_run.c` (`cmd_names[]` at lines 35-172; `step()` at 645; `gta_script_tick` at 2691), `gta_script.h:203-220` and `:459-663`, the `gta_main.c` callbacks (doors, cranes, bombs, the arrow), `gta_hud.c`, `gta_font.c`, `gta_text.c`, and `gta_main.c:2615-2830` (text displays).
@@ -402,9 +404,15 @@ Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.m
 
 - Moved on 2026-11-20 to M6b, to be measured from the original under DOSBox-X: the tank, boat handling, the helicopter and the RC car.
 
-- [ ] **Water.**
+- [x] **Water.**
   - Cars entering water sink and are lost.
   - Finish drowning for the player and peds. The water ticks at `gta_main.c:2253` are only partial.
+  - 2026-11-21, done for the player.
+    - On foot, with UP held, water 10 px ahead with only air between takes him in.
+    - A jump that falls short over water loses the car (`car: sank`).
+    - Under water he cannot move and loses 3 health every other tick. At none he is wasted, and until M6 he starts again where the level put him (`World::health`, `Doing::Drowning`).
+    - Both harnesses restate the rule, and `walk_water.txt` and `drive_sink.txt` match AmiGTA1 tick for tick.
+  - Peds drowning moved to M5, which brings the peds.
 - [ ] **Trains**: follow the bogie path table instead of cutting corners on the chord.
   - Trams stay still, as in the original.
   - Make train boarding, riding and IS_PLAYER_ON_TRAIN robust across all three cities.
@@ -414,6 +422,7 @@ Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.m
 - [ ] **Horn and pull-over**: the original's look-ahead of up to five blocks for a car (`gta_main.c:3957`, NOT PORTED).
 - [ ] **Emergency vehicles the player drives**: the siren and light toggle in cop cars, ambulances and fire engines, and how traffic reacts to it.
 - [ ] **Dragging the driver out** when the player takes an occupied car, and the carjack's score (moved from M4: needs peds).
+- [ ] **Peds in the water** drown as the player does (moved from M4 on 2026-11-21: needs peds).
 - [ ] The victim's ped counter-punch (`gta_peds.c:1675`).
 - [ ] Settle the gang-role state machine (`gta_peds.c:1111`).
 - [ ] **Special ped groups** that the bonuses need: Hare Krishna lines; Elvis impersonators **(verify which levels)**. Spawn rules come from the style and ped tables.
@@ -543,6 +552,13 @@ Newest first. Each entry: date, decision, why.
 ## Progress log
 
 Newest first.
+
+- **2026-11-21. M4 stage 5: water; Vice City in the README.**
+  - On foot he walks into water and drowns; a car that falls short of a jump over water sinks. `World::health` (100, the drowning drains it), `Doing::Drowning`, and a stopgap wasted that starts him again at the level's start until M6.
+  - The probe asks for the UP key as AmiGTA1 does, not the stick.
+  - `walktrace.c` restates the walk into water and the drowning, and `drivetrace.c` ends its trace when the car sinks. New scripts `walk_water.txt` (151 ticks) and `drive_sink.txt` (75 car ticks) match AmiGTA1. New synthetic test: `walking_into_water_drowns_him`. Every tier green, with clippy and wasm-check.
+  - README: how to choose a city, and how to play Vice City (sections 202 and 203, `MIAMI.CMP`, `STYLE003`).
+  - A known issue, from the owner: the get-in looks as if he goes in through the wrong side of the door. Logged for M6b, to compare frame by frame with the original.
 
 - **2026-11-20. M4 stage 4: the vault; tank, boats and specials moved to M6b.**
   - `Doing::Vaulting`, `Doing::Sliding`, the far-side get-in (`cars::far_side`), the exit over the roof, SPACE on foot as jump; ped frames 91..94 and 41. `drive_basic.txt` now parks its car door-side; `vault.txt` goes over the roof three ways.

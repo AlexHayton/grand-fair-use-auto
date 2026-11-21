@@ -7,7 +7,8 @@
  * tick for tick, plus gtadump-style leg lines.
  *
  * Unlike `gtadump walk`, it builds the navigation grid first, so fences
- * (thin walls) are in force as they are in AmiGTA1's game.
+ * (thin walls) are in force as they are in AmiGTA1's game. It also restates
+ * the walk into water and the drowning from gta_main.c's main loop.
  *
  *     walktrace <map.cmp> <script.txt>
  *
@@ -22,6 +23,7 @@
 #include "gta_map.h"
 #include "gta_nav.h"
 #include "gta_player.h"
+#include "gta_trig.h"
 
 /* The player asks the tile set where the ped sprites start; a trace has no
  * use for sprites, so these stand in for gta_tiles.c. */
@@ -43,6 +45,18 @@ static const char *const ground_name[8] = {
     "air", "water", "road", "pavement", "field", "building", "?6", "?7"
 };
 
+/* The layer of the water under this one with only air between, or -1
+ * (gta_main.c's water_below). */
+static int water_below(const gta_map *m, int bx, int by, int z)
+{
+    for (; z >= 0; z--) {
+        int g = gta_map_ground_type(m, bx, by, z);
+        if (g != GTA_GROUND_AIR)
+            return g == GTA_GROUND_WATER ? z : -1;
+    }
+    return -1;
+}
+
 static void trace(long tick, const gta_player *p)
 {
     printf("t %ld x %08lx y %08lx z %d a %d anim %d f %d %d b %d%d g %d\n",
@@ -60,7 +74,7 @@ int main(int argc, char **argv)
     gta_player pl;
     FILE *script;
     char line[256];
-    int sx = 64, sy = 64, leg = 0;
+    int sx = 64, sy = 64, leg = 0, drown = 0, health = 100;
     long tick = 0;
 
     if (argc != 3) {
@@ -98,7 +112,37 @@ int main(int argc, char **argv)
         if (sscanf(line, "%d %d %d %d", &turn, &fwd, &walk, &ticks) != 4)
             continue;
         for (i = 0; i < ticks; i++) {
-            gta_player_update(&pl, &map, turn, fwd, walk);
+            if (!drown) {
+                gta_player_update(&pl, &map, turn, fwd, walk);
+                /* WATER IS NOT A WALL TO A MAN WHO WALKS INTO IT: the probe
+                 * from gta_main.c's main loop, 10 px ahead while UP is held. */
+                if (fwd > 0) {
+                    long ax = pl.x + (long)gta_sin(pl.angle) * 40;
+                    long ay = pl.y - (long)gta_cos(pl.angle) * 40;
+                    int wz = water_below(&map, (int)(ax >> 21), (int)(ay >> 21),
+                                         pl.layer);
+                    if (wz >= 0) {
+                        pl.x = ax;
+                        pl.y = ay;
+                        pl.layer = wz;
+                        drown = 1;
+                        printf("player: in the water at (%d,%d)\n",
+                               (int)(ax >> 21), (int)(ay >> 21));
+                    }
+                }
+            }
+            /* gta_main.c: 3 health every other tick under water. */
+            if (drown && (drown++ & 1))
+                health -= 3;
+            if (health <= 0) {
+                /* Wasted. AmiGTA1 shows the card and starts again at a
+                 * hospital; gfa-sim, until M6, starts again where the
+                 * script began, and so does this. */
+                printf("player: wasted - drowned\n");
+                gta_player_init(&pl, &map, &tiles, sx, sy);
+                drown = 0;
+                health = 100;
+            }
             trace(++tick, &pl);
         }
         printf("leg %2d: turn %2d fwd %2d walk %d x%3d  ->  block (%3d,%3d) "

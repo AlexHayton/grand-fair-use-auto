@@ -1,0 +1,19 @@
+# Run off the quay into the water and drown.
+#
+# Block (161,15) is pavement on layer 2, with the river south of it on
+# layer 1 and only air between. Facing south, he runs to the edge. Water is
+# not a wall to a man who walks into it, so 10 px from the edge he goes in.
+# Under water he cannot move, and he loses 3 health every other tick. At
+# none he is wasted; until M6 he starts again where the script began. Still
+# holding UP, he runs in a second time and drowns again. Then he backs away
+# north, from the water.
+#
+# oracle: walk
+# section: 1
+# expect: player: in the water at (161,16)
+# expect: player: wasted - drowned
+start 161 15
+
+0 1 0 40
+0 1 0 80
+0 -1 0 30

@@ -9,7 +9,7 @@
 //! the original (Carnage3D `CreateStartupObjects`).
 
 use crate::hash::{SimHash, StateHasher};
-use crate::map::SimMap;
+use crate::map::{SimMap, ground};
 use crate::vehicle::{CLASS_BIKE, EXIT_MAX_SPEED, Pedals, Veh, veh_layer};
 use gfa_fixed::trig::{cos, sin};
 use gfa_formats::cmp::StartupObject;
@@ -368,14 +368,16 @@ impl SimHash for Driven {
 impl Driven {
     /// One tick of driving: the physics, a take-off or the flight, the
     /// layer from the nose, then the walls and their damage. Lines for the
-    /// run log go to `say`.
+    /// run log go to `say`. Returns the layer of the water the car fell
+    /// into, if a jump fell short over water.
     pub fn tick(
         &mut self,
         map: &SimMap,
         ci: &CarInfo,
         pedals: Pedals,
         say: &mut impl FnMut(String),
-    ) {
+    ) -> Option<i32> {
+        let mut water = None;
         let v = &mut self.veh;
         let on_road = map.nav_ground((v.ox >> 21) as i32, (v.oy >> 21) as i32, self.layer) == 2;
         let (x0, y0, ox0, oy0, ang0) = (v.x, v.y, v.ox, v.oy, v.ang16);
@@ -412,6 +414,17 @@ impl Driven {
                     _ if air.z < -(32 << 16) => {
                         say(format!("car: jump fell short at ({bx},{by})"));
                         self.air = None;
+                        // What it fell into answers: the first surface
+                        // under the layer it left.
+                        let below = (0..=self.layer)
+                            .rev()
+                            .find(|&z| map.nav_ground(bx, by, z) != ground::AIR);
+                        if let Some(z) = below
+                            && map.nav_ground(bx, by, z) == ground::WATER
+                        {
+                            say(format!("car: into the water at ({bx},{by}) layer {z}"));
+                            water = Some(z);
+                        }
                     }
                     _ => {}
                 }
@@ -457,6 +470,7 @@ impl Driven {
                 ));
             }
         }
+        water
     }
 
     /// Leave the ground if the car is driving up a ramp, fast enough, into

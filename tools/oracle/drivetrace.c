@@ -53,6 +53,7 @@ static gta_veh veh;
 static int layer, air, lift;
 static long az, avz, flown;
 static long tick;
+static int driving;
 
 static void one_tick(int up, int down, int steer, int hb)
 {
@@ -95,8 +96,23 @@ static void one_tick(int up, int down, int steer, int hb)
                 printf("car: landed at (%d,%d) layer %d after %ld px\n", bx, by, lz, flown >> 16);
                 layer = lz; air = 0; az = 0; avz = 0;
             } else if (az < -(32L << 16)) {
+                int z = layer, g = 0;
                 printf("car: jump fell short at (%d,%d)\n", bx, by);
                 air = 0; az = 0; avz = 0;
+                /* What it fell into answers: the first surface under the
+                 * layer it left. Water takes the car (gta_main.c), and the
+                 * trace of it ends. */
+                for (; z >= 0; z--) {
+                    g = gta_nav_ground(gta_nav_at(&nav, bx, by, z));
+                    if (g != 0)
+                        break;
+                }
+                if (z >= 0 && g == 1) {
+                    printf("car: into the water at (%d,%d) layer %d\n", bx, by, z);
+                    driving = 0;
+                    tick++;
+                    return;
+                }
             }
         }
     }
@@ -128,7 +144,6 @@ int main(int argc, char **argv)
 {
     FILE *f;
     char line[256];
-    int driving = 0;
 
     if (argc != 4) {
         fprintf(stderr, "usage: drivetrace <map.cmp> <style.gry> <script.txt>\n");

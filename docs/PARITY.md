@@ -34,7 +34,7 @@ AmiGTA1 references are to `native/` in a sibling `../AmiGTA1` checkout.
 | Fences (solid flat faces) on GTA's maps | ✓ | full | done | M3 | `gta_nav.c` tile lists per style |
 | Fences on London's maps | ✓ | none | — | M11 | No tile lists for London's styles yet: walked through for now |
 | Railway blocks closed to traffic routing | ✗ | full | done | M3 | AmiGTA1's own deviation (the original treats them as road); kept, for traffic |
-| Drowning, punching, jumping, vaulting cars | ✓ | partial | — | M4–M6 | `gta_main.c` (water ticks, punch, vault) |
+| Drowning, punching, jumping, vaulting cars | ✓ | partial | wip | M4–M6 | `gta_main.c` (water ticks, punch, vault) |
 
 ## Vehicles (M4)
 
@@ -44,14 +44,14 @@ AmiGTA1 references are to `native/` in a sibling `../AmiGTA1` checkout.
 | Wall resolve, ramps, layers, jumps | ✓ | full | done | M4 | `gta_vehphys.c`, `gta_main.c:790-805`; NYC jump at x 91 lands |
 | Damage deltas, burning, write-offs | ✓ | full | done | M4 | `gta_car.c` (`gta_car_panel_delta`), `gta_main.c` (fuse) |
 | Explosions harming what is near, burnt wrecks | ✓ | full | — | M4/M6 | `gta_weapon.c` (`gta_weapons_wreck_car`) |
-| Enter/exit by door, bikes | ✓ | full | done | M4 | `gta_main.c` (door point, enter and exit steps) |
+| Enter/exit by door, bikes | ✓ | full | wip | M4/M6b | `gta_main.c` (door point, enter and exit steps). Known issue (user report, 2026-11-21): the get-in animation does not match the original. He seems to enter the door from the wrong side. Compare frame by frame under DOSBox-X |
 | Vault over a car | ✓ | full | done | M4 | `gta_main.c` (vault states, far-side entry, blocked-door exit); `tools/scripts/vault.txt` |
 | Slide under a tall vehicle | ✓ | partial | done | M4/M6b | only while one is over him, as AmiGTA1; the original's approach from outside to verify |
 | Drag out the driver | ✓ | full | — | M5 | the driver needs M5's peds |
 | Tank: handling | ✓ | full | — | M6b | engine cut, `gta_vehphys.c:395`, is in the physics; check against the original |
 | Tank: turret and cannon | ✓? | none | — | M6b | not modelled anywhere in AmiGTA1; measure under DOSBox-X |
 | Boats: driving on water | ✓? | none | — | M6b | placed as an object only, `gta_traffic.c:1152`; no doors in the car table; measure under DOSBox-X |
-| Cars sinking; drowning | ✓ | partial | — | M4 | `gta_main.c:2253` |
+| Cars sinking; drowning | ✓ | partial | done (player) | M4/M5 | `gta_main.c:2253`, the walk into water and the jump falling short; `walk_water.txt` and `drive_sink.txt` match the oracle. Peds in the water: M5 |
 | Helicopter (scripted escape) | ✓ | none | — | M6b/M7 | filtered from traffic, `gta_traffic.c:1186`; drivable? measure under DOSBox-X |
 | RC car / map-placed specials | ? | partial | — | M6b | `gta_traffic.c:1152`; model 47, no doors; measure under DOSBox-X |
 | Trains: routes, stops, boarding, crush | ✓ | partial | done | M4 | `gta_train.c`; straights and quarter circles, not yet the original's path table; oracle matches |

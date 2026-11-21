@@ -1,0 +1,19 @@
+# The jump over the water at x = 91 in Liberty City, taken too slowly.
+#
+# The ramp climbs south over y 100..105 on layer 3, and y 106..107 is open
+# water. From a standing start at (91,100), with 30 ticks of throttle and
+# then a coast, the car leaves the ramp at a crawl and falls short. The
+# first surface under it is the water on layer 1, so the car is lost and
+# he drowns. Until M6 he then starts again where the script began.
+#
+# oracle: drive
+# section: 1
+# expect: car: jump from (91,105) layer 3
+# expect: car: jump fell short at (91,106)
+# expect: car: into the water at (91,106) layer 1
+# expect: car: sank
+# expect: player: wasted - drowned
+# reject: landed at
+drive 0 91 100 128
+run 30 1 0 0 0
+wait 150

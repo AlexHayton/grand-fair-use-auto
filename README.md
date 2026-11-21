@@ -26,13 +26,52 @@ roadmap, decision log and progress log.
 
 ```sh
 cargo run --release -p gfa-native                         # Liberty City, level [1]
-cargo run --release -p gfa-native -- --level 102          # San Andreas (202: Vice City)
+cargo run --release -p gfa-native -- --level 102          # San Andreas
+cargo run --release -p gfa-native -- --level 202          # Vice City
 cargo run --release -p gfa-native -- --game london69 --level 2
 cargo run -p gfa-tool -- info                             # what's in your data folder
 ```
 
 You start on foot at the level's starting point. The cars parked around the
 city can be driven; traffic, people and missions arrive in later milestones.
+
+### Choosing a city
+
+`--level` takes a section number from `GTADATA/MISSION.INI`. Each city has two
+sections, one per chapter. Both play on the same map, and for now they differ
+only in where you start. The map names its style, which is loaded from beside
+it: `.G24` if present, otherwise `.GRY`.
+
+| City | `--level` | Map | Style |
+|---|---|---|---|
+| Liberty City | `1` (default), `2` | `NYC.CMP` | `STYLE001` |
+| San Andreas | `102`, `103` | `SANB.CMP` | `STYLE002` |
+| Vice City | `202`, `203` | `MIAMI.CMP` | `STYLE003` |
+| London 1969 (`--game london69`) | `2`, `3`, `4` | `UK/UK.CMP` | `UK/STYLE001` |
+
+### Playing Vice City
+
+```sh
+cargo run --release -p gfa-native -- --level 202     # Vice City, first chapter
+cargo run --release -p gfa-native -- --level 203     # Vice City, second chapter
+./target/release/gfa --level 202                     # the same, once built
+```
+
+- **Web:** run `trunk serve` and open `http://127.0.0.1:8080/?level=202`.
+- **Data:** add `--data /path/to/GTA` if you have not set `gfa.local.toml` or
+  `GFA_DATA`.
+- **Checking it loaded:** the log should show `GTADATA/miami.cmp: … faces`
+  and Vice City's trains (2 trains, 3 stations).
+- **Without a window:** `--screenshot vc.png` saves the first frame and quits.
+
+Testing on Vice City:
+
+```sh
+cargo run -p gfa-tool -- run tools/scripts/walk_basic.txt --section 202   # any script, on Vice City's map
+cargo run -p gfa-tool -- render GTADATA/MIAMI.CMP --at 9,19               # an offscreen picture of the city
+```
+
+A script runs on Vice City if its header says `# section: 202`.
 
 | Key | Does |
 |---|---|

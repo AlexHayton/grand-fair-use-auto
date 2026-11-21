@@ -16,6 +16,9 @@ use gfa_fixed::fx::{BLOCK_SHIFT, FP, block_centre};
 use gfa_fixed::trig::{cos, sin};
 use gfa_formats::style::CarInfo;
 
+/// Health at the start and after a respawn.
+pub const FULL_HEALTH: i32 = 100;
+
 /// Where the player starts: a block, and optionally a heading.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Start {
@@ -154,6 +157,9 @@ pub enum Doing {
     /// Under a tall vehicle, a pixel along every state until clear; the
     /// count is the tick within the state.
     Sliding(i32),
+    /// Gone under: there is no swimming. The count is AmiGTA1's
+    /// `player_drown`, ticks since he went in plus one.
+    Drowning(u32),
 }
 
 /// The simulation.
@@ -172,6 +178,10 @@ pub struct World {
     /// Vehicles standing in the streets.
     pub parked: Vec<Parked>,
     pub trains: Trains,
+    /// AmiGTA1's `player_health`: 100 full, wasted at 0.
+    pub health: i32,
+    /// Where the level put him, for the stopgap respawn.
+    start: Start,
     /// Last tick's buttons, to find presses.
     prev: Buttons,
     log: Vec<LogLine>,
@@ -195,6 +205,8 @@ impl World {
             driven: None,
             parked,
             trains,
+            health: FULL_HEALTH,
+            start,
             prev: Buttons::NONE,
             log: Vec::new(),
         };
@@ -242,8 +254,11 @@ impl World {
                 Doing::Driving => self.try_exit(),
                 Doing::Riding(t) => self.try_get_off(t),
                 // A press mid-animation is dropped, not queued.
-                Doing::Entering(_) | Doing::Exiting(_) | Doing::Vaulting(_) | Doing::Sliding(_) => {
-                }
+                Doing::Entering(_)
+                | Doing::Exiting(_)
+                | Doing::Vaulting(_)
+                | Doing::Sliding(_)
+                | Doing::Drowning(_) => {}
             }
         }
         // On foot, the handbrake key is jump.
@@ -257,7 +272,8 @@ impl World {
             Doing::Riding(t) => self.ride(t, b, pressed.contains(Buttons::FIRE)),
             Doing::Vaulting(v) => self.vaulting(v),
             Doing::Sliding(t) => self.sliding(t),
-            Doing::Driving => {}
+            // In the water he does nothing but drown.
+            Doing::Driving | Doing::Drowning(_) => {}
         }
         if self.doing == Doing::Driving {
             let pedals = Pedals {
@@ -269,6 +285,7 @@ impl World {
             self.drive(pedals);
         }
         self.run_trains();
+        self.harm();
         self.prev = b;
         self.tick += 1;
     }
@@ -340,7 +357,10 @@ impl World {
             .collect();
         for event in self.trains.tick(player, &cars) {
             match event {
-                TrainEvent::RanOver => self.say("train: ran the player over".into()),
+                TrainEvent::RanOver => {
+                    self.health = 0;
+                    self.say("train: ran the player over".into());
+                }
                 TrainEvent::Stopped(t) => {
                     let c = self
                         .trains
@@ -424,6 +444,71 @@ impl World {
                 self.player.layer
             ));
         }
+        // The UP key itself, as AmiGTA1 asks, not the stick: UP and DOWN
+        // together still probe.
+        if b.contains(Buttons::UP) {
+            self.walk_into_water();
+        }
+    }
+
+    /// Water is not a wall to a man who walks into it: with water 10 px
+    /// ahead, below him with only air between, he goes in (AmiGTA1's main
+    /// loop).
+    fn walk_into_water(&mut self) {
+        let p = &self.player;
+        // A Q14 unit times 40 is 10 px.
+        let ax = p.x + sin(p.angle) * 40;
+        let ay = p.y - cos(p.angle) * 40;
+        let (bx, by) = (ax >> (FP + BLOCK_SHIFT), ay >> (FP + BLOCK_SHIFT));
+        let Some(z) = self.water_below(bx, by, p.layer) else {
+            return;
+        };
+        self.player.x = ax;
+        self.player.y = ay;
+        self.player.layer = z;
+        self.doing = Doing::Drowning(1);
+        self.say(format!("player: in the water at ({bx},{by})"));
+    }
+
+    /// The layer of the water at or under layer `z` with only air between.
+    fn water_below(&self, bx: i32, by: i32, z: i32) -> Option<i32> {
+        let z = (0..=z)
+            .rev()
+            .find(|&z| self.map.ground_type(bx, by, z) != ground::AIR)?;
+        (self.map.ground_type(bx, by, z) == ground::WATER).then_some(z)
+    }
+
+    /// What hurts him this tick: the water takes 3 health every other tick
+    /// (a second and a half from full); at none he is wasted.
+    fn harm(&mut self) {
+        if let Doing::Drowning(n) = self.doing {
+            if n & 1 != 0 {
+                self.health -= 3;
+            }
+            self.doing = Doing::Drowning(n + 1);
+        }
+        if self.health <= 0 {
+            self.wasted();
+        }
+    }
+
+    /// Wasted. Until M6 brings the card, lives and hospitals, he starts
+    /// again where the level put him, with full health.
+    fn wasted(&mut self) {
+        let how = match self.doing {
+            Doing::Drowning(_) => " - drowned",
+            _ => "",
+        };
+        self.say(format!("player: wasted{how}"));
+        self.driven = None;
+        let start = self.start;
+        let (mut player, _) = Player::place(&self.map, start.bx, start.by);
+        if let Some(a) = start.angle {
+            player.angle = a & 255;
+        }
+        self.player = player;
+        self.health = FULL_HEALTH;
+        self.doing = Doing::OnFoot;
     }
 
     /// Is a parked car's body at `(px, py)` on `layer`, grown by `margin`?
@@ -879,7 +964,7 @@ impl World {
             }
         }
         let mut lines = Vec::new();
-        d.tick(&self.map, &self.cars[d.veh.model], pedals, &mut |s| {
+        let water = d.tick(&self.map, &self.cars[d.veh.model], pedals, &mut |s| {
             lines.push(s)
         });
         if self.doing == Doing::Driving {
@@ -891,7 +976,24 @@ impl World {
         for l in lines {
             self.say(l);
         }
+        if let Some(z) = water {
+            self.sink(z);
+            return;
+        }
         self.burn();
+    }
+
+    /// The car is in the water: it sinks and is lost, and he drowns where
+    /// it went down.
+    fn sink(&mut self, z: i32) {
+        let Some(d) = self.driven.take() else {
+            return;
+        };
+        self.player.x = d.veh.ox as i32;
+        self.player.y = d.veh.oy as i32;
+        self.player.layer = z;
+        self.doing = Doing::Drowning(1);
+        self.say("car: sank".into());
     }
 
     /// A write-off burns for [`cars::FUSE`] ticks, then blows up: the
@@ -983,8 +1085,9 @@ impl World {
     /// hidden inside a car.
     pub fn player_frame(&self) -> Option<u16> {
         match self.doing {
-            // Aboard a train he is out of sight.
-            Doing::Riding(_) => None,
+            // Aboard a train he is out of sight, and in the water he has
+            // gone under.
+            Doing::Riding(_) | Doing::Drowning(_) => None,
             Doing::OnFoot => Some(self.player.ped_frame()),
             Doing::Entering(e) if e.walk_t < e.walk_len || e.over.is_some() => {
                 Some(self.player.ped_frame())
@@ -1194,6 +1297,10 @@ impl World {
                 h.u8(6);
                 h.i32(t);
             }
+            Doing::Drowning(n) => {
+                h.u8(7);
+                h.u32(n);
+            }
             Doing::Exiting(e) => {
                 h.u8(3);
                 for v in [e.from.0, e.from.1, e.door.0, e.door.1] {
@@ -1213,6 +1320,7 @@ impl World {
             c.sim_hash(&mut h);
         }
         self.trains.sim_hash(&mut h);
+        h.i32(self.health);
         h.finish()
     }
 

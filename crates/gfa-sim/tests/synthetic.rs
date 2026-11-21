@@ -468,6 +468,29 @@ fn jump_under_a_bus_slides_him_out() {
     assert!(w.player.x > bus.x + (8 << 16), "out on the east side");
 }
 
+#[test]
+fn walking_into_water_drowns_him() {
+    let mut b = CmpBuilder::new(1);
+    street(&mut b, 5..25, 5..15);
+    // Open water south of the street, on the street's layer.
+    for x in 5..25 {
+        for y in 15..20 {
+            b.set(x, y, 2, block(0x10));
+        }
+    }
+    let mut w = world(&b, south(15, 13));
+    run(&mut w, Buttons::UP, 80);
+    assert!(matches!(w.doing, Doing::Drowning(_)), "{:?}", w.doing);
+    assert!(log_has(&mut w, "player: in the water at (15,15)"));
+    assert_eq!(w.player_frame(), None, "gone under");
+    assert!(w.health < 100);
+    run(&mut w, Buttons::NONE, 80);
+    assert!(log_has(&mut w, "player: wasted - drowned"));
+    assert_eq!(w.doing, Doing::OnFoot);
+    assert_eq!(w.health, 100);
+    assert_eq!(w.player.block(), (15, 13), "back at the start");
+}
+
 /// A rectangle of railway on layer 2, x 10..=40 and y 10..=20, with a
 /// spawning station (hint 7) on the top side and a plain one (6) on the
 /// bottom.
