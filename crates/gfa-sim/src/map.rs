@@ -183,6 +183,17 @@ impl SimMap {
         map
     }
 
+    /// The lowest layer with ground anybody can stand on, anywhere on the
+    /// map (layer 1 in all three of GTA's cities): nothing that moves is
+    /// ever lower, so the renderer measures how much it shows there.
+    pub fn floor_layer(&self) -> i32 {
+        (0..LAYERS)
+            .find(|&z| {
+                (0..DIM).any(|y| (0..DIM).any(|x| ground::walkable(self.ground_type(x, y, z))))
+            })
+            .unwrap_or(0)
+    }
+
     /// The parsed map file.
     pub fn cmp(&self) -> &Cmp {
         &self.cmp

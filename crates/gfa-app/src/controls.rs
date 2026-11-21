@@ -1,13 +1,26 @@
 //! Keys and mouse: the player's controls, and the camera.
 //!
-//! - Arrows or WASD: run forward and back, turn. Shift walks.
+//! The original's keys do what they did in the DOS game's default layout
+//! (its README, decision log 2026-11-21), and our own keys keep off them:
+//! - Arrows: run forward and back, turn (WASD too). Shift walks (ours).
 //! - Return gets in and out of cars; Space is the handbrake and jump;
-//!   Ctrl fires; Tab is the special key; Z and X change weapon.
-//! - Scroll wheel, `+`/`-` or PageUp/PageDown zoom (camera height).
+//!   Ctrl fires; Tab is the special key (horn, siren); Z and X change
+//!   weapon; F6 pauses; Esc quits.
+//! - Kept for what they did there, not built yet: F5 retunes the radio
+//!   (M8), F7 repeats the last pager message, F9 shows the area's name,
+//!   F10 repeats the last message (M7), F8 the frame limiter and F11 the
+//!   screen mode (M12). F1 to F4 sent messages in network games, which are
+//!   out of scope.
+//!
+//! Ours, on keys the original leaves free:
+//! - Scroll wheel, `+`/`-` or PageUp/PageDown zoom (camera height). In
+//!   normal play the zoom-out stops where the picture would show more than
+//!   the simulation's view; free look and flying are not capped.
 //! - `F` toggles free look: drag with the right mouse button to tilt and
 //!   turn. `R` returns to straight down.
 //! - `C` detaches the camera to fly over the city with the movement keys
 //!   (Shift is faster); the player stands still meanwhile.
+//! - `` ` `` shows the debug overlay (in the app's event loop).
 //!
 //! The keys reach the simulation only as a [`TickInput`] per tick.
 
@@ -23,6 +36,8 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 const PX: f32 = BLOCK_PX as f32;
 /// Top of the tallest column: the eye never goes below the rooftops.
 const ROOF_Z: f32 = 6.0 * PX;
+/// The lowest the eye goes: a block above the rooftops.
+pub(crate) const MIN_EYE_Z: f32 = ROOF_Z + PX;
 
 pub struct Controls {
     held: HashSet<KeyCode>,
@@ -33,38 +48,39 @@ pub struct Controls {
     pub free_look: bool,
     /// The camera is detached from the player.
     pub flying: bool,
+    /// F6: the simulation is stopped. The camera still moves.
+    pub paused: bool,
     pub pitch: f32,
     pub yaw: f32,
     dragging: bool,
     last_cursor: Option<Vec2>,
     /// Cursor in window pixels, for the inspector.
     pub cursor: Option<Vec2>,
-    velocity: Vec3,
 }
 
 impl Controls {
     pub fn new(target: Vec3) -> Self {
         let mut follow = FollowCamera::new(target);
-        follow.snap(ROOF_Z + PX);
+        follow.snap(MIN_EYE_Z);
         Controls {
             held: HashSet::new(),
             follow,
             target,
             free_look: false,
             flying: false,
+            paused: false,
             pitch: 0.0,
             yaw: 0.0,
             dragging: false,
             last_cursor: None,
             cursor: None,
-            velocity: Vec3::ZERO,
         }
     }
 
     pub fn jump_to(&mut self, target: Vec3) {
         self.target = target;
         self.follow.target = target;
-        self.follow.snap(ROOF_Z + PX);
+        self.follow.snap(MIN_EYE_Z);
     }
 
     /// Feed a window event. Returns whether it was used.
@@ -143,6 +159,7 @@ impl Controls {
                 self.yaw = 0.0;
             }
             KeyCode::KeyC => self.flying = !self.flying,
+            KeyCode::F6 => self.paused = !self.paused,
             KeyCode::Equal | KeyCode::NumpadAdd | KeyCode::PageUp => self.follow.zoom(0.8),
             KeyCode::Minus | KeyCode::NumpadSubtract | KeyCode::PageDown => self.follow.zoom(1.25),
             _ => {}
@@ -185,18 +202,22 @@ impl Controls {
         TickInput::new(b)
     }
 
-    /// Advance the camera by `dt` seconds, following `player` (position and
-    /// velocity, map pixels) unless flying.
-    pub fn update(&mut self, dt: f32, player: Option<(Vec3, Vec3)>) {
-        match player {
-            Some((pos, velocity)) if !self.flying => {
+    /// Advance the camera by `dt` seconds, following `player` (the point
+    /// to centre on, map pixels, and the simulation's zoom) unless flying.
+    /// `ceiling` is the highest the eye may go in normal play.
+    pub fn update(&mut self, dt: f32, player: Option<(Vec3, f32)>, ceiling: Option<f32>) {
+        let (zoom, ceiling) = match player {
+            Some((pos, zoom)) if !self.flying => {
                 self.target = pos;
-                self.velocity = velocity;
+                (zoom, ceiling.filter(|_| !self.free_look))
             }
-            _ => self.fly(dt),
-        }
+            _ => {
+                self.fly(dt);
+                (1.0, None)
+            }
+        };
         self.follow
-            .update(self.target, self.velocity, dt, ROOF_Z + PX);
+            .update(self.target, zoom, ceiling, dt, MIN_EYE_Z);
     }
 
     fn fly(&mut self, dt: f32) {
@@ -212,8 +233,7 @@ impl Controls {
         // Screen directions turn with the free-look heading.
         let (s, c) = self.yaw.sin_cos();
         let world = Vec2::new(dir.x * c - dir.y * s, dir.x * s + dir.y * c);
-        self.velocity = Vec3::new(world.x, world.y, 0.0) * speed;
-        self.target += self.velocity * dt;
+        self.target += Vec3::new(world.x, world.y, 0.0) * speed * dt;
         let max = 256.0 * PX;
         self.target.x = self.target.x.clamp(0.0, max);
         self.target.y = self.target.y.clamp(0.0, max);
@@ -232,7 +252,7 @@ impl Controls {
                 self.target.y + back.y,
                 self.target.z + dist * self.pitch.cos(),
             )
-            .max(Vec3::new(f32::MIN, f32::MIN, ROOF_Z + PX));
+            .max(Vec3::new(f32::MIN, f32::MIN, MIN_EYE_Z));
         }
         cam
     }

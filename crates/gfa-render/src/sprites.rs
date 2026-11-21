@@ -19,7 +19,7 @@
 //!   not write it, so they are drawn in order: lowest first, then in the order
 //!   they were added.
 
-use gfa_formats::style::{Colour, Style};
+use gfa_formats::style::{Colour, SpriteCategory, Style};
 
 use crate::camera::Camera;
 use crate::city::DEPTH_FORMAT;
@@ -121,6 +121,9 @@ pub enum SpriteColours {
     Own,
     /// Remap `remap` (1..=12; 0 means none) of car record `car`.
     Car { car: usize, remap: u8 },
+    /// A pedestrian dressed in GRY remap table `table` (0 means none), as
+    /// the simulation names them.
+    Ped { table: u8 },
 }
 
 /// The palette, in [`crate::style_tables::StyleTables`] numbering, for a sprite.
@@ -129,6 +132,9 @@ pub fn sprite_palette(style: &Style, sprite: usize, colours: SpriteColours) -> u
         (Colour::G24(c), SpriteColours::Car { car, remap }) if remap > 0 => c
             .remap_palette(car * gfa_formats::style::CAR_REMAPS + remap as usize - 1)
             .unwrap_or(0),
+        (Colour::G24(c), SpriteColours::Ped { table }) if table > 0 => {
+            c.ped_palette(table).unwrap_or(0)
+        }
         (Colour::G24(c), _) => style
             .sprites
             .get(sprite)
@@ -141,6 +147,7 @@ pub fn sprite_palette(style: &Style, sprite: usize, colours: SpriteColours) -> u
             .get(car)
             .and_then(|c| c.remap8.get(remap as usize - 1))
             .map_or(0, |&t| u16::from(t)),
+        (Colour::Gry(_), SpriteColours::Ped { table }) => u16::from(table),
         (Colour::Gry(_), _) => 0,
     }
 }
@@ -245,6 +252,28 @@ pub fn own_sprite(
     })
 }
 
+/// A person: frame `frame` of the style's ped sprites, dressed in GRY remap
+/// table `table` (0 for the sprite's own colours), at `pos`, turned `angle`
+/// radians clockwise.
+pub fn ped_sprite(
+    style: &Style,
+    atlas: &SpriteAtlas,
+    frame: u16,
+    table: u8,
+    pos: [f32; 3],
+    angle: f32,
+) -> Option<SpriteInstance> {
+    let sprite = style.sprite_index(SpriteCategory::Ped, usize::from(frame))?;
+    Some(SpriteInstance {
+        pos: [pos[0], pos[1], pos[2], angle],
+        rect: *atlas.rects.get(sprite)?,
+        palette_flags: [
+            sprite_palette(style, sprite, SpriteColours::Ped { table }),
+            0,
+        ],
+    })
+}
+
 /// A vehicle: car table record `car` in colour remap `remap` (0 for its
 /// own colours) at `pos`, turned `angle` radians clockwise.
 pub fn car_sprite(
@@ -317,7 +346,6 @@ pub fn push_carriage(
     first: bool,
     last: bool,
 ) {
-    use gfa_formats::style::SpriteCategory;
     let pieces = [
         (front, if first { 4 } else { 2 }),
         (back, if last { 3 } else { 2 }),

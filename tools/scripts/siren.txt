@@ -1,0 +1,28 @@
+# The special key (TAB) in a police car.
+#
+# A police car (record 4, model 4) is parked beside the player and he gets
+# in. The first press puts the siren on, and it stays on after he lets go.
+# The next press sounds it (the yelp) for as long as the key is held;
+# letting go goes back to the plain siren. He gets out, which puts it off.
+#
+# section: 1
+# expect: car: in - model 4
+# expect: special key - siren on (model 4)
+# expect: special key - siren sounding (model 4)
+# expect: car: out at
+# reject: horn
+# reject: a shout
+start 62 60
+park 4 -20 0 128
+enter
+wait 100
+tab 1
+wait 10
+tab 0
+wait 100
+tab 1
+wait 100
+tab 0
+wait 50
+enter
+wait 100

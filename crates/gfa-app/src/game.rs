@@ -14,8 +14,9 @@ use gfa_render::glam::Vec3;
 use gfa_sim::clock::TICK_US;
 use gfa_sim::input::{InputLog, TickInput};
 use gfa_sim::map::{SimMap, WallTiles};
-use gfa_sim::view::SimView;
-use gfa_sim::world::{Start, World};
+use gfa_sim::traffic::roads::{Lamp, Light};
+use gfa_sim::view::{SimCamera, SimView, ZOOM_ONE};
+use gfa_sim::world::{Doing, Start, World};
 
 /// Most ticks run for one frame. A frame that took longer (a stall, a
 /// debugger stop) drops the rest rather than paying it back, which would
@@ -63,7 +64,14 @@ pub struct Frame {
     pub player: Option<(Pose, u16)>,
     /// The player's car: pose, car table record and colour remap.
     pub car: Option<(Pose, usize, u8)>,
+    /// What the camera centres on: the player (or his car) as drawn, plus
+    /// the simulation's lead.
     pub follow: Pose,
+    /// The simulation's speed zoom between the last two ticks: 1.0 at rest.
+    pub zoom: f32,
+    /// The simulation's view now: half-extents in blocks. The camera shows
+    /// no more than this.
+    pub view: (i32, i32),
 }
 
 /// Ticks between the driven car's physics steps (it steps at 23.3 Hz).
@@ -153,11 +161,13 @@ impl CarClock {
 struct Snapshot {
     player: ([i32; 3], i32),
     car: Option<([i32; 3], i32)>,
+    camera: SimCamera,
 }
 
 impl Snapshot {
     fn of(world: &World) -> Self {
         Snapshot {
+            camera: world.camera,
             player: (world.player_pos(), world.player.angle),
             car: world.driven.as_ref().map(|d| {
                 let v = &d.veh;
@@ -200,6 +210,32 @@ fn traffic_poses(world: &World) -> Vec<(u64, ([i32; 3], i32))> {
         .collect()
 }
 
+/// Each ped slot's position (16.16, with the ground's height) and heading,
+/// or `None` when nobody there is shown.
+fn ped_poses(world: &World) -> Vec<Option<([i32; 3], i32)>> {
+    world
+        .peds
+        .p
+        .iter()
+        .map(|p| {
+            p.shown().then(|| {
+                let (x, y) = (p.x as i32, p.y as i32);
+                ([x, y, world.map.ground_z(x, y, p.layer)], p.angle)
+            })
+        })
+        .collect()
+}
+
+/// A person to draw: pose between the last two ticks, sprite frame, the
+/// GRY remap table he wears, and the fire's frame if he is alight.
+#[derive(Debug, Clone, Copy)]
+pub struct PedLook {
+    pub pose: Pose,
+    pub frame: u16,
+    pub table: u8,
+    pub burning: Option<usize>,
+}
+
 /// A fleet car to draw: its pose between the last two ticks, car table
 /// record, colour remap (0 for its own colours), dents and fire.
 #[derive(Debug, Clone, Copy)]
@@ -220,10 +256,14 @@ pub struct Game {
     prev: Snapshot,
     /// The fleet before the last tick: serial, position and face.
     prev_traffic: Vec<(u64, ([i32; 3], i32))>,
+    /// The crowd before the last tick, by slot.
+    prev_peds: Vec<Option<([i32; 3], i32)>>,
     /// The player's car on its physics clock.
     car_clock: CarClock,
     /// Every tick's input since the level started.
     pub recording: InputLog,
+    /// The city's traffic lights, found once.
+    lamps: Vec<Lamp>,
 }
 
 impl Game {
@@ -250,16 +290,48 @@ impl Game {
         for line in world.drain_log() {
             log::info!("{}", line.text);
         }
-        let prev = Snapshot::of(&world);
-        let prev_traffic = traffic_poses(&world);
+        Game::of(world)
+    }
+
+    /// A running level from a world already made.
+    fn of(world: World) -> Self {
+        let mut car_clock = CarClock::default();
+        car_clock.track(&world);
         Game {
+            prev: Snapshot::of(&world),
+            prev_traffic: traffic_poses(&world),
+            prev_peds: ped_poses(&world),
+            lamps: world.traffic.lamps(&world.map),
             world,
             pacer: Pacer::default(),
-            prev,
-            prev_traffic,
-            car_clock: CarClock::default(),
+            car_clock,
             recording: InputLog::default(),
         }
+    }
+
+    /// The traffic lights near the simulation's view (two blocks past it)
+    /// and what each shows: the lamp, where it is drawn (map pixels) and
+    /// its heading.
+    pub fn lamps(&self) -> impl Iterator<Item = (Light, [f32; 3], f32)> + '_ {
+        let w = &self.world;
+        let view = w.view_now();
+        let (cx, cy) = w.view_centre();
+        let (cbx, cby) = ((cx >> 21) as i32, (cy >> 21) as i32);
+        let tick = w.traffic.light_tick();
+        self.lamps
+            .iter()
+            .filter(move |l| {
+                (l.bx - cbx).abs() <= view.half_w + 2 && (l.by - cby).abs() <= view.half_h + 2
+            })
+            .map(move |l| {
+                let (x, y) = l.pos();
+                let z = w.map.ground_z(x, y, l.z);
+                let pos = gfa_render::sprites::from_sim([x, y, z]);
+                // The sprite's front is its lens: it faces the drivers
+                // coming the other way (see `Pose::draw_angle`).
+                let angle = gfa_render::sprites::sim_angle(l.toward);
+                (l.light(tick), pos, angle)
+            })
     }
 
     /// Run the ticks due after `elapsed_us` of wall time, all with `input`.
@@ -269,6 +341,7 @@ impl Game {
         for _ in 0..n {
             self.prev = Snapshot::of(&self.world);
             self.prev_traffic = traffic_poses(&self.world);
+            self.prev_peds = ped_poses(&self.world);
             self.recording.record(self.world.tick, input);
             self.world.step(input);
             self.car_clock.track(&self.world);
@@ -305,6 +378,39 @@ impl Game {
             .collect()
     }
 
+    /// The crowd between the last two ticks. Somebody new in a slot (a
+    /// spawn, or a jump no walk makes in a tick) is drawn where he is.
+    pub fn peds(&self) -> Vec<PedLook> {
+        const JUMP: i32 = 8 << 16;
+        let alpha = self.pacer.alpha();
+        let now = ped_poses(&self.world);
+        self.world
+            .peds
+            .p
+            .iter()
+            .zip(now)
+            .enumerate()
+            .filter_map(|(i, (p, pose))| {
+                let pose = pose?;
+                let before = self
+                    .prev_peds
+                    .get(i)
+                    .copied()
+                    .flatten()
+                    .filter(|b| {
+                        (b.0[0] - pose.0[0]).abs() < JUMP && (b.0[1] - pose.0[1]).abs() < JUMP
+                    })
+                    .unwrap_or(pose);
+                Some(PedLook {
+                    pose: between(before, pose, alpha),
+                    frame: p.sprite_frame(),
+                    table: p.remap.clamp(0, 255) as u8,
+                    burning: (p.burn > 0).then_some(p.burn_frame.max(0) as usize),
+                })
+            })
+            .collect()
+    }
+
     /// The player and his car between the last two ticks.
     pub fn frame(&self) -> Frame {
         let alpha = self.pacer.alpha();
@@ -333,11 +439,38 @@ impl Game {
             }
             (pose, model, remap)
         });
+        // A rider on his bike, or a driver seen in a convertible, sits at
+        // the car's origin in the simulation: drawn with the car, on its
+        // clock, or he trails the seat by up to a step (and stays on the
+        // ground under a jump).
+        let player = match (self.world.doing, car) {
+            (Doing::Driving, Some((pose, _, _))) => pose,
+            _ => player,
+        };
+        // The view's lead and zoom between ticks, like everything else.
+        let (was, cam) = (self.prev.camera, now.camera);
+        let lerp = |a: i64, b: i64| a as f32 + (b - a) as f32 * alpha;
+        let lead = Vec3::new(
+            lerp(was.lead.0, cam.lead.0) / 65536.0 * gfa_render::sprites::SIM_SCALE,
+            lerp(was.lead.1, cam.lead.1) / 65536.0 * gfa_render::sprites::SIM_SCALE,
+            0.0,
+        );
+        let mut follow = car.map_or(player, |c| c.0);
+        follow.pos += lead;
+        let view = self.world.view_now();
         Frame {
             player: self.world.player_frame().map(|f| (player, f)),
             car,
-            follow: car.map_or(player, |c| c.0),
+            follow,
+            zoom: lerp(i64::from(was.zoom), i64::from(cam.zoom)) / ZOOM_ONE as f32,
+            view: (view.half_w, view.half_h),
         }
+    }
+
+    /// The height of the lowest ground anything stands on (map pixels): the
+    /// camera's cap is measured there.
+    pub fn floor_z(&self) -> f32 {
+        self.world.map.floor_layer() as f32 * gfa_render::city_mesh::BLOCK_PX as f32
     }
 }
 
@@ -399,10 +532,9 @@ mod tests {
         }
     }
 
-    /// The driven car's drawn y on every frame of a 60 Hz display, the old
-    /// way (between ticks) and on the physics clock, while it drives south
-    /// down a long straight road at speed.
-    fn drawn_ys() -> (Vec<f32>, Vec<f32>) {
+    /// A long straight road running south, and the player in `car` at its
+    /// top, facing down it.
+    fn south_road(car: CarInfo) -> World {
         let mut b = CmpBuilder::new(1);
         let floor = Block {
             faces: [0, 0, 0, 0, 1],
@@ -425,11 +557,19 @@ mod tests {
         };
         let mut world = World::new(
             SimMap::new(cmp, WallTiles::gta(1)),
-            vec![saloon()],
+            vec![car],
             SimView::GAME,
             start,
         );
         world.put_in_car(0, 12, 8, 128);
+        world
+    }
+
+    /// The driven car's drawn y on every frame of a 60 Hz display, the old
+    /// way (between ticks) and on the physics clock, while it drives south
+    /// down a long straight road at speed.
+    fn drawn_ys() -> (Vec<f32>, Vec<f32>) {
+        let mut world = south_road(saloon());
         let mut clock = CarClock::default();
         let up = TickInput::new(Buttons::UP);
         // Up to speed first.
@@ -474,6 +614,61 @@ mod tests {
         let (lo, hi) = steps(&new);
         assert!(lo > 0.0, "it never stops");
         assert!(lo > 0.9 * hi, "on the physics clock, even: {lo} .. {hi}");
+    }
+
+    /// A bike: the saloon, narrow, in the bike class.
+    fn bike() -> CarInfo {
+        CarInfo {
+            width: 12,
+            length: 40,
+            vtype: gfa_sim::vehicle::CLASS_BIKE,
+            ..saloon()
+        }
+    }
+
+    /// Reported from play: riding a bike, the rider trailed the seat by a
+    /// frame. He was drawn between ticks and the bike on its physics clock.
+    #[test]
+    fn the_rider_sits_on_his_bike_on_every_frame() {
+        let mut game = Game::of(south_road(bike()));
+        let up = TickInput::new(Buttons::UP);
+        let mut worst_between = 0.0f32;
+        for i in 0..270 {
+            game.advance(16_667, up);
+            if i < 150 {
+                // Up to speed first.
+                continue;
+            }
+            let f = game.frame();
+            let ((rider, sprite), (car, _, _)) = (f.player.unwrap(), f.car.unwrap());
+            assert_eq!(sprite, gfa_sim::cars::BIKE_SIT);
+            assert_eq!(rider.pos, car.pos, "frame {i}");
+            assert_eq!(rider.draw_angle, car.draw_angle, "frame {i}");
+            // How far off the seat he was drawn the old way.
+            let old = between(
+                game.prev.player,
+                Snapshot::of(&game.world).player,
+                game.pacer.alpha(),
+            );
+            worst_between = worst_between.max(old.pos.distance(car.pos));
+        }
+        // The old way was off the seat: the test would have caught it.
+        assert!(worst_between > 0.5, "between ticks, off by {worst_between}");
+    }
+
+    /// On a street (layer 2) the default camera fits the simulation's view
+    /// at 21:9 measured on layer 1, at rest and at full speed, so the cap
+    /// only bites when the player zooms out or climbs.
+    #[test]
+    fn the_default_camera_fits_the_view() {
+        use gfa_render::camera::{FollowCamera, MAX_ASPECT, max_depth};
+        let block = gfa_render::city_mesh::BLOCK_PX as f32;
+        for zoom in [ZOOM_ONE, gfa_sim::view::ZOOM_MAX] {
+            let v = SimView::GAME.at(zoom);
+            let cap = block + max_depth(v.half_w, v.half_h, MAX_ASPECT);
+            let eye = 2.0 * block + FollowCamera::DEFAULT_HEIGHT * zoom as f32 / ZOOM_ONE as f32;
+            assert!(eye <= cap, "zoom {zoom}: eye {eye} over the cap {cap}");
+        }
     }
 
     #[test]

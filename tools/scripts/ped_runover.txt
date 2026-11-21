@@ -1,0 +1,15 @@
+# Run somebody over. The player drives a saloon south from (62,60) for
+# half a second, then a man is put in the road 36 px ahead of the car's
+# centre. He runs for the pavement (anybody caught in the road does), but
+# the car is too fast and too close: it kills him where he stands, and the
+# log counts him. Put him a block further on and he gets away.
+#
+# section: 1
+# expect: car: in - model 0
+# expect: ped: dropped a ped at (2000,2023)
+# expect: car: ran over 1 - 1 so far
+start 62 60
+drive 0 62 60 128
+run 25 1 0 0 0
+ped 0 36 64
+run 15 1 0 0 0

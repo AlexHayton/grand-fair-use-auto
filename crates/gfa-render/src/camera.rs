@@ -1,16 +1,19 @@
 //! The render camera: a perspective view, straight down by default.
 //!
 //! Render-side only. The simulation never sees this camera (Principle 4): its
-//! "on screen" tests use a fixed logical view, so zoom, aspect ratio and
-//! Retina scaling cannot change gameplay.
+//! "on screen" tests use its own logical view (`gfa_sim::view`), so zoom,
+//! aspect ratio and Retina scaling cannot change gameplay. The traffic goes
+//! the other way: in normal play this camera shows no more ground than that
+//! view, [`max_depth`] capping the zoom-out and [`pillarbox`] the width, so
+//! nothing comes or goes in sight.
 //!
 //! Positions are map pixels (64 per block): `x` east, `y` south, `z` up.
 //! That frame is left-handed, so the view matrix flips `y` first and works in
 //! an ordinary right-handed frame from there.
 //!
 //! Source for the follow behaviour: Carnage3D `FollowCameraController.cpp`
-//! (MIT): 55° vertical field of view, scroll zoom on height, a lead ahead of
-//! a moving car. Implementation ours.
+//! (MIT): 55° vertical field of view, scroll zoom on height. Its lead ahead
+//! of a moving car is now the simulation's. Implementation ours.
 
 use glam::{Mat4, Quat, Vec3, Vec4};
 
@@ -122,17 +125,55 @@ impl Frustum {
     }
 }
 
-/// The game camera: follows a target from above, zooms by height, and
-/// looks ahead of a moving target.
+/// Windows wider than this are pillarboxed. The simulation's view is sized
+/// for 21:9; a wider picture would show ground where people and cars come
+/// and go.
+pub const MAX_ASPECT: f32 = 21.0 / 9.0;
+
+/// Blocks of the simulation's view kept spare round what the camera shows:
+/// the car is drawn up to a physics step (0.8 of a block at top speed) ahead
+/// of its last tick, and a person's sprite pokes a little out of his block.
+pub const VIEW_MARGIN_BLOCKS: f32 = 1.0;
+
+/// The part of a `width` by `height` window the scene is drawn in, as
+/// `[x, y, w, h]`: all of it, or a centred 21:9 band with bars either side.
+pub fn pillarbox(width: u32, height: u32) -> [u32; 4] {
+    let max_w = ((height as f32 * MAX_ASPECT).floor() as u32).max(1);
+    if width <= max_w {
+        [0, 0, width, height]
+    } else {
+        [(width - max_w) / 2, 0, max_w, height]
+    }
+}
+
+/// The highest the eye may be above the lowest ground (map pixels) for a
+/// straight-down picture of `aspect` to show no more than the simulation's
+/// view, `half_w` by `half_h` blocks round the point it centres on, with
+/// [`VIEW_MARGIN_BLOCKS`] spare.
+pub fn max_depth(half_w: i32, half_h: i32, aspect: f32) -> f32 {
+    let t = (FOV_Y_DEGREES.to_radians() / 2.0).tan();
+    let aspect = aspect.clamp(1e-3, MAX_ASPECT);
+    let w = (half_w as f32 - VIEW_MARGIN_BLOCKS) / (t * aspect);
+    let h = (half_h as f32 - VIEW_MARGIN_BLOCKS) / t;
+    w.min(h).max(0.0) * PX
+}
+
+/// The game camera: straight down over a target, at a height the player
+/// zooms.
+///
+/// The target already carries the simulation's lead, and the zoom passed
+/// in is the simulation's speed zoom, so the camera adds no smoothing of
+/// its own across the ground: whatever it lagged by would show ground the
+/// simulation does not count as on screen. Only the height eases.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FollowCamera {
     /// Point followed, map pixels.
     pub target: Vec3,
-    /// Height of the eye above the target, map pixels.
+    /// The player's choice: the eye's height above the target at rest, map
+    /// pixels.
     pub height: f32,
-    /// Smoothed look-ahead offset, map pixels.
-    lead: Vec3,
-    /// Smoothed eye position.
+    /// The highest `height` the cap let through on the last update.
+    room: f32,
     eye: Vec3,
 }
 
@@ -141,42 +182,56 @@ impl FollowCamera {
     pub const DEFAULT_HEIGHT: f32 = 8.0 * PX;
     pub const MIN_HEIGHT: f32 = 3.0 * PX;
     pub const MAX_HEIGHT: f32 = 40.0 * PX;
-    /// Seconds of travel the camera looks ahead (Carnage3D: 0.35).
-    const LEAD_SECONDS: f32 = 0.35;
-    /// How quickly the eye catches up, per second (Carnage3D: 20, ×0.3 in a car).
-    const CATCH_UP: f32 = 8.0;
+    /// How quickly the height eases, per second.
+    const EASE: f32 = 8.0;
 
     pub fn new(target: Vec3) -> Self {
-        let eye = target + Vec3::Z * Self::DEFAULT_HEIGHT;
         FollowCamera {
             target,
             height: Self::DEFAULT_HEIGHT,
-            lead: Vec3::ZERO,
-            eye,
+            room: Self::MAX_HEIGHT,
+            eye: target + Vec3::Z * Self::DEFAULT_HEIGHT,
         }
     }
 
-    /// Multiply the height (scroll wheel), within limits.
+    /// Multiply the height (scroll wheel), within limits. Zooming out
+    /// stops where the cap did on the last update, so scrolling back in
+    /// answers at once.
     pub fn zoom(&mut self, factor: f32) {
-        self.height = (self.height * factor).clamp(Self::MIN_HEIGHT, Self::MAX_HEIGHT);
+        let mut h = self.height * factor;
+        if factor > 1.0 {
+            h = h.min(self.room.max(self.height));
+        }
+        self.height = h.clamp(Self::MIN_HEIGHT, Self::MAX_HEIGHT);
     }
 
-    /// Move towards `target`, moving at `velocity` (pixels per second), over
-    /// `dt` seconds. Never lower than the rooftops: the eye stays above
-    /// `min_eye_z`.
-    pub fn update(&mut self, target: Vec3, velocity: Vec3, dt: f32, min_eye_z: f32) {
+    /// Over `target` (map pixels) at `zoom` times the player's height,
+    /// eased over `dt` seconds. The eye stays below `ceiling` when there is
+    /// one (the zoom cap, in normal play) and above `min_eye_z` (the
+    /// roofs).
+    pub fn update(
+        &mut self,
+        target: Vec3,
+        zoom: f32,
+        ceiling: Option<f32>,
+        dt: f32,
+        min_eye_z: f32,
+    ) {
         self.target = target;
-        let k = 1.0 - (-Self::CATCH_UP * dt).exp();
-        let lead = Vec3::new(velocity.x, velocity.y, 0.0) * Self::LEAD_SECONDS;
-        self.lead += (lead - self.lead) * k;
-        let want = target + self.lead + Vec3::Z * self.height;
-        self.eye += (want - self.eye) * k;
-        self.eye.z = self.eye.z.max(min_eye_z);
+        let zoom = zoom.max(1e-3);
+        let k = 1.0 - (-Self::EASE * dt).exp();
+        let want = target.z + self.height * zoom;
+        let mut z = self.eye.z + (want - self.eye.z) * k;
+        self.room = Self::MAX_HEIGHT;
+        if let Some(c) = ceiling {
+            z = z.min(c);
+            self.room = ((c - target.z) / zoom).max(Self::MIN_HEIGHT);
+        }
+        self.eye = Vec3::new(target.x, target.y, z.max(min_eye_z));
     }
 
-    /// Jump straight to the target, without smoothing.
+    /// Jump straight to the target, without easing.
     pub fn snap(&mut self, min_eye_z: f32) {
-        self.lead = Vec3::ZERO;
         self.eye = self.target + Vec3::Z * self.height;
         self.eye.z = self.eye.z.max(min_eye_z);
     }
@@ -238,22 +293,66 @@ mod tests {
     }
 
     #[test]
-    fn follow_camera_leads_and_stays_above_roofs() {
-        let mut fc = FollowCamera::new(Vec3::new(0.0, 0.0, 64.0));
-        for _ in 0..200 {
-            fc.update(
-                Vec3::new(0.0, 0.0, 64.0),
-                Vec3::new(1000.0, 0.0, 0.0),
-                1.0 / 60.0,
-                0.0,
+    fn wide_windows_are_pillarboxed() {
+        assert_eq!(pillarbox(1920, 1080), [0, 0, 1920, 1080]);
+        assert_eq!(pillarbox(2520, 1080), [0, 0, 2520, 1080]);
+        assert_eq!(pillarbox(5120, 1440), [880, 0, 3360, 1440]);
+        // Tall windows are not letterboxed: they show less across.
+        assert_eq!(pillarbox(800, 1600), [0, 0, 800, 1600]);
+    }
+
+    #[test]
+    fn the_cap_keeps_the_picture_inside_the_view() {
+        for aspect in [0.5, 4.0 / 3.0, 16.0 / 9.0, MAX_ASPECT] {
+            let d = max_depth(12, 7, aspect);
+            let cam = Camera::top_down(Vec3::new(0.0, 0.0, d));
+            let (w, h) = cam.footprint(aspect, d);
+            assert!(
+                w / 2.0 <= (12.0 - VIEW_MARGIN_BLOCKS) * PX + 0.01,
+                "{aspect}: {w}"
+            );
+            assert!(
+                h / 2.0 <= (7.0 - VIEW_MARGIN_BLOCKS) * PX + 0.01,
+                "{aspect}: {h}"
             );
         }
-        let eye = fc.camera().eye;
-        assert!(
-            (eye.x - 350.0).abs() < 1.0,
-            "leads by 0.35 s of travel: {eye}"
-        );
-        fc.update(Vec3::ZERO, Vec3::ZERO, 10.0, 10_000.0);
+        // Wider than 21:9 is drawn at 21:9.
+        assert_eq!(max_depth(12, 7, 4.0), max_depth(12, 7, MAX_ASPECT));
+    }
+
+    #[test]
+    fn follow_camera_sits_over_the_target_under_the_cap() {
+        let mut fc = FollowCamera::new(Vec3::new(0.0, 0.0, 128.0));
+        let step = |fc: &mut FollowCamera, x: f32, zoom: f32, cap: Option<f32>| {
+            for _ in 0..120 {
+                fc.update(Vec3::new(x, 0.0, 128.0), zoom, cap, 1.0 / 60.0, 0.0);
+            }
+            fc.camera().eye
+        };
+        // Straight over the target, at the player's height: no lag.
+        let eye = step(&mut fc, 500.0, 1.0, None);
+        assert_eq!((eye.x, eye.y), (500.0, 0.0));
+        assert!((eye.z - (128.0 + FollowCamera::DEFAULT_HEIGHT)).abs() < 1.0);
+        // The speed zoom raises it; the cap stops it.
+        let eye = step(&mut fc, 500.0, 1.5, None);
+        assert!((eye.z - (128.0 + 1.5 * FollowCamera::DEFAULT_HEIGHT)).abs() < 1.0);
+        let eye = step(&mut fc, 500.0, 1.5, Some(700.0));
+        assert_eq!(eye.z, 700.0);
+        // Under the cap, zooming out does nothing to the player's choice.
+        fc.zoom(1.25);
+        assert_eq!(fc.height, FollowCamera::DEFAULT_HEIGHT);
+        // With room above, it goes no further than the cap allows...
+        step(&mut fc, 500.0, 1.5, Some(1100.0));
+        let room = (1100.0 - 128.0) / 1.5;
+        for _ in 0..20 {
+            fc.zoom(1.25);
+        }
+        assert!((fc.height - room).abs() < 0.01, "{}", fc.height);
+        // ...and zooming in answers at once.
+        fc.zoom(0.8);
+        assert!((fc.height - room * 0.8).abs() < 0.01);
+        // Never below the roofs.
+        fc.update(Vec3::ZERO, 1.0, Some(100.0), 10.0, 10_000.0);
         assert_eq!(fc.camera().eye.z, 10_000.0);
     }
 }

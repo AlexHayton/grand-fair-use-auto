@@ -9,8 +9,8 @@
  * Unlike `gtadump walk`, it builds the navigation grid first, so fences
  * (thin walls) are in force as they are in AmiGTA1's game. It also restates
  * the walk into water and the drowning from gta_main.c's main loop, and
- * runs the fleet and the trains around him (fleet.h), with every car held
- * off him as he walks. The style is read for the fleet's car table.
+ * runs the fleet, the trains and the crowd around him (fleet.h), with
+ * every car held off him as he walks. The style is read for the fleet's car table.
  *
  *     walktrace <map.cmp> <style.gry> <script.txt>
  *
@@ -130,7 +130,8 @@ int main(int argc, char **argv)
             }
             speed = pl.anim == GTA_ANIM_RUN || pl.anim == GTA_ANIM_WALK
                   ? GTA_RUN_SPEED_FP : 0;
-            if (fleet_tick(pl.x, pl.y, speed, pl.angle, pl.layer, 3, 3, 1)) {
+            if (fleet_tick(pl.x, pl.y, speed, pl.angle, pl.layer, 3, 3, 1,
+                           pl.anim == GTA_ANIM_RUN || pl.anim == GTA_ANIM_WALK)) {
                 printf("player: run over by a train\n");
                 health = 0;
             }

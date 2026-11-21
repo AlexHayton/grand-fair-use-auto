@@ -1,20 +1,25 @@
 /* fleet.h: the rest of the street, for the walk and drive harnesses.
  *
- * AmiGTA1's own traffic (gta_traffic.c) and trains (gta_train.c), run
- * around the player the way gfa-sim's World runs them, which is the order
- * of AmiGTA1's main loop: after the player has moved, the fleet is told
- * where he is and ticks with the view on him, then the trains tick, then
- * write-offs in the fleet burn (gta_weapon.c's sweep, without the blast,
- * which neither side has yet). The glue AmiGTA1 keeps in gta_main.c (a
- * walker held off a car, and the fleet as seen by the player's car) is
- * restated here.
+ * AmiGTA1's own traffic (gta_traffic.c), trains (gta_train.c) and people
+ * on foot (gta_peds.c), run around the player the way gfa-sim's World runs
+ * them, which is the order of AmiGTA1's main loop: after the player has
+ * moved, the crowd and the fleet are told where he is, the people standing
+ * on their feet go to the fleet as walkers, the fleet ticks with the view
+ * on him, then the trains, then the crowd, then write-offs in the fleet
+ * burn (gta_weapon.c's sweep, without the blast, which neither side has
+ * yet). The glue AmiGTA1 keeps in gta_main.c (a walker held off a car, the
+ * lights as the crowd asks about them, and the fleet as seen by the
+ * player's car) is restated here.
  *
  * The fleet starts as World::new starts it: seed 12345, AmiGTA1's view of
  * 5 blocks, parked out to 8 blocks around the level start, and none of the
- * map's parked cars (AmiGTA1 has none). After every tick the whole fleet
- * is printed in traffictrace's format:
+ * map's parked cars (AmiGTA1 has none). The crowd starts empty with seed
+ * 777 and fills from the view's edge. After every tick the whole fleet and
+ * every living ped are printed:
  *
  *     f <tick> <slot> <serial> <x> <y> <layer> <face> <angle> <speed> <model>
+ *     p <tick> <slot> <x> <y> <layer> <angle> <mode> <sub> <speed> <frame>
+ *       <corpse> <down> <pull>
  *
  * Grand Fair Use Auto, MIT.
  */
@@ -26,6 +31,7 @@
 #include "gta_car.h"
 #include "gta_map.h"
 #include "gta_nav.h"
+#include "gta_peds.h"
 #include "gta_tiles.h"
 #include "gta_traffic.h"
 #include "gta_train.h"
@@ -36,9 +42,11 @@
 #define FLEET_PED_MARGIN 3
 #define FLEET_WRECKED   100
 #define FLEET_FUSE      120
+#define CROWD_SEED      777UL
+#define CROWD_VIEW_H    4
 
-/* The drawing and pedestrian sides of the modules linked, never called
- * for anything a trace prints. */
+/* The drawing side of the modules linked, never called for anything a
+ * trace prints. */
 int gta_tiles_sprite_base(const gta_tiles *t, int type) { (void)t; (void)type; return 0; }
 int gta_tiles_sprite_count(const gta_tiles *t, int type) { (void)t; (void)type; return 295; }
 int gta_tiles_wreck_sprite(const gta_tiles *t, int vtype) { (void)t; (void)vtype; return 0; }
@@ -57,11 +65,21 @@ int gta_render_add_sprite_air(gta_view *v, long wx, long wy, int layer, int grid
                               unsigned long mask)
 { (void)v; (void)wx; (void)wy; (void)layer; (void)grid; (void)sub; (void)index;
   (void)angle; (void)remap; (void)delta; (void)mask; return 0; }
-void gta_peds_kill(gta_peds *ps, int i) { (void)ps; (void)i; }
+int gta_render_add_sprite_r(gta_view *v, long wx, long wy, int layer, int grid,
+                            int index, int angle, int remap)
+{ (void)v; (void)wx; (void)wy; (void)layer; (void)grid; (void)index; (void)angle;
+  (void)remap; return 0; }
 
 static gta_traffic fleet;
 static gta_trains fleet_trains;
+static gta_peds crowd;
 static const gta_map *fleet_map;
+
+/* The crowd asks the fleet about the lights (gta_main.c). */
+static int crowd_light_green(void *ctx, int bx, int by, int along_x)
+{
+    return gta_traffic_light_green((const gta_traffic *)ctx, bx, by, along_x);
+}
 
 static void fleet_start(const gta_map *m, const gta_nav *nav,
                         const gta_tiles *t, int bx, int by)
@@ -72,6 +90,9 @@ static void fleet_start(const gta_map *m, const gta_nav *nav,
     gta_traffic_set_nav(&fleet, nav);
     gta_traffic_set_view_blocks(&fleet, FLEET_VIEW);
     gta_traffic_park(&fleet, m, bx, by, 8, fleet.fleet_cap);
+    gta_peds_init(&crowd, t, CROWD_SEED);
+    gta_peds_set_lights(&crowd, crowd_light_green, &fleet);
+    gta_peds_set_nav(&crowd, nav);
 }
 
 /* Is the point inside a car's body, grown by `margin` px? */
@@ -147,21 +168,48 @@ static void fleet_wreck_sweep(void)
 }
 
 /* One tick of the street, with the player at (x, y): his speed, heading,
- * layer and half size as the fleet sees him, and whether he is on foot
- * (for the trains). Returns 1 if a train ran him over. */
+ * layer and half size as the fleet sees him, whether he is on foot (for
+ * the trains and the crowd) and whether he is moving (for where the crowd
+ * spawns). Returns 1 if a train ran him over. */
 static int fleet_tick(long x, long y, long speed, int face, int layer,
-                      int hl, int hw, int on_foot)
+                      int hl, int hw, int on_foot, int moving)
 {
-    int hit;
+    int hit, i;
     gta_traffic_set_player(&fleet, 1, x, y, speed, face, layer, hl, hw);
+    gta_peds_set_player(&crowd, x, y, layer, !on_foot, on_foot ? 0 : hl,
+                        on_foot ? 0 : hw, on_foot ? 0 : face);
+    /* Where a cop would take him and whether the car is slow enough: no
+     * cops yet on either side (M6), so the door is where he is. */
+    crowd.pl_door_x = x;
+    crowd.pl_door_y = y;
+    crowd.pl_slow = 0;
     gta_traffic_clear_walkers(&fleet);
+    for (i = 0; i < GTA_MAX_PEDS; i++) {
+        const gta_ped *p = &crowd.p[i];
+        if (p->alive && p->down <= 0)
+            gta_traffic_add_walker(&fleet, p->x, p->y, p->layer);
+    }
     gta_traffic_set_view_blocks(&fleet, FLEET_VIEW);
     gta_traffic_tick(&fleet, fleet_map, x, y);
-    gta_trains_tick(&fleet_trains, &fleet, NULL, x, y, layer, on_foot, NULL, 0);
+    gta_trains_tick(&fleet_trains, &fleet, &crowd, x, y, layer, on_foot, NULL, 0);
     hit = fleet_trains.pl_hit;
     fleet_trains.pl_hit = 0;
+    gta_peds_set_view(&crowd, FLEET_VIEW, CROWD_VIEW_H, face, moving);
+    gta_peds_tick(&crowd, fleet_map, x, y);
     fleet_wreck_sweep();
     return hit;
+}
+
+/* The player's car through the crowd, after the street has ticked; the
+ * speed is gta_main.c's (the larger axis and half the smaller). Returns how
+ * many it killed. */
+static int crowd_ram(long x, long y, int face, int hl, int hw, int layer,
+                     long vx, long vy)
+{
+    long avx = vx < 0 ? -vx : vx;
+    long avy = vy < 0 ? -vy : vy;
+    return gta_peds_ram(&crowd, x, y, face, hl, hw, layer,
+                        avx > avy ? avx + avy / 2 : avy + avx / 2);
 }
 
 /* The whole fleet, after the player's line for the same tick. */
@@ -172,6 +220,14 @@ static void fleet_dump(long tick)
         const gta_car *c = &fleet.cars[i];
         printf("f %ld %d %lu %ld %ld %d %d %d %ld %d\n", tick, i, c->serial,
                c->x, c->y, c->layer, c->face, c->angle, c->speed, c->model);
+    }
+    for (i = 0; i < GTA_MAX_PEDS; i++) {
+        const gta_ped *p = &crowd.p[i];
+        if (!p->alive)
+            continue;
+        printf("p %ld %d %ld %ld %d %d %d %d %d %d %d %d %d\n", tick, i,
+               p->x, p->y, p->layer, p->angle, p->mode, p->sub, p->speed,
+               p->frame, p->corpse ? 1 : 0, p->down, p->pull);
     }
 }
 

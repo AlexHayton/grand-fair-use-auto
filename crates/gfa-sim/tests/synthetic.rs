@@ -608,3 +608,277 @@ fn a_recording_replays_the_run() {
     let hashes = replay::play(&mut played, &rec, report.ticks, Some(50));
     assert_eq!(hashes, report.hashes, "the recording reproduces every hash");
 }
+
+/// Pavement both sides of a north-south road: blocks x 5..45, y 5..45, the
+/// road at x 24 and 25.
+fn pavements() -> CmpBuilder {
+    let mut b = CmpBuilder::new(1);
+    let floor = Block {
+        faces: [0, 0, 0, 0, 1],
+        ..Block::default()
+    };
+    for x in 5..45 {
+        for y in 5..45 {
+            let kind = if (24..26).contains(&x) {
+                ROAD
+            } else {
+                PAVEMENT
+            };
+            b.set(x, y, 1, floor).set(x, y, 2, block(kind));
+        }
+    }
+    b
+}
+
+#[test]
+fn the_crowd_comes_on_at_the_pavements() {
+    use gfa_sim::map::ground;
+    let mut w = world(&pavements(), south(20, 25));
+    let mut was: Vec<bool> = w.peds.p.iter().map(|p| p.alive).collect();
+    let mut seen = 0;
+    for _ in 0..600 {
+        w.step(TickInput::default());
+        for (i, p) in w.peds.p.iter().enumerate() {
+            if p.alive && !was[i] {
+                seen += 1;
+                let g = w
+                    .map
+                    .nav_ground((p.x >> 21) as i32, (p.y >> 21) as i32, p.layer);
+                assert_eq!(
+                    g,
+                    ground::PAVEMENT,
+                    "ped {i} came on at {:?}",
+                    (p.x >> 21, p.y >> 21)
+                );
+            }
+            was[i] = p.alive;
+        }
+    }
+    let about = w.peds.count();
+    assert!(seen >= 10 && about >= 10, "{seen} came on, {about} about");
+}
+
+#[test]
+fn a_car_runs_a_ped_over() {
+    let mut w = world(&pavements(), south(25, 8));
+    w.peds.clear();
+    // Lying in the road 4 blocks ahead: killed under the car, but not
+    // counted as run over (AmiGTA1's ram).
+    w.drop_ped(0, 128, 0);
+    let i = w.peds.p.iter().position(|p| p.alive).unwrap();
+    w.peds.p[i].down = 1000;
+    w.put_in_car(0, 25, 8, 128);
+    // Looked at as it happens: a body left behind out of sight is cleared
+    // and its slot given to somebody new.
+    let under = (0..100).find(|_| {
+        w.step(press(Buttons::UP));
+        w.peds.p[i].corpse
+    });
+    assert!(under.is_some(), "drove over him and he lives");
+    assert!(
+        !log_has(&mut w, "car: ran over"),
+        "a man lying down counted"
+    );
+    // Standing in the road just ahead of the moving car: no time to get
+    // out of the way, and he counts.
+    let v = w.driven.as_ref().unwrap().veh.clone();
+    assert!(v.vy > 4 << 16, "not up to speed");
+    let at = (v.ox, v.oy + (48 << 16));
+    assert!(w.peds.drop_ped(at.0, at.1, 2, 64, -1, 0));
+    let j = w
+        .peds
+        .p
+        .iter()
+        .position(|p| p.alive && (p.x, p.y) == at)
+        .unwrap();
+    let hit = (0..10).find(|_| {
+        w.step(press(Buttons::UP));
+        log_has(&mut w, "car: ran over 1 - ")
+    });
+    assert!(hit.is_some(), "never hit him");
+    assert!(w.peds.p[j].corpse);
+}
+
+#[test]
+fn taking_a_car_drags_its_driver_out() {
+    let mut b = CmpBuilder::new(1);
+    street(&mut b, 5..25, 5..25);
+    let mut w = world(&b, south(15, 15));
+    w.peds.clear();
+    w.park(0, -20, 0, 128);
+    // Somebody at the wheel of it.
+    let k = w.traffic.cars.iter().position(|c| !c.done).unwrap();
+    w.traffic.cars[k].driver = true;
+    w.step(press(Buttons::ENTER));
+    assert!(log_has(&mut w, "car: somebody is at the wheel"));
+    run(&mut w, Buttons::NONE, 100);
+    assert_eq!(w.doing, Doing::Driving);
+    assert!(log_has(&mut w, "car: dragged the driver out (ped "));
+    // Pulled out of the door and left lying beside the car...
+    let car = w.driven.as_ref().unwrap().veh.clone();
+    let near = |p: &gfa_sim::peds::Ped| {
+        (p.x - car.ox).abs() < (48 << 16) && (p.y - car.oy).abs() < (48 << 16)
+    };
+    let i = w
+        .peds
+        .p
+        .iter()
+        .position(|p| p.alive && p.down > 0 && near(p))
+        .expect("the driver lying by the car");
+    // ...then up and walking.
+    run(&mut w, Buttons::NONE, 150);
+    let p = &w.peds.p[i];
+    assert!(p.alive && !p.corpse && p.down == 0, "{p:?}");
+}
+
+#[test]
+fn a_ped_in_the_water_drowns() {
+    let mut b = CmpBuilder::new(1);
+    street(&mut b, 5..25, 5..15);
+    for x in 5..25 {
+        for y in 15..20 {
+            b.set(x, y, 2, block(0x10));
+        }
+    }
+    let mut w = world(&b, south(15, 13));
+    w.peds.clear();
+    w.drop_ped(0, 80, 0);
+    let i = w.peds.p.iter().position(|p| p.alive).unwrap();
+    w.step(TickInput::default());
+    assert!(log_has(
+        &mut w,
+        &format!("ped: {i} in the water at (15,16)")
+    ));
+    assert!(!w.peds.p[i].shown(), "gone under");
+    run(&mut w, Buttons::NONE, gfa_sim::peds::DROWN_TICKS as u32 + 2);
+    assert!(log_has(&mut w, &format!("ped: {i} drowned")));
+    assert_eq!(w.peds.stats.drowned, 1);
+}
+
+#[test]
+fn nobody_spins_on_the_spot() {
+    // A crowd on pavements between a road and a wall of buildings, for a
+    // minute. A sidestep bends a man's heading a quarter turn; it must not
+    // pile up into a spin, nor flick back and forth along a kerb.
+    let mut b = pavements();
+    for x in 30..34 {
+        for y in 5..45 {
+            b.set(x, y, 2, block(BUILDING));
+        }
+    }
+    let mut w = world(&b, south(27, 20));
+    w.park(0, 40, 0, 0);
+    let n = w.peds.p.len();
+    let mut last: Vec<Option<i32>> = vec![None; n];
+    let mut turning = vec![0; n];
+    let mut worst = (0, 0, 0);
+    let mut crowded = 0;
+    for t in 0..3000 {
+        w.step(TickInput::default());
+        for (i, p) in w.peds.p.iter().enumerate() {
+            let walking = p.alive && !p.corpse && p.down == 0 && p.speed > 0;
+            let a = walking.then_some(p.angle);
+            match (last[i], a) {
+                (Some(l), Some(a)) => {
+                    let d = (a - l) & 255;
+                    if d.min(256 - d) >= 32 {
+                        turning[i] += 1;
+                        if turning[i] > worst.0 {
+                            worst = (turning[i], i, t);
+                        }
+                    } else {
+                        turning[i] = 0;
+                    }
+                }
+                _ => turning[i] = 0,
+            }
+            last[i] = a;
+        }
+        crowded += w.peds.p.iter().filter(|p| p.alive && p.dodging()).count();
+    }
+    assert!(crowded > 100, "nobody sidestepped ({crowded}): not a test");
+    assert!(
+        worst.0 <= 8,
+        "ped {} turned hard on {} ticks running, to tick {}",
+        worst.1,
+        worst.0,
+        worst.2
+    );
+}
+
+/// A press and release of the special key, `hold` ticks down.
+fn tab(w: &mut World, hold: u32) {
+    run(w, Buttons::SPECIAL, hold);
+    run(w, Buttons::NONE, 5);
+}
+
+#[test]
+fn the_special_key_works_the_siren_then_sounds_it() {
+    use gfa_sim::cars::{DELTA_LIGHT0, Siren};
+    let mut b = CmpBuilder::new(1);
+    street(&mut b, 5..25, 5..40);
+    let cmp = Cmp::parse(&b.build()).unwrap();
+    let police = CarInfo {
+        model: 4,
+        ..saloon()
+    };
+    let mut w = World::new(
+        SimMap::new(cmp, WallTiles::gta(1)),
+        vec![saloon(), police],
+        SimView::GAME,
+        south(15, 8),
+    );
+    w.put_in_car(1, 15, 8, 128);
+    w.drain_log();
+    let siren = |w: &World| w.driven.as_ref().unwrap().siren;
+    let lights = |w: &World| w.driven_look().unwrap().0 & (3 << DELTA_LIGHT0);
+    assert_eq!(lights(&w), 0, "dark until the siren is on");
+
+    // The first press puts it on, and holding that press does not sound it.
+    tab(&mut w, 30);
+    assert_eq!(siren(&w), Siren::On);
+    assert!(log_has(&mut w, "special key - siren on (model 4)"));
+    // The lights take turns, ten ticks each.
+    let a = lights(&w);
+    run(&mut w, Buttons::NONE, 10);
+    let b2 = lights(&w);
+    assert!(a.count_ones() == 1 && b2.count_ones() == 1 && a != b2);
+
+    // A press after that sounds it while held; letting go goes back to on.
+    run(&mut w, Buttons::SPECIAL, 20);
+    assert_eq!(siren(&w), Siren::Sounding);
+    assert!(log_has(&mut w, "special key - siren sounding (model 4)"));
+    run(&mut w, Buttons::NONE, 1);
+    assert_eq!(siren(&w), Siren::On);
+    assert!(log_has(&mut w, "special key - siren on (model 4)"));
+
+    // Getting out puts it out.
+    run(&mut w, Buttons::ENTER, 1);
+    run(&mut w, Buttons::NONE, 1);
+    assert!(matches!(w.doing, Doing::Exiting(_)), "{:?}", w.doing);
+    assert_eq!(siren(&w), Siren::Off);
+}
+
+#[test]
+fn the_special_key_is_a_horn_in_a_car_and_a_shout_on_foot() {
+    let mut b = CmpBuilder::new(1);
+    street(&mut b, 5..25, 5..40);
+    let mut w = world(&b, south(15, 8));
+    tab(&mut w, 3);
+    assert!(log_has(&mut w, "special key - a shout"));
+    w.put_in_car(0, 15, 8, 128);
+    run(&mut w, Buttons::SPECIAL, 50);
+    assert!(w.driven.as_ref().unwrap().horn, "held down, it sounds");
+    run(&mut w, Buttons::NONE, 1);
+    assert!(!w.driven.as_ref().unwrap().horn);
+    let log = w.drain_log();
+    assert!(
+        log.iter()
+            .any(|l| l.text == "special key - horn down (model 0)")
+    );
+    assert!(
+        log.iter()
+            .any(|l| l.text == "special key - horn up (model 0)")
+    );
+    assert!(!log.iter().any(|l| l.text.contains("siren")));
+}

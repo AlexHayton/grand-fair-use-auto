@@ -34,6 +34,9 @@ pub struct Runner {
     held: Buttons,
     /// Keys pressed for this tick only.
     tap: Buttons,
+    /// The special key, held from `tab 1` to `tab 0` across waits (in
+    /// AmiGTA1 the key's state outlives the order).
+    tab: bool,
     legs: u32,
 }
 
@@ -62,9 +65,15 @@ impl Runner {
         } else {
             // Past the end: hands off the keys.
             self.held = Buttons::NONE;
+            self.tab = false;
         }
+        let tab = if self.tab {
+            Buttons::SPECIAL
+        } else {
+            Buttons::NONE
+        };
         TickPlan {
-            input: TickInput::new(Buttons(self.held.0 | self.tap.0)),
+            input: TickInput::new(Buttons(self.held.0 | self.tap.0 | tab.0)),
             dump,
         }
     }
@@ -152,6 +161,8 @@ impl Runner {
                         Ok(model) => world.park(model, dx, dy, face),
                         Err(_) => world.say(format!("script: line {}: bad model", line.number)),
                     },
+                    ("ped", &[dx, dy, angle]) => world.drop_ped(dx, dy, angle),
+                    ("tab", &[down]) => self.tab = down != 0,
                     _ => world.say(format!(
                         "script: line {}: `{name}` is not supported yet",
                         line.number

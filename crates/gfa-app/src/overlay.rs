@@ -1,5 +1,5 @@
 //! The egui debug overlay: frame rate, camera, draw counts and a block
-//! inspector. F1 shows and hides it.
+//! inspector. The backtick key (`` ` ``) shows and hides it.
 
 use std::sync::Arc;
 

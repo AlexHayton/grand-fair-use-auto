@@ -26,6 +26,16 @@ struct Args {
     /// Save the first frame as a PNG and quit (a smoke test).
     #[arg(long)]
     screenshot: Option<PathBuf>,
+    /// Window size in logical pixels, e.g. 1280x800.
+    #[arg(long, default_value = "1280x800", value_parser = parse_size)]
+    size: (u32, u32),
+}
+
+/// `WIDTHxHEIGHT`.
+fn parse_size(s: &str) -> Result<(u32, u32), String> {
+    let (w, h) = s.split_once('x').ok_or("expected WIDTHxHEIGHT")?;
+    let n = |v: &str| v.trim().parse::<u32>().ok().filter(|&n| n > 0);
+    n(w).zip(n(h)).ok_or_else(|| format!("bad size {s}"))
 }
 
 fn main() -> ExitCode {
@@ -54,6 +64,7 @@ fn main() -> ExitCode {
         level: args.level,
         no_hd: args.nohd,
         screenshot: args.screenshot,
+        size: args.size,
     };
     match gfa_app::run_native(config) {
         Ok(()) => ExitCode::SUCCESS,

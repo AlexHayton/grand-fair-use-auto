@@ -237,7 +237,7 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
   - `gfa_sim::clock`: `Half` (both of AmiGTA1's phases), `Ratio` (vehicle physics 7/15 fires on the third tick, as AmiGTA1's accumulator), `ped_frames`.
   - The app's `Pacer` turns wall time into ticks (at most 6 a frame, AmiGTA1's catch-up cap) and the player is drawn between the last two ticks.
 - [x] Logical sim view (Principle 4). Map and height queries, including the nav byte grid (`gta_nav.c`) and ground types (`gta_map_ground_type`). `ScriptWorld` trait skeleton.
-  - `SimView::GAME` is 10×6 half-blocks (a 21:9 window at the default camera height); `SimView::AMIGTA1` (5×4) is for oracle runs.
+  - `SimView::GAME` is 10×6 half-blocks (a 21:9 window at the default camera height; 12×7 since M5 stage 4); `SimView::AMIGTA1` (5×4) is for oracle runs.
   - `gfa_sim::map`: ground types with the missing-pavement rule, the nav byte (railway blocks zeroed, dirt roads as road), thin walls from the solid flat-face tile lists, ramps (`slope_up_dir`, `slope_is_top`), `wall_cross`, and `ground_z` for the height on a ramp.
   - `ScriptWorld` holds the M3 callbacks and a table of which AmiGTA1 callbacks each later milestone adds; unsupported calls return `Unsupported` instead of succeeding.
 - [x] Input becomes a recorded command stream. Parse the AmiGTA1 order format (`wait/run/enter/goto/park/…`, `gta_main.c:6875-7084`).
@@ -286,15 +286,17 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
   - So far: the jump lands; `tools/oracle/drivetrace.c` (AmiGTA1's physics, wall and layer code, with its main loop's glue restated) matches gfa-sim on `drive_oracle`, `drive_jump`, `drive_wall`, `drive_sink` and 24 random drives over the three cities with random vehicles (`oracle_drive_scripts`, `oracle_random_drives`).
 
 **M5: Living city.** Ref: `gta_traffic.c` (10.6k lines), `gta_route.c` (BFS: 48-block window, 700 nodes), `gta_nav.c`, `gta_peds.c`.
-- [ ] Fleet spawn and despawn on the logical view.
+- [x] Fleet spawn and despawn on the logical view.
   - Nothing may pop in or out where the player can see it. The camera's lead and any speed zoom become sim state (from position and speed only), the spawn and despawn rings follow them with AmiGTA1's margins (+2..+6 blocks spawn, +9 despawn), and in normal play the renderer never shows more ground than that view: zoom-out is capped and windows wider than 21:9 are pillarboxed. Free look, fly and extreme zoom are debug views where pop-in is accepted.
   - A pop-in check, like the holecheck: run traffic and fail if anything spawns or despawns inside the visible ground at the largest allowed zoom and aspect.
-  - Stage 1 (2026-11-21): the fleet's rings follow `SimView` (half-width 10 blocks in the game), centred on the player or his car, never on the window. The camera lead and zoom as sim state, the zoom cap and pillarbox, and the pop-in check remain.
+  - Stage 1 (2026-11-21): the fleet's rings follow `SimView` (half-width 10 blocks in the game), centred on the player or his car, never on the window.
+  - Stage 4 (2026-11-21): `gfa_sim::view::SimCamera` leads a moving player by 0.35 s of travel (at most a third of the view) and widens the view up to 1.5× with his speed; the fleet's rings and the crowd's edges follow it. `SimView::GAME` is 12 by 7, measured on layer 1, the lowest ground anything stands on. The follow camera centres on the simulation's lead, caps its height so it never shows more than the view (`max_depth`, a block spare), and pillarboxes windows wider than 21:9. The pop-in check (`nothing_pops_in_or_out_in_sight`) drives the fastest car and runs on foot in all three cities at 21:9, 16:9 and 4:3: about 17,600 comings and goings, none in sight; its control without the cap sees 2,369 of 2,445.
 - [x] AI driver: lanes, junctions, give way, queues, S-curve lane change, U-turn.
   - `gfa_sim::traffic` (with `route`): AmiGTA1's `gta_traffic.c` with its switches at their defaults. Routes by breadth-first search over the arrows, pure-pursuit lane keeping, turns on circular arcs, junction bookings and convoys, the occupancy table, following gaps, lane changes and U-turns when blocked, head-on backing off, escapes out of sight, cruising on clear straights, far cars driving at half or quarter rate.
   - `tools/oracle/traffictrace.c` runs AmiGTA1's own traffic; `oracle_traffic` matches it car for car at the four `fullgate` sites, seeds 1 to 3, 3,000 ticks each.
 - [x] Traffic lights.
   - The lights' clock and the stop line (the block's traffic hint). Drawing the lights waits for the renderer's sprite work.
+  - Stage 5 (2026-11-21): drawn. `gfa_sim::traffic::roads::lamps` finds AmiGTA1's lamps (two on each lit corner, one for each road beside it) with each lamp's crossing and facing; the app and `gfa-tool` pictures draw the style's lamp sprites lit red, green or amber, under the crowd and the cars, the lens toward the drivers coming in. Each crossing now has one light: AmiGTA1 timed a light by the 8×8 neighbourhood of the block asking, which split 59 of the three cities' 79 lit crossings (decision log). Liberty City has 148 lamps at 24 crossings, San Andreas 150 at 28, Vice City 156 at 27.
 - [x] SAT `box_mtv` collisions with impulse and spin (`fleet_collide`, around `gta_traffic.c:8067`).
   - Within the fleet, and (stage 2) the player's car against it: stopped at the contact by eight halvings of the move (`gta_traffic_sweep_box`), then the ram (`gta_traffic_ram`): both pushed apart by mass, the struck car knocked loose with a spin or leant on, bodywork charged on a real impact.
 - [x] The player and the fleet (stage 2, 2026-11-21).
@@ -302,16 +304,25 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
   - RETURN takes the nearest car within reach out of the fleet, moving or standing (`gta_traffic_grab_car`). A moving car's driver is not thrown out yet: that needs the peds.
   - On foot he is held off fleet cars (`ped_car_block`); the vault, the slide and the blocked door ask the fleet. Trains crush fleet cars (20 points), and write-offs in the fleet burn and burn out (`gta_weapon.c`'s sweep; the blast is M6).
   - `walktrace.c` and `drivetrace.c` now run the fleet and the trains (`tools/oracle/fleet.h`), and the walk and drive oracles compare the whole fleet on every tick: 71 runs match, 11 of them with rams (46 in all).
-- [ ] Peds on pavements, crossings, knockdowns, panic.
-- [ ] Close the M5 items in *Gaps beyond AmiGTA1*: counter-punch, gang roles, special ped groups, junction fidelity, pull-over, the siren, dragging out drivers.
+- [x] Peds on pavements, crossings, knockdowns, panic (stage 3, 2026-11-21).
+  - `gfa_sim::peds`: AmiGTA1's `gta_peds.c` crowd. People come on at the edge of the view ahead of the player and go once they have been out of sight a while; they wander the pavements, pick a gait, step round each other, cross at lit crossings, run for the pavement when caught in the road, dodge a car coming at them, lie down when knocked over, and leave bodies that stay for 30 seconds.
+  - In the world, in AmiGTA1's order: the crowd learns where the player is, people on their feet are walkers the fleet stops for, the fleet and trains tick (trains now kill peds on the line), then the crowd ticks, then the player's car runs over whoever is in its box.
+  - A taken car's driver is dragged out once the door is fully open, or knocked off a bike (AmiGTA1's `gta_peds_pull` and `_knock_off`); he lies in the road for a while, then gets up and walks off. The carjack's score and a cop car's driver coming after him are M6's.
+  - The pool is sized to the view: 12 at AmiGTA1's view (the oracle), 33 at the game's. Ours: a ped who ends up in the water drowns (decision log).
+  - Drawn in the app between ticks and in `gfa-tool` pictures, in his own dress (`PED_REMAP_TABLES`, measured).
+  - The walk and drive oracles compare every living ped on every tick (`tools/oracle/fleet.h` runs AmiGTA1's crowd): all 71 runs match.
+  - Not yet (M6/M7): shooting and punching people, panic at gunfire, fire, cops on foot, the script's own people.
+- [x] Close the M5 items in *Gaps beyond AmiGTA1*: junction fidelity, pull-over, the siren. (The counter-punch and special ped groups moved to M6, gang roles to M7, on 2026-11-21.)
+  - 2026-11-21: the siren and the horn done; the pull-over built with provisional numbers, which M6b measures; junction fidelity measured and closed (decision log).
 - Exit: the `drive` traces from `fullgate`/`litegate` (4 sites × 3 seeds × 12,000 ticks) match the oracle, with no deadlocks.
+  - Met for the traffic (2026-11-21): `oracle_traffic` runs `fullgate`'s twelve runs in `gtadump drive`'s setup and every trace matches AmiGTA1 (patched as `tools/oracle/build.sh` lists); `traffic_gate` passes all twelve on AmiGTA1's own checks (on the road, none inside another, none vanishing in view, the fleet moving) and ours (no car standing a minute). `litegate`'s lite mode is not in this AmiGTA1. AmiGTA1 unpatched passes 3 of the 12. The gap items below remain.
 
 **M6: Combat, police, services.** Ref: `gta_weapon.c`, `gta_pickup.c`, `gta_score.c` (heat thresholds such as LC 151/251/351/501), `gta_traffic.c:9681-10500` (cop dispatch, roadblocks), `gta_peds.c:1912-2066` (arrest, shooting), `gta_service.c`, `gta_marks.c`, plus the `gta_main.c` busted/wasted/siren code.
 - [ ] Five weapons, rockets and flames, fires and explosions; crates.
 - [ ] Wanted levels, chases and rams, roadblocks, arrest; BUSTED and WASTED, lives, hospital.
 - [ ] Ambulance and fire engine. Spray and bomb shops.
 - [ ] Tyre marks, blood and oil for all cars. AmiGTA1 only marks the player's car.
-- [ ] Close the M6 items in *Gaps beyond AmiGTA1*: crates, armour, friendly fire, wall fires, power-ups, bonuses, police reasons, bust tally, bombs, chain explosions, blast damage.
+- [ ] Close the M6 items in *Gaps beyond AmiGTA1*: crates, armour, friendly fire, wall fires, power-ups, bonuses, police reasons, bust tally, bombs, chain explosions, blast damage, the counter-punch, special ped groups.
 - Exit: the bust, death and spray-escape loops work; the AmiGTA1 `car_*`, `bankblast` and `blood*` scripts pass.
 
 **M6b: Measured from the original.** The vehicles AmiGTA1 does not drive, measured from the DOS original running under DOSBox-X (Principle 8). After M6, because the tank's cannon uses its explosions.
@@ -319,10 +330,14 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
   - Key presses come from a script timed in emulated time, not wall-clock time, so a run repeats exactly.
   - Readouts are screenshots, with sprite position and angle measured from the pixels, and memory dumps once the player's vehicle is found in memory.
   - Nothing it captures is committed. The input scripts and the measured numbers are.
-  - The harness also serves the later **(verify)** items: special ped groups, bonuses, cheats.
+  - The harness also serves the later **(verify)** items: special ped groups, the counter-punch, gang roles, bonuses, cheats.
 - [ ] Boats: handling on water, getting on and off, what happens at the shore.
 - [ ] Tank: its handling against AmiGTA1's; the turret; the cannon; its armour; pushing cars; where it is found.
 - [ ] RC car and helicopter: whether either can be driven, and how. The escape helicopter's scripted flight is M7's.
+- [ ] The counter-punch: what the victim's punch back does to the player (AmiGTA1 has only the 13-step counter whose last two are it). For M6.
+- [ ] Gang roles: the state machine of the original's gang AI types (`gta_peds.c:1111`: AmiGTA1 has read the police ones only). For M7.
+- [ ] Special ped groups: where Hare Krishnas and Elvises appear, in which cities, how often and how they walk. For M6.
+- [ ] The pull-over: how far to the side the look reaches, how slowly the car moves over, whether it stops and for how long, whether the siren left on does it too. And the keys for the game's police and zoom toggles, which its README does not list.
 - [ ] Getting into a car, frame by frame against the original. The owner reports that ours looks as if he goes in through the wrong side of the door (2026-11-21). Check the door point, the walk-in path, the sprite frames and the door's opening delta.
 - Exit: each drives as measured; the numbers and the probe scripts that produced them are in the decision log.
 
@@ -332,7 +347,7 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
 - [ ] `docs/MISSION_OPCODES.md` lists every command used in GTA's `MISSION.INI` with its status. Sources: AmiGTA1's table, Carnage3D `docs/ped.txt`, community mission docs, and observed behaviour.
 - [ ] `gfa-tool mission coverage` produces the coverage report.
 - [ ] Original HUD: cop heads, weapon and ammo, armour, jail-free card, the pager scroll, the brief box, the big two-line card, score and multiplier fonts.
-- [ ] Close the M7 items in *Gaps beyond AmiGTA1*: every job, a playthrough script per job, mission-only vehicles.
+- [ ] Close the M7 items in *Gaps beyond AmiGTA1*: every job, a playthrough script per job, mission-only vehicles, gang roles.
 - Exit, in order:
   1. LC jobs 1–2 pass AmiGTA1's `threejobs`/`phonering`/`lc2_job1` scripts.
   2. Each level's first job passes (`sa1`, `sa2`, `vc1`, `vc2`).
@@ -379,7 +394,7 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
   - Decoded by the same Rust code everywhere.
 - [ ] Polish:
   - Additive dynamic lights: headlights, siren strobes, muzzle flash, explosions.
-  - Smooth speed-based zoom (render only, never the sim view).
+  - Smooth speed-based zoom: done in M5 as simulation state (`SimCamera`), so the view it shows is the view that spawns.
   - Optional xBRZ-style shader when no pack is present; optional CRT shader.
 - Exit:
   - The toggle works on native and web.
@@ -429,16 +444,15 @@ Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.m
   - 2026-11-20: AmiGTA1 has since replaced the chord with straights and quarter circles, which is ported; the original's nine-shape path table itself is still to compare against. Boarding, riding, getting off and driving work on Liberty City (`train_ride.txt`); IS_PLAYER_ON_TRAIN comes with M7.
 
 **M5 Living city**
-- [ ] **Horn and pull-over**: the original's look-ahead of up to five blocks for a car (`gta_main.c:3957`, NOT PORTED).
-- [ ] **Emergency vehicles the player drives**: the siren and light toggle in cop cars, ambulances and fire engines, and how traffic reacts to it.
-- [ ] **Dragging the driver out** when the player takes an occupied car, and the carjack's score (moved from M4: needs peds).
-- [ ] **Peds in the water** drown as the player does (moved from M4 on 2026-11-21: needs peds).
-- [ ] The victim's ped counter-punch (`gta_peds.c:1675`).
-- [ ] Settle the gang-role state machine (`gta_peds.c:1111`).
-- [ ] **Special ped groups** that the bonuses need: Hare Krishna lines; Elvis impersonators **(verify which levels)**. Spawn rules come from the style and ped tables.
-- [ ] Traffic fidelity issues AmiGTA1 lists as open: junction wobble (`gta_traffic.c:5871`) and corner landing error (`gta_traffic.c:5666`).
+- [ ] **Horn and pull-over**: the original's look-ahead of up to five blocks for a car (`gta_main.c:3957`, NOT PORTED). The horn is done; the pull-over is built with provisional numbers, to measure in M6b.
+- [x] **Emergency vehicles the player drives**: the siren and light toggle in cop cars, ambulances and fire engines, and how traffic reacts to it (the pull-over, above). The siren's sound is M8's.
+- [x] **Dragging the driver out** when the player takes an occupied car (moved from M4: needs peds). The carjack's score is M6's.
+- [x] **Peds in the water** drown as the player does (moved from M4 on 2026-11-21: needs peds).
+- [x] Traffic fidelity issues AmiGTA1 lists as open: junction wobble (`gta_traffic.c:5871`) and corner landing error (`gta_traffic.c:5666`). Measured and closed (decision log, 2026-11-21).
 
 **M6 Combat, police, services**
+- [ ] The victim's ped counter-punch (`gta_peds.c:1675`; moved from M5 on 2026-11-21: needs the player's punch). What it does: **(verify)** in M6b.
+- [ ] **Special ped groups** that the bonuses need: Hare Krishna lines; Elvis impersonators **(verify which levels)** in M6b. Spawn rules come from the style and ped tables. (Moved from M5 on 2026-11-21: the bonuses are here.)
 - [ ] **Bombs**: the type-4 tanker bomb, whose wreck blows five times (`gta_main.c:4272`, not ported). Find the global that triggers it.
 - [ ] **Chain explosions**: a burning wreck sets off its neighbours (`gta_weapon.h:34`).
 - [ ] **Blast damage**: a car blowing up hurts the cars and people around it (`gta_weapons_wreck_car`); burnt-out wrecks look burnt (moved from M4).
@@ -468,6 +482,7 @@ Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.m
   - The RC car (model 47) has no doors either. Drivable or not, and how? **(verify)**
 
 **M7 Missions**
+- [ ] Settle the gang-role state machine (`gta_peds.c:1111`; moved from M5 on 2026-11-21: only the script makes gangs). The original's states: **(verify)** in M6b.
 - [ ] **Every job of every chapter.** AmiGTA1 played through only the first job of each level.
   - Add one `tools/scripts` playthrough per job as each job is finished.
   - Each job's script must pass in CI. Where the oracle has no answer, record a replay hash instead.
@@ -499,6 +514,86 @@ Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.m
 ## Decision log
 
 Newest first. Each entry: date, decision, why.
+
+- **2026-11-21. The counter-punch and special ped groups move to M6, gang roles to M7.** Agreed with the owner.
+  - Each needs a system that comes later. The counter-punch needs the player's punch (M6). The special groups exist for the bonuses (M6). Gangs are made only by the mission script (M7).
+  - None has enough evidence to build from. AmiGTA1 has only the punch counter's last two steps, an unread state machine for the gang AI types, and no Hare Krishnas or Elvises. Carnage3D's mission-writing notes name ped type 143 as the Hare Krishnas, and its 60-second spawn timer is its own guess.
+  - So each goes to its milestone with its facts to gather in M6b, rather than being invented now. That closes M5's gap list.
+
+- **2026-11-21. The junction wobble and the corner landing are closed on measurement; cars still do not steer inside a crossing.**
+  - Measured over the gate's twelve runs (`cars_keep_their_lanes_through_junctions`). Of 3,351 crossings, no car turned twice in one. The wobble AmiGTA1 describes came from cars with no route re-rolling their heading every tick; with our routes (the earlier gate fixes), cars on that fallback are 0.2% of moving car-ticks.
+  - Of 2,126 straight crossings, 14 end more than a pixel off their line. Of 2,282 turns, 15 are more than a pixel off 40 ticks later (AmiGTA1's `stat_slide`). The test holds both under 1%.
+  - The four worst landings are not landing errors. In three, a bus standing mid-turn swings its tail into the next lane and shoves a car that has already landed. The fourth is a bike whose U-turn was interrupted.
+  - The worst crossing: a car set off from the kerb a block before a crossing, entered it 24° off square, and crossed diagonally into the next lane (27 px), because a car holds its heading inside a junction box. AmiGTA1 chose that rule on measurement: steering inside crossings made cars book diagonal footprints, box waiting rose from 6,851 to 8,292 car-ticks and flow fell from 93.5% to 92.25%. One crossing in 2,126 does not outweigh that, so the rule stays.
+
+- **2026-11-21. The pull-over is built from AmiGTA1's note, with our numbers where it is silent.**
+  - Evidence: AmiGTA1's `special_key` note (`gta_main.c:3957`): the original's routine looks up to five blocks ahead for a car and makes it pull over, lane offset 7 or 0x37 of 0x40 instead of the middle's 0x1f, in its own state (`car+0x11f == 1`; `gta_traffic.h`). The routine handles the key in a car, so both the horn and the siren do it, while the key is down.
+  - Ours: the look takes the nearest car whose centre is within half a block of his line. It must be ordinary traffic driving along its lane, with its block and the next two plain road, so it never stops in a junction. It moves to the kerb on its right (16 ± 12 px, from the original's offsets) at 2 speed units, and stops within 2 px of it. It stays three seconds after the key last found it, then drives on. Standing there counts as no jam, so none of the stuck rules fire. A turn, a lane change or a booking ends it.
+  - Every number in that list is **(verify)** in M6b. Precedent: the camera's zoom curve, built provisional for the same reason. Nothing in the oracle presses TAB, so every oracle run is unchanged.
+  - London drives on the left (M11), where the kerb is on the left.
+
+- **2026-11-21. The player's siren and horn, from AmiGTA1's `special_key`.** Models 4, 5 and 0x2a (the police car, the ambulance, the fire engine) have a siren. The first press puts it on and it stays on. A press after that sounds it (the yelp) for as long as the key is held, and letting go goes back to on. Getting out puts it off. Any other car sounds its horn while the key is held. On foot a press is a shout, whose sample is the sound's to pick (M8).
+  - AmiGTA1 drives this from key events. Ours takes the presses and releases from each tick's buttons, which is the same thing. Its script order `tab N` holds the key across waits, as AmiGTA1's harness does.
+  - Ours: his car shows its lights, lighting deltas 15 and 16 turn about every ten ticks. In the original the same byte (`car+0x113`) switches the siren and the lights. AmiGTA1 flashes them only on its dispatched cops.
+
+- **2026-11-21. The original's keys do what they did; debug keys keep off them.** Asked by the owner.
+  - Evidence: the 1997 DOS README's key list (pieter.com mirror of the demo's `README.TXT`). The default layout uses the arrows, Space (brake, jump), Enter (in and out), Ctrl (fire), Z and X (previous and next weapon), Tab (horn), F1 to F4 (network messages), F5 (retune the radio), F6 (pause), F7 (repeat the pager), F9 (the area's name), F10 (repeat the last message), F11 (screen mode) and Esc (quit). AmiGTA1 agrees on every in-game key it ports.
+  - F8 is not in the README. The game's text has strings for a frame-rate limiter going on and off, and the Windows re-release puts that toggle on F8, so F8 counts as the original's too.
+  - The game's text also has toggles for the police and for three zoom levels whose keys the README does not give: **(verify)** in M6b before binding anything new.
+  - Changed: the debug overlay moves from F1 to the backtick key, and F6 now pauses (no time reaches the simulation). Our free look (F), straight down (R), fly (C) and zoom (`+`/`-`, PageUp/PageDown, the wheel) are on keys neither of the original's layouts uses, so they stay.
+  - Shift (walk) and the WASD aliases are ours too. They sit on keys of the README's second, "Classic" layout (Z/X turn, U/I forward and back, P brake, W enter, 9 fire, Tab and Left Shift weapons, S horn). If we offer that layout (M12, key rebinding), those aliases go while it is chosen.
+  - Kept for later: F5 with the radio (M8), F7, F9 and F10 with the HUD's messages (M7), F8 and F11 with the settings (M12), Esc's confirmation with the front end (M8).
+
+- **2026-11-21. The last of the gate: spawning clear of bodies, following round a turn, stopping by the nose; the oracle carries them.**
+  - Spawning: four of the five bumps left in the gate were new cars put down on another's body, the nose of a car waiting at a corner or one changing into the lane. AmiGTA1 asks only whether the lane has room. Ours (`Traffic::body_in_way`): no car's body may touch the box the new car would take (at the block's middle, wide enough for the kerb lane, 2 px spare at the ends). `tools/oracle/traffic_spawn.pl`.
+  - Following round a turn: the fifth was two cars turning through one corner. Halfway round, the nose points across the corner and the car ahead in the street being turned into falls outside the strip a car watches. Ours: while turning, it looks along that street too. Added to `traffic_follow.pl`.
+  - A shoved car's lane: a bus pushed past the middle of the pavement block beside its lane found only more pavement on the nearer side. `lane_block` now tries the other side too (`traffic_rejoin.pl`).
+  - Stopping for a light by the nose: what pushed that bus was the traffic across the crossing clipping its nose. AmiGTA1 holds a car at a red light once its middle is on the stop line, which leaves a bus half a block into the crossing. Ours: the light also holds a car once its nose would reach the box (within its stopping reach, the box gate's own test), where the block before the box is a stop line. The longest waits at the crossing by (61,52) fell from 48 to 58 s to 16 to 35 s. `tools/oracle/traffic_stopline.pl`.
+  - Built without either new patch, `oracle_traffic` differs (from line 96,243 and 9,469 of a (64,64) run).
+
+- **2026-11-21. A car follows only what is on its way; the oracle carries the change.**
+  - The loop by (106,114) still jammed in one seed once its corners were fixed. Traced at the jam: every car stood behind another, and round the loop each wait was for a car the waiter would never reach. A car follows whatever is straight ahead of it within four blocks, and a northbound car about to turn east queued behind a westbound car beyond its corner, a southbound one about to turn west behind a car turning out of the next street. Round a closed loop of one-way streets those waits joined into a ring.
+  - Ours (`Traffic::turn_ahead`): where a car's route turns within four blocks, a car straight on past that corner is not one it follows. Cars before the corner and in it still are. The loop keeps 57 to 59% of its fleet moving, its longest wait 15 s (from 8 to 25% and up to two minutes). `tools/oracle/traffic_follow.pl`; built without it, `oracle_traffic` differs from line 681 of its first run.
+
+- **2026-11-21. Long vehicles take their corners; the oracle carries the change.**
+  - A bus came to a corner of a one-way street whose far side was a building or grass, and stopped there for good with its street queued behind it (a 198 s wait at (98,228) in the gate). AmiGTA1 asks whether a vehicle fits lying along the way it is leaving, in the block it is in and in the next: so the bus was refused the move into the corner, since its nose would reach the building if it drove straight on, which at a corner it does not; and once it had turned in the corner, its tail still over the verge, it was refused the way out.
+  - Ours (`roads::fits_entering`): a move is judged by the block it enters, as the car comes in. Lying along its way where it may go straight on; at a corner, along the street it turns into. The car is already where it is.
+  - Two follow-on changes: a turn the car must make at a corner with no way on starts though its nose is not yet straight (a bus pushed askew by the car beside it entered a junction box, where nothing steers, crabbing; its turn waited to straighten and it left by the far side onto the pavement), and a car refused its turn at such a corner because the street beyond is full waits until it has room, rather than AmiGTA1's half second before forcing in, which put it into the back of the queue.
+  - `tools/oracle/traffic_fits.pl` and `traffic_corner.pl`; built without `traffic_fits.pl`, `oracle_traffic` differs from line 8,444 of a (61,52) run.
+  - The gate's overlap check now tests the two cars' bodies as boxes on their headings (`geom::box_hit`, the fleet's own collision test), allowing 2 px at the ends and 1 at the sides. AmiGTA1's measures along the first car's nose, which halfway round a turn counts a car passing in the next lane as one in front: most of the corner "overlaps" were that.
+
+- **2026-11-21. A car shoved out of its lane drives by its own lane; the oracle carries the change.**
+  - Of the dead-end stops left after the corner fix, most were cars a collision had pushed a pixel or half a block over a lane line, into the lane beside going the other way or onto the kerb. AmiGTA1 drives a car by the block under its middle, so such a car had nowhere legal to go and stood until out of sight. AmiGTA1 does pick the lane beside when a knocked car comes to rest, but the lane keeper resets the line to the block under it the next tick, and a car only pushed gets nothing.
+  - Ours (`Traffic::lane_block`): a car driving normally (not turning, changing lanes, reversing, crossing a junction or on police business) whose block does not go its way, while the block beside it on the nearer side does, drives by that block. Its route, junctions and lane line are its own lane's, and the lane keeper steers it back. Tried first as a lane change started from the dead end; that waited for the block beside to be empty, which never happens to a car queued in its own lane with its middle a pixel over the line.
+  - In the gate's twelve runs, cars stranded ten seconds out of their lane with nowhere to go fell from 4 to none, and ticks with a car off the road from 2,326 to none. `tools/oracle/traffic_rejoin.pl` makes the same change to the C; every oracle run matches, and built without it `oracle_traffic` differs from line 127,492 of a (108,228) run.
+
+- **2026-11-21. A car turns its corner or waits for it; the oracle carries the change.**
+  - The traffic gate found Liberty City's loop of one-way streets by (106,114) jammed solid. Traced: a car on its route came to a corner where the street turns and there is no way on, its turn was refused because the street round the corner was busy, and it drove straight on at full speed onto the pavement, where with no arrows under it it stopped for good. Two faults, both AmiGTA1's: a turn begun a block early asked whether the block beside the car had room, which is the far lane of the street it turns into, so a car was refused for traffic coming the other way; and a refused car carried on as if straight on were open, which only a junction makes true. AmiGTA1 has only a car on a long route wait. Its in-view give-up then deleted the car six seconds later, which hid the fault; ours waits until out of sight, so the car stayed and the loop jammed.
+  - Ours: the turn asks about the block beside the turning block, and a car refused its turn where its block's arrows or the road do not go straight on waits at the corner with the give-way brake. In the gate's twelve runs, cars that ran past a corner fell from 44 to none, and stops at a dead end from 47 to 12 (the rest are cars shoved out of their lane in collisions, and the off-road car at (97..101,228)). `tools/oracle/traffic_corner.pl` makes the same change to the C; every oracle run matches, and built without it `oracle_traffic` differs from line 7,426 of its first run.
+
+- **2026-11-21. One light per crossing; the oracle carries the change.**
+  - AmiGTA1 times a light from the 8×8-block neighbourhood of the block that asks, to keep neighbouring crossings half a cycle apart, and its comment says one crossing's stop lines always agree. They lie either side of the junction box, though, and on these maps they mostly fall in different neighbourhoods: 20 of Liberty City's 24 lit crossings, 21 of San Andreas's 28 and 18 of Vice City's 27 had approaches on both roads green at once, and the junction bookings sorted out who went. Invisible until the lamps were drawn; drawn faithfully, they would have looked broken.
+  - Ours: a light is named by its crossing, the root of its junction box (`Boxes::crossing`: the first junction block within two blocks). A car at a stop line asks about the box ahead of it, so a second crossing just behind cannot answer; a lamp about the crossing at its corner; a person waiting to cross about where he stands. The phase still alternates by the root's 8×8 neighbourhood. The cycle itself (5 s a road, 0.6 s amber) is AmiGTA1's own, not the original's.
+  - `tools/oracle/traffic_lights.pl` makes the same change to the copy of `gta_traffic.c` under `build/`. Every oracle run matches; built without it, `oracle_traffic` differs from line 246 of its first run.
+  - Lamps: where they stand and which road each is for is AmiGTA1's scan of the map's hint. AmiGTA1 draws them all facing south; ours face the drivers coming in (the lens is the sprite's front, as a car's bonnet is). Where a kerb lane runs past a T-junction's box rather than into it (23 lamps in San Andreas), the lamp faces the box beside it. Cars in such a lane never stop, as in AmiGTA1, since no box lies ahead of them.
+
+- **2026-11-21. The camera's lead and speed zoom are simulation state; the camera never shows more than the simulation's view.**
+  - Before, the lead and zoom were the renderer's, and the rings followed a fixed view on the player. Zoomed out, or led ahead at speed, the picture showed ground where people and cars come and go. Measured: the control run without the cap sees 2,369 of 2,445 comings and goings in sight.
+  - `SimCamera` (from his position and velocity only): the view's centre leads him by 0.35 s of travel, Carnage3D's figure, eased over about a sixth of a second and capped at a third of the view's half-extent. The old render lead was uncapped: 5.5 blocks at a sports car's top speed, more than the 4.2 blocks a 16:9 window shows above and below. The view widens with speed up to 1.5× at 10 px a tick, eased over about two thirds of a second. The original zooms out with speed; **(verify)** its curve under DOSBox-X (M6b), as nothing in AmiGTA1 or Carnage3D gives it. AmiGTA1's view (`SimView::AMIGTA1`) neither leads nor zooms, so every oracle run is unchanged.
+  - `SimView::GAME` grows from 10×6 to 12×7, measured on layer 1. All three cities have walkable ground there, and lower ground shows more of itself through a perspective camera. The default camera (8 blocks above a layer-2 street) shows 10.9 by 4.7 blocks there at 21:9, plus a block spare: the car is drawn up to a physics step (0.8 of a block) ahead of its last tick. The height leaves a 16:9 window room to zoom out as far as a 21:9 one. The crowd's pool scales with the view's area: 45, from 33.
+  - The renderer caps the eye at the lowest ground plus `max_depth` for the view now and the window's shape, pillarboxes past 21:9, and follows the simulation's lead without smoothing of its own (a lag would show ground behind the view). Only the height eases. Free look and flying are debug views and not capped.
+- **2026-11-21. A car stuck at a dead end gives up only out of sight; the oracle carries the change.** AmiGTA1 deletes a car with nowhere legal to go after 300 ticks wherever it is, its one exception to never deleting a car in view (a long vehicle in a street it cannot leave). The pop-in check saw one vanish in San Andreas. Ours waits until the car is out of sight, as AmiGTA1 already does for a car abandoned in a queue. `tools/oracle/traffic_giveup.pl` makes the same change to a copy of `gta_traffic.c` under `build/`; every oracle run matches.
+
+- **2026-11-21. The sidestep no longer spins people; the oracle carries the same fix.**
+  - Found in play: near a car and a wall, people spun on the spot. A crowded ped's sidestep bends his heading a quarter turn for 24 ticks, and AmiGTA1 bends whatever heading he has. Its comment assumes every walking mode re-aims him each tick, but a wanderer with nowhere to be keeps his heading, and a fleeing one re-aims only every seventh tick, so the bend piled up a quarter turn a tick. A second effect: a side found walled was tried again the next tick, so a man along a kerb turned a quarter and back on alternate ticks.
+  - Measured on Liberty City (eight random drives of 6,000 ticks): the longest run of hard turns, a quarter or more a tick, was 48 to 121 ticks in every drive; after the fix it is 4 to 6, all of them a man turning off a wall.
+  - Fix: the bend is remembered (`Ped::bent`) and taken off before his next tick's aim, forgotten when the step itself turns him, and given up for the rest of the sidestep once that side is walled.
+  - The bug is AmiGTA1's, so the faithful port had it and the oracle could not see it. The oracle now runs AmiGTA1's crowd with the same change, made by `tools/oracle/ped_sidestep.pl` on a copy under `build/` (each of its edits must apply exactly once). It keeps comparing everything else tick for tick, and it compares the crowd the game runs, not a spin nobody plays. `nobody_spins_on_the_spot` fails with AmiGTA1's rule (144 ticks of turning) and passes with ours.
+
+- **2026-11-21. The crowd is sized to the view.** AmiGTA1 keeps 12 people, enough for its narrow screen; at the game's view (20 by 12 blocks against AmiGTA1's 10 by 8) twelve leave the streets empty. The pool is 12 × the view's area over AmiGTA1's, so 33 in the game and exactly 12 at AmiGTA1's view, where the oracle runs are unchanged. The fleet's walker list grew from 16 to 64 to take them all.
+- **2026-11-21. Peds in the water drown.** AmiGTA1 lets a ped stand on water (only the player drowns). Ours goes under where he stands and is gone after 67 ticks, as the original's do. Nothing in AmiGTA1's crowd walks into water by itself, so it only differs when a shove, a fall or a drop puts somebody there; no oracle run does.
+- **2026-11-21. AmiGTA1's four departures in the crowd are kept**: corner targets spread across the pavement, separation between people and the relax pass after it, no stopping to rest near a corner, and a coin per ped at a T-junction (the original sends everybody the same way). Each is AmiGTA1's fix for people piling up where the original's rule bunches them. Recorded in `docs/PARITY.md`; for M6b's probe to compare with the original.
+- **2026-11-21. Ped colours in the G24 style are measured.** The simulation dresses people in GRY remap tables, as AmiGTA1 does; the G24 has 64 ped remap CLUTs with no stated order. Every ped sprite through each CLUT against the GRY palette through every table, in all four styles, pairs them one to one (`PED_REMAP_TABLES`): each best match is within the sprites' own requantising error, the next best at least 60 times worse. `people_wear_the_same_in_either_style` draws all 22 of AmiGTA1's dresses in both styles; they agree to within 2.6 of 255.
 
 - **2026-11-21. Traffic is AmiGTA1's, with its switches at their defaults.** AmiGTA1 carries about twenty experimental switches (`opt_*`), most of them off after its author measured them; the port keeps what the defaults run and leaves out the rest, so there is one behaviour to match and to maintain.
 - **2026-11-21. Traffic keeps AmiGTA1's fixed array of 60 cars.** A new car is written into the next slot with only the fields AmiGTA1 sets, and keeps the rest from whatever car last used that slot (a lane change under way, a coast, a collision latch). Clearing them would be tidier but would part from the oracle in ways nobody could see the cause of.
@@ -571,6 +666,74 @@ Newest first. Each entry: date, decision, why.
 ## Progress log
 
 Newest first.
+
+- **2026-11-21. M5 gap items: the siren, the horn and the pull-over; the junctions measured; the original's keys.**
+  - The special key (TAB): the siren in a police car, ambulance or fire engine, with its lights; the horn in any other car; a shout on foot. Scripts `siren.txt` and `horn.txt` (both pass on Liberty City), synthetic tests for each state.
+  - The pull-over: the car ahead moves to the kerb and stops while the key is held. Data test `the_car_ahead_pulls_over_for_the_horn`. Its numbers are provisional, **(verify)** in M6b (decision log).
+  - The junction wobble and corner landing: measured over the gate's runs and closed. No car turns twice in a crossing, and over 99% of crossings and turns end within a pixel of the line. Data test `cars_keep_their_lanes_through_junctions`.
+  - Keys: the original's default layout, from its 1997 README, does what it did there. F6 pauses. The debug overlay moves from F1 (the original's network messages) to the backtick key.
+  - The counter-punch and special ped groups moved to M6, gang roles to M7, each with its facts to gather in M6b (decision log). M5's gap list is closed. Every M5 item is now ticked, and its exit is met for the traffic.
+
+- **2026-11-21. M5: the traffic gate passes.**
+  - All twelve of `fullgate`'s runs pass `traffic_gate` and match AmiGTA1 in `oracle_traffic` (the M5 exit for the traffic). Fixes, all ours and all in the oracle (decision log): new cars clear of other bodies, following along the exit street mid-turn, a shoved car's lane found on either side, and the light holding a car by its nose. Eight patches to AmiGTA1's traffic now (`build.sh`), each shown to matter: built without it, `oracle_traffic` differs.
+  - Every tier green, the gate included: unit, data (28), oracle (all 71 walk and drive runs, traffic, trains), native against wasm, clippy, fmt, wasm-check.
+  - Next: the M5 gap items (horn and pull-over, the siren toggle, the counter-punch, gang roles, special ped groups, junction wobble and corner landing).
+
+- **2026-11-21. M5: the queue ring and the buses' corners fixed.**
+  - `roads::fits_entering`, the off-straight turn at a corner with no way on, the corner's patience, `Traffic::turn_ahead` (decision log). `tools/oracle/traffic_fits.pl` and `traffic_follow.pl` (six patches in all, `build.sh` chains them); `traffic_corner.pl` widened. Every oracle run matches; built without either new patch, `oracle_traffic` differs.
+  - The gate's overlap check is now the fleet's own box test (decision log), and it names the car that stood longest and what held it.
+  - New tests: `the_one_way_loop_keeps_moving` (fails without the following rule: a car stands 55 s), `no_car_stops_at_a_dead_end`; both sim, data. `film_gate` films of the loop and the bus corner after the change.
+  - The gate: 6 of 12 pass, from 3. No car stands a minute and none is off the road but one. What is left: a single tick of two cars inside each other in five runs, the moment of a bump; a bus stopped partway round the corner by (97,228) with its tail over the verge for 125 ticks in one run; and the longest waits at the lit crossing by (61,52) have grown to 48 to 58 s (the light, then the box on green), under the minute but worth a look.
+  - Next: the bumps, the bus's tail, the crossing by (61,52).
+
+- **2026-11-21. M5: a shoved car steers back into its lane; films of the gate.**
+  - `Traffic::lane_block` (decision log); `tools/oracle/traffic_rejoin.pl`, the fifth patch.
+  - New test `no_car_stands_in_the_wrong_lane` (sim, data: 4 stranded before, none now).
+  - `film_gate` (sim, data): with `FILM="bx by seed x0 y0 blocks from to step"` and `OUT`, writes a schematic film of a gate run: ground types, arrows, lights, and every car as a box on its heading, coloured by state (moving, standing, 3 s, 10 s; off the road rimmed). Made of the queue ring at (106,114), the bus at the corner by (98,228), and the bus off the road at (101,228) before this change.
+  - The gate: no tick with a car off the road in any run (from 2,326); 3 of 12 pass. What is left: the queue ring at (106,114) seed 1; long vehicles refused corners by `roads::fits` at (98,228) and (101,228) (a bus stands up to 198 s); brief overlaps; one car vanishing in view at (61,50).
+  - Next: the queue ring, and the long vehicles' corners.
+
+- **2026-11-21. M5: cars turn the one-way corners.**
+  - `gfa_sim::traffic` (drive): a turn checks the street it leads into, and a car refused its turn at a corner with no way on waits for it (decision log). `tools/oracle/traffic_corner.pl`, the fourth patch.
+  - New test `no_car_runs_past_a_corner` (sim, data: the gate's twelve runs; 44 cars ran past before, none now).
+  - The gate after it: the loop by (106,114) flows (24 to 64% of the fleet moving, from 8 to 19%), but seed 1 still has a car standing a minute. That is a second fault: a car queues behind whatever is straight ahead of it, even a car beyond the corner its route turns at, and round a closed loop those waits join up into a ring. Across the twelve runs the brief overlaps have moved about, as any change to the fleet reshuffles every run, and one run now has a car vanish in view at (61,50), not yet looked at. 3 of 12 pass; `traffic_gate` is still red.
+  - Next: the queue that looks past its own turn; what a car with nowhere to go does in view; then the overlaps, the vanished car and the off-road car.
+
+- **2026-11-21. M5: the traffic gate run at 12,000 ticks; it fails as AmiGTA1's does.**
+  - `oracle_traffic` is now the gate's own setup (four sites by seeds 1 to 3, 12,000 ticks, the fleet's view at 6 blocks as `gtadump drive` gives it): all 12 runs match AmiGTA1 car for car, about 238,000 trace lines each, in 8 s.
+  - `traffic_gate` (sim, data) checks what those runs do, as AmiGTA1's `gtadump drive` does: every car on the road (its rule: the centre line on road or pavement, the flanks out of buildings and water), none inside another, none vanishing from the camera's picture, the fleet moving, and none standing a minute or more. It passes 4 of the 12, and gives the same verdict as AmiGTA1's own gate on every run, built from the same patched sources (the flow figures and the longest waits agree too). Unpatched, AmiGTA1 passes 3 of 12.
+  - What fails: (1) brief overlaps, 4 to 8 ticks in a run, at five of the runs, AmiGTA1's own; (2) at (106,114), a loop of one-way streets with sharp corners, long cars run straight past a corner onto the pavement and stop there with no arrows under them. AmiGTA1 deletes them after six seconds in view (13 to 20 vanish a run); since stage 4 we wait until out of sight, and with the gate's camera standing still the whole loop jams (8 to 19% of the fleet moving, a car standing up to two minutes). (3) At (108,228), seeds 2 and 3, a car off the road at (97,228), once for a minute.
+  - Next: fix the corner overshoot (the jam's cause) and decide what a car with nowhere to go does in view; then the overlaps and the off-road car. The data tier has one red test until then: `traffic_gate`, the exit criterion.
+
+- **2026-11-21. M5 stage 5: the traffic lights drawn; one light per crossing.**
+  - `gfa_sim::traffic::roads`: `Light` (red, green, amber), `light`, `Lamp` and `lamps` (AmiGTA1's `gta_traffic_light_state` and `gta_traffic_lights_scan`), `Boxes::crossing`; `Traffic::lamps` and `light_tick`. Lights are timed by the crossing, and a car at a stop line asks about the box ahead (decision log); `tools/oracle/traffic_lights.pl`.
+  - Drawn in the app (`Game::lamps`, near the simulation's view) and in `gfa-tool` pictures, before the crowd and the cars.
+  - Tests: `one_axis_at_a_time_with_amber_before_red`; `the_lamps_face_their_crossings` (sim, data: every lamp in the three cities faces a crossing and shows what its cars obey, and no crossing has both roads green, over two cycles with the city running); `the_lights_stand_on_the_corners` (render, data: a Liberty City crossing's eight lamps drawn on their corners, lit their light's colour, lenses toward the drivers coming in). Every tier green: unit, data (22), oracle (all 71 walk and drive runs, traffic, trains), native against wasm, clippy, fmt, wasm-check. The oracle built without the new patch fails, as it should.
+  - Next: the traffic gate at 12,000 ticks (run; see above).
+
+- **2026-11-21. M5 stage 4: the camera and the view; no pop-in.**
+  - `gfa_sim::view::SimCamera` (the lead and speed zoom, in the world and its hash), `World::view_now` and `view_centre` for the fleet and the crowd; `SimView::GAME` 12×7; `SimMap::floor_layer`.
+  - `gfa_render::camera`: `max_depth`, `pillarbox`, `MAX_ASPECT`, `VIEW_MARGIN_BLOCKS`; `FollowCamera` follows the simulation's lead, eases only its height, and takes a ceiling. The app caps the zoom and draws the scene in the pillarbox (the inspector too). `gfa --size WxH` for smoke tests: a 2912×1000 window draws a 2,333-pixel band, as computed.
+  - The fleet's dead-end give-up waits until out of sight (decision log); `tools/oracle/traffic_giveup.pl`.
+  - Tests: `nothing_pops_in_or_out_in_sight` and its control `without_the_cap_things_pop_in` (gfa-app, data); `the_default_camera_fits_the_view`; the camera's cap, pillarbox and follow; `SimCamera`'s lead, zoom and AmiGTA1's view at rest. Every tier green: unit, data (20), oracle (all 71 walk and drive runs, traffic, trains), native against wasm, clippy, fmt, wasm-check.
+  - Next: drawing the lights, then the traffic gate at 12,000 ticks (lights done in stage 5).
+
+- **2026-11-21. Fix: the rider trailing his bike's seat.**
+  - Reported from play: riding forwards, the rider was drawn behind the seat. The app drew the bike on its physics clock but the rider between ticks, up to a quarter of a block apart at speed, and left him on the ground under a jump. A seated rider (and a driver seen in a convertible) is now drawn with the car's own pose. Render only; the simulation is unchanged.
+  - New test `the_rider_sits_on_his_bike_on_every_frame` (gfa-app): the rider on the seat on every frame of a 60 Hz display; drawn the old way, 16 render units off.
+
+- **2026-11-21. Fix: people spinning on the spot.**
+  - Reported from play: near the player's car and a wall, people spun rapidly. Caused by AmiGTA1's sidestep piling its quarter-turn bend onto a heading that nothing re-aims (decision log). Fixed in `gfa_sim::peds`; the oracle runs the same fix (`tools/oracle/ped_sidestep.pl`), and all 71 walk and drive runs match again.
+  - New test `nobody_spins_on_the_spot` (a crowd between a road and a wall for a minute). Every tier green.
+
+- **2026-11-21. M5 stage 3: the crowd.**
+  - `gfa_sim::peds` (AmiGTA1's `gta_peds.c`, the crowd's part: spawning, the brain, gaits, crossings, separation, dodging, knockdowns, bodies, the pull-out and knock-off, the ram, the drop). Ped RNG seed 777, AmiGTA1's generator.
+  - In `World`: the crowd's tick in AmiGTA1's order, walkers to the fleet, trains killing peds, the player's car running people over, the driver of a taken car dragged out or knocked off his bike, the state hash. The `ped dx dy angle` test order (AmiGTA1's fixture 11). `tools/scripts/ped_runover.txt`.
+  - Drawn: the app interpolates each ped between ticks; `gfa-tool` pictures show the crowd; `gfa_formats::style::PED_REMAP_TABLES` and `G24Colour::ped_palette` give each dress its G24 palette (decision log). `gfa-tool run --trace-peds`.
+  - Oracle: `fleet.h` runs AmiGTA1's crowd too, and the walk and drive oracles compare every living ped on every tick as well as every car. All 71 runs match.
+  - Tests: four synthetic ones (the crowd comes on at the pavements; run over, standing and lying; the driver dragged out, lying, then up; a ped drowning) and the two-style colour test.
+  - Speed: Liberty City, 5,000 ticks standing at the start with the full crowd and fleet, 0.22 s (release), 44 µs a tick.
+  - Next: the pop-in check and the camera lead and zoom as sim state, drawing the lights, then the traffic gate at 12,000 ticks.
 
 - **2026-11-21. M5 stage 2: the player and the fleet; smooth driving.**
   - `gfa_sim::traffic::contact` (AmiGTA1's `car_place`, `abandon`, `leave_wreck`, `grab_car`, `rename_car`, `box_free`, `sweep_box`, `ram`, `gta_main.c`'s `fleet_car_at` and `gta_weapon.c`'s wreck sweep). `World` keeps no list of its own parked cars: every car but his is in the fleet. The fleet grows to 192 slots.

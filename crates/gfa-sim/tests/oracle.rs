@@ -83,15 +83,17 @@ fn our_lines(script: &Script, prefix: &str) -> Vec<String> {
         if l.starts_with(prefix) {
             lines.push(l);
             lines.extend(w.traffic.trace_lines(u64::from(w.tick)));
+            lines.extend(w.peds.trace_lines(w.tick));
         }
     });
     lines
 }
 
-/// The harness's lines for the player (`prefix`) and the fleet, in order.
+/// The harness's lines for the player (`prefix`), the fleet and the crowd,
+/// in order.
 fn their_lines(harness: &str, args: &[&Path], prefix: &str) -> Vec<String> {
     let mut lines = oracle_lines(harness, args, &[], "");
-    lines.retain(|l| l.starts_with(prefix) || l.starts_with("f "));
+    lines.retain(|l| l.starts_with(prefix) || l.starts_with("f ") || l.starts_with("p "));
     lines
 }
 
@@ -290,13 +292,14 @@ fn our_traffic(section: u32, bx: i32, by: i32, ticks: u64, seed: u64, view: i32)
     lines
 }
 
-fn check_traffic(section: u32, bx: i32, by: i32, ticks: u64, seed: u64) {
-    let ours = our_traffic(section, bx, by, ticks, seed, 5);
+fn check_traffic(section: u32, bx: i32, by: i32, ticks: u64, seed: u64, view: i32) {
+    let ours = our_traffic(section, bx, by, ticks, seed, view);
     let args = [
         bx.to_string(),
         by.to_string(),
         ticks.to_string(),
         seed.to_string(),
+        view.to_string(),
     ];
     let extra: Vec<&str> = args.iter().map(String::as_str).collect();
     let theirs = oracle_lines(
@@ -312,17 +315,19 @@ fn check_traffic(section: u32, bx: i32, by: i32, ticks: u64, seed: u64) {
     );
 }
 
-/// AmiGTA1's traffic gate sites on Liberty City (`fullgate.sh`).
+/// AmiGTA1's traffic gate (`fullgate.sh`): its four sites on Liberty City,
+/// seeds 1 to 3, 12,000 ticks each, with the fleet's view `gtadump drive`
+/// gives it (6 blocks). What the runs do is `traffic_gate`'s (data.rs).
 #[test]
 #[ignore = "needs game data and ../AmiGTA1 (cargo oracle-test)"]
 fn oracle_traffic() {
     let ticks: u64 = std::env::var("GFA_TRAFFIC_TICKS")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(3000);
+        .unwrap_or(12_000);
     for seed in [1, 2, 3] {
         for (bx, by) in [(64, 64), (61, 52), (108, 228), (106, 114)] {
-            check_traffic(1, bx, by, ticks, seed);
+            check_traffic(1, bx, by, ticks, seed, 6);
         }
     }
 }

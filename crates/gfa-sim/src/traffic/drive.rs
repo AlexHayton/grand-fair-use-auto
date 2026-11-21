@@ -160,10 +160,7 @@ impl Traffic {
             let Some(nz) = roads::nav_step_layer(map, bx, by, z, a) else {
                 continue;
             };
-            let axis = if a & 127 == 64 { 64 } else { 0 };
-            if !roads::fits(map, bx, by, z, axis, length)
-                || !roads::fits(map, bx + dx, by + dy, nz, axis, length)
-            {
+            if !roads::fits_entering(map, bx + dx, by + dy, nz, a, length) {
                 continue;
             }
             if roads::has_exit(map, bx + dx, by + dy, nz, a, length) {
@@ -215,17 +212,12 @@ impl Traffic {
         if !c.lane_set {
             return (c.face, false);
         }
+        let line = Self::lane_line(c);
         let l = ((c.speed * PURSUIT_K) >> FP).clamp(i64::from(PURSUIT_MIN), i64::from(PURSUIT_MAX));
         let (tx, ty) = if c.lane_axis != 0 {
-            (
-                c.x + ((if c.lane_dir == 64 { l } else { -l }) << FP),
-                c.lane_off,
-            )
+            (c.x + ((if c.lane_dir == 64 { l } else { -l }) << FP), line)
         } else {
-            (
-                c.lane_off,
-                c.y + ((if c.lane_dir == 128 { l } else { -l }) << FP),
-            )
+            (line, c.y + ((if c.lane_dir == 128 { l } else { -l }) << FP))
         };
         let want16 = i64::from(dir16(((tx - c.x) >> 8) as i32, ((ty - c.y) >> 8) as i32));
         if ((c.face16 >> FP) & 255) != i64::from(c.face) {
@@ -239,13 +231,24 @@ impl Traffic {
         c.face16 = (c.face16 + d) & 0xFF_FFFF;
         c.face = ((c.face16 >> FP) & 255) as i32;
         // On the line and nearly square to it: snap square.
-        let err = (if c.lane_axis != 0 { c.y } else { c.x } - c.lane_off).abs();
+        let err = (if c.lane_axis != 0 { c.y } else { c.x } - line).abs();
         let dd = wrap24((i64::from(c.lane_dir) << FP) - c.face16);
         if err <= (1 << FP) && dd < (1 << FP) && dd > -(1 << FP) {
             c.face16 = i64::from(c.lane_dir) << FP;
             c.face = c.lane_dir;
         }
         (c.face, slow)
+    }
+
+    /// The line car `c` steers along: its lane, or while it is pulled over,
+    /// the kerb on its right (right-hand traffic) in the same block.
+    fn lane_line(c: &Car) -> i64 {
+        if c.pull == 0 {
+            return c.lane_off;
+        }
+        let right = c.lane_dir == 0 || c.lane_dir == 64;
+        let off = LANE_TARGET + if right { PULL_KERB } else { -PULL_KERB };
+        ((c.lane_off >> BS) * 32 + i64::from(off)) << FP
     }
 
     /// Room to back out two blocks?
@@ -340,6 +343,49 @@ impl Traffic {
             self.line_from_block(map, idx, tx, ty, angle);
             break;
         }
+    }
+
+    /// The block car `idx` drives by: the one under its middle, unless it
+    /// has been shoved out of its lane. Then, if the block under it does not
+    /// go its way (the lane beside going the other way, or the kerb) and a
+    /// block beside it does (the nearer side first), that one: its route, its
+    /// junctions and its lane line are that lane's, and the lane keeper
+    /// steers it back. Not for a car turning, changing lanes, reversing,
+    /// crossing a junction or on police business, whose heading and lane
+    /// may part for a while by design.
+    ///
+    /// Ours (decision log, 2026-11-21; traffic_rejoin.pl): AmiGTA1 drives
+    /// by the block under the middle, so a car pushed a pixel over a lane
+    /// line in a collision has nowhere legal to go and stands at a "dead
+    /// end" in the wrong lane or on the pavement.
+    fn lane_block(&self, map: &SimMap, idx: usize) -> (i32, i32) {
+        let c = &self.cars[idx];
+        let (bx, by) = c.block();
+        let (z, angle) = (c.layer, c.angle);
+        if c.turn != 0 || c.swap != 0 || c.reverse != 0 || c.cop != 0 || c.crossing {
+            return (bx, by);
+        }
+        if self.is_junction(bx, by, z)
+            || (roads::drivable(map, bx, by, z) && roads::dir_allowed(map, bx, by, z, angle))
+        {
+            return (bx, by);
+        }
+        // The nearer side, across the way it is heading, then the other:
+        // pushed past the middle of the block beside its lane, its lane is
+        // on the far side.
+        let along_x = angle & 127 == 64;
+        let across = if along_x { c.y } else { c.x };
+        let s = if (across >> FP) & 31 >= 16 { 1 } else { -1 };
+        for s in [s, -s] {
+            let (nx, ny) = if along_x { (bx, by + s) } else { (bx + s, by) };
+            if roads::drivable(map, nx, ny, z)
+                && roads::dir_allowed(map, nx, ny, z, angle)
+                && !self.is_junction(nx, ny, z)
+            {
+                return (nx, ny);
+            }
+        }
+        (bx, by)
     }
 
     /// Turn round into the oncoming lane on the left, if the road is wide
@@ -994,7 +1040,18 @@ impl Traffic {
         if self.cars[idx].done {
             return;
         }
-        let (bx, by) = self.cars[idx].block();
+        let (bx, by) = self.lane_block(map, idx);
+        // Pulled over: standing at the kerb is not a jam, so no waiting
+        // counts; a turn, a lane change or a booking ends it.
+        if self.cars[idx].pull > 0 {
+            let c = &mut self.cars[idx];
+            c.pull = if c.turn != 0 || c.swap != 0 || c.crossing {
+                0
+            } else {
+                c.pull - 1
+            };
+            c.wait = 0;
+        }
         if self.cars[idx].cop == 3 {
             let c = &mut self.cars[idx];
             c.speed = 0;
@@ -1230,10 +1287,7 @@ impl Traffic {
         }
         if want_dir >= 0 {
             let (tdx, tdy) = heading_step(want_dir);
-            let axis = if want_dir & 127 == 64 { 64 } else { 0 };
-            if !roads::fits(map, bx, by, layer, axis, len)
-                || !roads::fits(map, bx + tdx, by + tdy, layer, axis, len)
-            {
+            if !roads::fits_entering(map, bx + tdx, by + tdy, layer, want_dir, len) {
                 self.cars[idx].clear_path();
                 want_dir = -1;
             }
@@ -1244,11 +1298,16 @@ impl Traffic {
             want_dir = self.choose_heading(map, bx, by, layer, a, len);
         }
         if want_dir < 0 {
+            // Nowhere to go: a long vehicle in a street it cannot leave.
+            // It gives up once it is out of sight (ours: AmiGTA1 deletes it
+            // in view too, after six seconds, and the pop-in check saw a
+            // bus vanish; the oracle carries the change, traffic_giveup.pl).
+            let in_view = self.in_view(bx, by);
             let c = &mut self.cars[idx];
             c.speed = 0;
             c.hold = hold::DEADEND;
             c.wait += 1;
-            if c.wait > GIVEUP {
+            if c.wait > GIVEUP && !in_view {
                 c.done = true;
             }
             return;
@@ -1348,7 +1407,12 @@ impl Traffic {
                 let dist_look = dist;
                 let aim_r = ((dist >> FP) as i32).max(TURN_RADIUS_MIN);
                 let (aim_tgt, aim_line) = (tgt, line);
-                let (nx, ny) = (bx + twx, by + twy);
+                // The street the turn leads into: beside the turning block,
+                // which for a turn begun a block early is the next one.
+                // Ours: AmiGTA1 looks beside the car's own block, the far
+                // lane of the crossing street, and refused corners for cars
+                // coming the other way (traffic_corner.pl).
+                let (nx, ny) = (abx + twx, aby + twy);
                 {
                     let c = &self.cars[idx];
                     if ready && c.turn_lock != 0 && c.path_i >= c.path_n() {
@@ -1387,8 +1451,21 @@ impl Traffic {
                         len,
                         slack,
                     );
-                    if exit_busy && self.cars[idx].wait <= SWEEP_PATIENCE {
+                    // Ours: where the corner leaves no way straight on, a
+                    // car refused its turn waits for it at the corner rather
+                    // than running on off the road, and for as long as the
+                    // street round the corner is full, not AmiGTA1's half
+                    // second before forcing its way in (decision log,
+                    // 2026-11-21; traffic_corner.pl). AmiGTA1 has only a car
+                    // on a long route wait.
+                    let (cx, cy) = (abx, aby);
+                    let on = roads::dir_allowed(map, cx, cy, layer, angle)
+                        && roads::drivable(map, cx + dxs, cy + dys, layer);
+                    if exit_busy && (self.cars[idx].wait <= SWEEP_PATIENCE || !on) {
                         ready = false;
+                        if !on {
+                            give_way = true;
+                        }
                     }
                 }
                 {
@@ -1407,7 +1484,14 @@ impl Traffic {
                 {
                     let c = &self.cars[idx];
                     let dsq = wrap24((i64::from(c.angle) << FP) - c.face16);
-                    if !(-(STEER_SLOW << FP)..=(STEER_SLOW << FP)).contains(&dsq) {
+                    // Ours: at a corner with no way on, a turn the car must
+                    // make starts though it is not yet straight; nothing
+                    // straightens it inside a junction box, so waiting for
+                    // that sent it out of the far side (decision log,
+                    // 2026-11-21; traffic_fits.pl).
+                    let way_on = roads::dir_allowed(map, abx, aby, layer, angle)
+                        && roads::drivable(map, abx + dxs, aby + dys, layer);
+                    if !(-(STEER_SLOW << FP)..=(STEER_SLOW << FP)).contains(&dsq) && way_on {
                         ready = false;
                     }
                 }
@@ -1532,6 +1616,16 @@ impl Traffic {
                 want = want.min(eased);
             }
         }
+        // Pulled over: slowly to the kerb line, then stop on it.
+        if c.pull > 0 {
+            let cross = if c.lane_axis != 0 { c.y } else { c.x };
+            if (cross - Self::lane_line(c)).abs() <= PULL_BAND << FP {
+                want = 0;
+                new_hold = Some(hold::PULL);
+            } else {
+                want = want.min(SPEED_PULL * SPEED_UNIT);
+            }
+        }
         if let Some(h) = new_hold {
             self.cars[idx].hold = h;
         }
@@ -1568,11 +1662,26 @@ impl Traffic {
             }
         };
         let (crossing, cop) = (self.cars[idx].crossing, self.cars[idx].cop);
-        if cop != 2
-            && !crossing
-            && at_stop_line
-            && !self.light_green(bx, by, (self.cars[idx].angle & 127) == 64)
-        {
+        // The light is the crossing's ahead (traffic_lights.pl).
+        let ahead = heading_step(self.cars[idx].angle);
+        let ew = (self.cars[idx].angle & 127) == 64;
+        // Ours: the light holds a car once its nose would reach the box, as
+        // the box's own gate does, where the block before the box is a stop
+        // line. AmiGTA1 asks only when its middle is on the stop line, and a
+        // bus is then half a block into the crossing, where the traffic
+        // across clips it (decision log, 2026-11-21; traffic_stopline.pl).
+        let light_ahead = !at_stop_line
+            && jbx >= 0
+            && ej < stopr
+            && map
+                .block(jbx - dxs, jby - dys, layer)
+                .is_some_and(|b| b.type_map_ext & 0x07 == 1);
+        let red = if at_stop_line {
+            !self.light_green(bx + ahead.0, by + ahead.1, ew)
+        } else {
+            light_ahead && !self.light_green(jbx, jby, ew)
+        };
+        if cop != 2 && !crossing && red {
             want = 0;
             let c = &mut self.cars[idx];
             c.at_light = true;

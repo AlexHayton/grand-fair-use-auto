@@ -2,11 +2,11 @@
  *
  * Links AmiGTA1's own modules from a sibling ../AmiGTA1 checkout (build.sh):
  * the physics, wall resolve and layer rule (gta_vehphys.c), the GRY reader
- * for the car table (gta_style.c), the map and nav grid, and the fleet and
- * trains around him (fleet.h). The few lines of per-tick glue that live in
+ * for the car table (gta_style.c), the map and nav grid, and the fleet,
+ * trains and crowd around him (fleet.h). The few lines of per-tick glue that live in
  * AmiGTA1's 11,000-line main loop (the road flag, the jump off a ramp and
  * its landing, the layer judged at the nose, wall damage, stopping at a
- * fleet car and ramming it) are restated here, in the order gta_main.c
+ * fleet car and ramming it, and running people over) are restated here, in the order gta_main.c
  * runs them.
  *
  * Prints one line per tick in the format of `gfa-tool run --trace` while
@@ -176,8 +176,14 @@ static void one_tick(int up, int down, int steer, int hb)
     {
         long avx = veh.vx < 0 ? -veh.vx : veh.vx;
         long avy = veh.vy < 0 ? -veh.vy : veh.vy;
+        int hits;
         fleet_tick(veh.ox, veh.oy, avx > avy ? avx : avy,
-                   gta_veh_angle(&veh), layer, veh.len / 2, veh.wid / 2, 0);
+                   gta_veh_angle(&veh), layer, veh.len / 2, veh.wid / 2, 0,
+                   veh.vx || veh.vy);
+        hits = crowd_ram(veh.ox, veh.oy, gta_veh_angle(&veh), veh.len / 2,
+                         veh.wid / 2, layer, veh.vx, veh.vy);
+        if (hits)
+            printf("car: ran over %d - %ld so far\n", hits, crowd.stat_runover);
         fleet_dump(tick);
     }
 }

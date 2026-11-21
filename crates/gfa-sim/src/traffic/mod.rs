@@ -115,11 +115,35 @@ pub(crate) const SPEED_REVERSE: i64 = 4;
 pub(crate) const GIVEUP: i32 = 300;
 pub(crate) const ABANDON: i32 = 1500;
 pub(crate) const STUCK: i32 = 150;
+
+// Pulling over for the player's horn or siren: the original's
+// `car+0x11f == 1`, which AmiGTA1 records (`gta_main.c` `special_key`,
+// `gta_traffic.h`'s lane offsets) and does not port. The special key held in
+// a car looks up to five blocks ahead for a car, and that car moves to the
+// kerb: lane offset 7 or 0x37 of the original's 0x40 against the middle's
+// 0x1f, 12 of our px either side of 16. How far to the side the look
+// reaches, how slowly the car moves over, that it stops, and for how long
+// are ours: (verify) under DOSBox-X (M6b).
+/// How far ahead of his nose the look reaches, px: five blocks.
+pub(crate) const PULL_LOOK: i64 = 5 * 32;
+/// How far either side of his line, px: half a block. (verify)
+pub(crate) const PULL_SIDE: i64 = 16;
+/// The kerb line, px off the middle of the block.
+pub(crate) const PULL_KERB: i32 = 12;
+/// Within this of the kerb line (px), it stops.
+pub(crate) const PULL_BAND: i64 = 2;
+/// Ticks it stays over after the look last found it: three seconds.
+/// (verify)
+pub(crate) const PULL_TICKS: i32 = 150;
+/// Its speed while it moves over, in [`SPEED_UNIT`]s. (verify)
+pub(crate) const SPEED_PULL: i64 = 2;
 pub(crate) const HEADON: i32 = 100;
 pub(crate) const ESCAPE: i32 = 150;
 const JUMP_MAX: i32 = 10;
 const WRECK_KEEP_BLOCKS: i32 = 20;
-const MAX_WALKERS: usize = 16;
+/// AmiGTA1 keeps 16, more than its 12 peds; ours holds a full game-view
+/// pool, so every walker counts.
+const MAX_WALKERS: usize = 64;
 pub(crate) const LANE_SWAP_WAIT: i32 = 100;
 pub(crate) const LANE_SWAP_COOL: i32 = 150;
 pub(crate) const LANE_SWAP_MAX: i32 = 200;
@@ -140,6 +164,8 @@ pub mod hold {
     pub const ROAD: u8 = 6;
     pub const GAP: u8 = 7;
     pub const STUCK: u8 = 8;
+    /// Pulled over for the player's horn or siren.
+    pub const PULL: u8 = 9;
 }
 
 /// Which models the fleet draws, with weights, per GTA style (AmiGTA1's
@@ -253,13 +279,13 @@ pub(crate) fn half_len(ci: &CarInfo) -> i32 {
 
 /// Half the width of a model, world px.
 #[inline]
-pub(crate) fn half_wid(ci: &CarInfo) -> i32 {
+pub fn half_wid(ci: &CarInfo) -> i32 {
     (i32::from(ci.width) >> 1) / 2
 }
 
 /// Length of a model, world px.
 #[inline]
-pub(crate) fn world_len(ci: &CarInfo) -> i32 {
+pub fn world_len(ci: &CarInfo) -> i32 {
     i32::from(ci.length) >> 1
 }
 
@@ -401,6 +427,9 @@ pub struct Car {
     pub occ_ser: u64,
     pub occ_mask: u16,
     pub cruise: i32,
+    /// Ticks left pulled over to the kerb for the player's horn or siren;
+    /// 0 driving ([`PULL_TICKS`]).
+    pub pull: i32,
 }
 
 impl Car {
@@ -536,7 +565,7 @@ impl Traffic {
         self.pl_hl = hl;
     }
 
-    /// Pedestrians standing in the road, as obstacles; at most 16.
+    /// Pedestrians standing in the road, as obstacles; at most 64.
     pub fn set_walkers(&mut self, walkers: impl Iterator<Item = (i64, i64, i32)>) {
         self.walk.clear();
         self.walk.extend(walkers.take(MAX_WALKERS));
@@ -547,13 +576,95 @@ impl Traffic {
     }
 
     #[inline]
+    /// The player's special key held in his car, centred at `(x, y)`
+    /// (16.16) on `layer`, facing `face`, `hl` px from centre to nose: the
+    /// nearest car whose centre is up to five blocks ahead of his nose
+    /// and within half a block of his line pulls over to the kerb, if it
+    /// is driving along a plain stretch of road. Returns its serial on the
+    /// tick it is first told.
+    pub fn pull_over(
+        &mut self,
+        map: &SimMap,
+        x: i64,
+        y: i64,
+        layer: i32,
+        face: i32,
+        hl: i32,
+    ) -> Option<u64> {
+        let (s, co) = (i64::from(sin(face)), i64::from(cos(face)));
+        let hl = i64::from(hl);
+        let mut best: Option<(i64, usize)> = None;
+        for (i, c) in self.cars[..self.n].iter().enumerate() {
+            if c.done || c.layer != layer {
+                continue;
+            }
+            let (dx, dy) = ((c.x - x) >> FP, (c.y - y) >> FP);
+            let along = (dx * s - dy * co) >> 14;
+            let side = (dx * co + dy * s) >> 14;
+            if along <= hl || along > hl + PULL_LOOK || side.abs() > PULL_SIDE {
+                continue;
+            }
+            if best.is_none_or(|(d, _)| along < d) {
+                best = Some((along, i));
+            }
+        }
+        let (_, i) = best?;
+        let first = self.cars[i].pull == 0;
+        if first && !self.can_pull_over(map, i) {
+            return None;
+        }
+        let c = &mut self.cars[i];
+        c.pull = PULL_TICKS;
+        c.cruise = 0;
+        first.then_some(c.serial)
+    }
+
+    /// Is car `i` ordinary traffic driving along its lane, with the block
+    /// it is on and the next two plain road, so it can move over and stop
+    /// clear of a junction?
+    fn can_pull_over(&self, map: &SimMap, i: usize) -> bool {
+        let c = &self.cars[i];
+        if c.cop != 0
+            || c.mission
+            || c.abandoned
+            || c.wrecked
+            || c.knock > 0
+            || c.reverse > 0
+            || c.turn != 0
+            || c.swap != 0
+            || c.crossing
+            || !c.lane_set
+            || c.lane_dir & 63 != 0
+        {
+            return false;
+        }
+        let (bx, by) = c.block();
+        let (dx, dy) = heading_step(c.lane_dir);
+        (0..=2).all(|k| {
+            let (x, y) = (bx + k * dx, by + k * dy);
+            roads::drivable(map, x, y, c.layer) && !self.is_junction(x, y, c.layer)
+        })
+    }
+
     pub fn is_junction(&self, bx: i32, by: i32, z: i32) -> bool {
         self.boxes.is_junction(bx, by, z)
     }
 
-    /// Is the light green at `(bx, by)` for traffic along x or y?
+    /// Is the light green at `(bx, by)` for traffic along x or y? The
+    /// light is the crossing's ([`roads::Boxes::crossing`]).
     pub fn light_green(&self, bx: i32, by: i32, along_x: bool) -> bool {
-        roads::light_green(self.tick as u32, bx, by, along_x)
+        let (kx, ky) = self.boxes.crossing(bx, by);
+        roads::light_green(self.tick as u32, kx, ky, along_x)
+    }
+
+    /// The tick the traffic lights' clock reads.
+    pub fn light_tick(&self) -> u32 {
+        self.tick as u32
+    }
+
+    /// Every traffic light in the city, for drawing: the map's, found once.
+    pub fn lamps(&self, map: &SimMap) -> Vec<roads::Lamp> {
+        roads::lamps(map, &self.boxes)
     }
 
     /// Fill the fleet around `(bx, by)` out to `radius` blocks, up to
@@ -656,6 +767,42 @@ impl Traffic {
         placed as usize
     }
 
+    /// Would a car of model `ci` put at `(x, y)` heading `ang` touch the
+    /// body of a car already there? Its box at the block's middle, wide
+    /// enough for the lane beside a kerb, with 2 px spare at the ends.
+    ///
+    /// Ours (decision log, 2026-11-21; traffic_spawn.pl): AmiGTA1 asks only
+    /// whether its lane has room, so a car could be put down on the nose
+    /// of one waiting at a corner or one changing into that lane.
+    fn body_in_way(
+        &self,
+        cars: &[CarInfo],
+        x: i64,
+        y: i64,
+        z: i32,
+        ang: i32,
+        ci: &CarInfo,
+    ) -> bool {
+        let (hl, hw) = (half_len(ci) + 2, half_wid(ci) + LANE_KERB);
+        self.cars[..self.n].iter().any(|o| {
+            let oi = &cars[o.model];
+            !o.done
+                && o.layer == z
+                && geom::box_hit(
+                    x,
+                    y,
+                    ang,
+                    hl,
+                    hw,
+                    o.x,
+                    o.y,
+                    o.face,
+                    half_len(oi),
+                    half_wid(oi),
+                )
+        })
+    }
+
     /// Try to put a car on block `(cx, cy)`.
     fn place_at(
         &mut self,
@@ -692,6 +839,7 @@ impl Traffic {
                 || !roads::has_exit(map, cx, cy, z, ang, len)
                 || !self.room_for(cars, None, px, py, z, ang, len, MIN_GAP)
                 || self.claim_any(cx, cy, z)
+                || self.body_in_way(cars, px, py, z, ang, &cars[cand])
             {
                 continue;
             }
@@ -768,6 +916,7 @@ impl Traffic {
         };
         car.face = ang & 255;
         car.turn = 0;
+        car.pull = 0;
         car.turn_accum = 0;
         car.turn_radius = TURN_RADIUS;
         car.since_turn = AFTER_TURN;
@@ -1220,9 +1369,39 @@ impl Traffic {
     /// The gap to whatever is nearest ahead of car `idx` in its lane (a
     /// car, the player or a walker), 16.16 px, with that thing's speed and
     /// index (`-1` for the player or a walker); `-1` if nothing.
+    /// How many blocks on along its heading car `c`'s route turns: 0 at the
+    /// block it is in, `None` if it goes straight on for the next four (or
+    /// it is turning already).
+    fn turn_ahead(c: &Car) -> Option<i32> {
+        if c.turn != 0 {
+            return None;
+        }
+        let (ax, ay) = roads::heading_step(c.angle);
+        let (mut px, mut py) = c.block();
+        let mut k = 0;
+        for n in c.path.iter().skip(c.path_i).take(4) {
+            let (nx, ny) = (i32::from(n.x), i32::from(n.y));
+            if (nx, ny) == (px, py) {
+                continue;
+            }
+            if (nx, ny) != (px + ax, py + ay) {
+                return Some(k);
+            }
+            (px, py) = (nx, ny);
+            k += 1;
+        }
+        None
+    }
+
     fn gap_ahead(&self, cars: &[CarInfo], idx: usize) -> (i64, i64, i32) {
         let c = &self.cars[idx];
         let (fx, fy) = (i64::from(sin(c.face)), -i64::from(cos(c.face)));
+        // Ours: where its route turns, a car straight on past the corner is
+        // not in its way, and waiting for one closed rings of queues round
+        // the one-way loops (decision log, 2026-11-21; traffic_follow.pl).
+        let corner = Self::turn_ahead(c);
+        let (cbx, cby) = c.block();
+        let (hax, hay) = roads::heading_step(c.angle);
         let my_half = i64::from(world_len(&cars[c.model]) / 2);
         let (mut best, mut lead, mut lead_i) = (-1i64, 0i64, -1i32);
         let along_side = |ox: i64, oy: i64| {
@@ -1233,6 +1412,14 @@ impl Traffic {
         let in_box = |ox: i64, oy: i64| {
             (-LOOKAHEAD..=LOOKAHEAD).contains(&ox) && (-LOOKAHEAD..=LOOKAHEAD).contains(&oy)
         };
+        // Ours: halfway round a turn the nose points across the corner, and
+        // a car ahead in the street it is turning into falls outside the
+        // strip along it; so while it turns, it looks along that street too
+        // (decision log, 2026-11-21; traffic_follow.pl).
+        let exit = (c.turn != 0).then(|| {
+            let a = (c.turn_from + if c.turn > 0 { 64 } else { -64 }) & 255;
+            (i64::from(sin(a)), -i64::from(cos(a)))
+        });
         for (i, o) in self.cars[..self.n].iter().enumerate() {
             if i == idx || o.done || o.layer != c.layer {
                 continue;
@@ -1241,7 +1428,13 @@ impl Traffic {
             if !in_box(ox, oy) {
                 continue;
             }
-            let (along, side) = along_side(ox, oy);
+            let (mut along, mut side) = along_side(ox, oy);
+            if let Some((gx, gy)) = exit
+                && (along <= 0 || side > FOLLOW_SIDE)
+            {
+                along = ((ox >> 8) * gx + (oy >> 8) * gy) >> 6;
+                side = (((ox >> 8) * -gy + (oy >> 8) * gx) >> 6).abs();
+            }
             if along <= 0 || side > FOLLOW_SIDE {
                 continue;
             }
@@ -1257,6 +1450,12 @@ impl Traffic {
             }
             if along > LOOKAHEAD {
                 continue;
+            }
+            if let Some(kt) = corner {
+                let (obx, oby) = o.block();
+                if (obx - cbx) * hax + (oby - cby) * hay > kt {
+                    continue;
+                }
             }
             let gap = (along - ((my_half + i64::from(world_len(&cars[o.model]) / 2)) << FP)).max(0);
             if best < 0 || gap < best {
@@ -2030,6 +2229,7 @@ impl SimHash for Traffic {
             h.u32(c.dmg_bits);
             h.i32(c.fuse);
             h.i32(c.knock);
+            h.i32(c.pull);
             h.u8(u8::from(c.abandoned) | u8::from(c.wrecked) << 1 | u8::from(c.resident) << 2);
         }
         h.u32(self.claim_top as u32);

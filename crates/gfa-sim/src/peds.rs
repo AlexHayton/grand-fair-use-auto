@@ -27,7 +27,11 @@
 //!
 //! Ours, beyond AmiGTA1: a ped who ends up in the water drowns as the
 //! player does (AmiGTA1's peds stand on it); the pool is sized to the view
-//! ([`Peds::cap_for`]).
+//! ([`Peds::cap_for`]); and the sidestep's quarter-turn bend comes off
+//! again before his next tick and is given up once that side is walled,
+//! where AmiGTA1's piled up into a spin on the spot or flicked back and
+//! forth along a kerb. The oracle runs AmiGTA1's crowd with the same fix
+//! (`tools/oracle/ped_sidestep.pl`).
 //!
 //! The police on foot, the script's own people and gunmen are AmiGTA1's
 //! too; their brain is here, and what sets them going comes with M6 and M7.
@@ -168,6 +172,11 @@ pub struct Ped {
     stuck: i32,
     dodge: i32,
     dodge_side: i32,
+    /// The turn the sidestep put on his heading this tick, taken off again
+    /// before his next tick's aim (ours: AmiGTA1 leaves it on, and a man
+    /// whose mode does not re-aim him every tick turned another quarter
+    /// every tick and spun on the spot).
+    bent: i32,
     /// The block he was last in and how long he has wanted out of it.
     blk_x: i32,
     blk_y: i32,
@@ -258,6 +267,11 @@ impl Ped {
         }
     }
 
+    /// Is he in the middle of a sidestep?
+    pub fn dodging(&self) -> bool {
+        self.dodge > 0
+    }
+
     /// Is he drawn? Not while under water.
     pub fn shown(&self) -> bool {
         self.alive && self.drown == 0
@@ -342,7 +356,10 @@ fn walkable(map: &SimMap, x: i64, y: i64, z: i32) -> bool {
 
 /// The point `px` world px along heading `a` from `(x, y)`.
 fn ahead(x: i64, y: i64, a: i32, px: i64) -> (i64, i64) {
-    (x + i64::from(sin(a)) * px * 4, y - i64::from(cos(a)) * px * 4)
+    (
+        x + i64::from(sin(a)) * px * 4,
+        y - i64::from(cos(a)) * px * 4,
+    )
 }
 
 fn snap_cardinal(a: i32) -> i32 {
@@ -513,6 +530,7 @@ impl Peds {
         p.stuck = 0;
         p.dodge = 0;
         p.dodge_side = 1;
+        p.bent = 0;
         p.offscreen = 0;
         p.flee_aim = 0;
         p.down = 0;
@@ -676,7 +694,14 @@ impl Peds {
 
     /// A bike's rider knocked off at `(x, y)` facing `angle`: the fall,
     /// lying, then up.
-    pub fn knock_off(&mut self, x: i64, y: i64, layer: i32, angle: i32, remap: i32) -> Option<usize> {
+    pub fn knock_off(
+        &mut self,
+        x: i64,
+        y: i64,
+        layer: i32,
+        angle: i32,
+        remap: i32,
+    ) -> Option<usize> {
         let i = self.free_slot_forced();
         self.last = i;
         let i = i?;
@@ -692,7 +717,15 @@ impl Peds {
 
     /// Somebody put down at `(x, y)` facing `angle`, lying for `stun` ticks.
     /// Only into a free slot (or a body's).
-    pub fn drop_ped(&mut self, x: i64, y: i64, layer: i32, angle: i32, remap: i32, stun: i32) -> bool {
+    pub fn drop_ped(
+        &mut self,
+        x: i64,
+        y: i64,
+        layer: i32,
+        angle: i32,
+        remap: i32,
+        stun: i32,
+    ) -> bool {
         let Some(i) = self.free_slot() else {
             return false;
         };
@@ -701,6 +734,13 @@ impl Peds {
         self.p[i].down = stun;
         self.stats.spawned += 1;
         true
+    }
+
+    /// Nobody about (tests that want an empty street).
+    pub fn clear(&mut self) {
+        for p in &mut self.p {
+            p.alive = false;
+        }
     }
 
     /// Killed where he stands.
@@ -1012,7 +1052,8 @@ impl Peds {
             let p = self.think(i, p, ctx, say);
             self.p[i] = p;
         }
-        if alive < self.p.len() && !self.spawn_one(ctx.map, cbx, cby) && !self.spawned_since_retire {
+        if alive < self.p.len() && !self.spawn_one(ctx.map, cbx, cby) && !self.spawned_since_retire
+        {
             self.spawn_one(ctx.map, cbx, cby);
         }
         self.relax(ctx.map);
@@ -1021,6 +1062,9 @@ impl Peds {
     /// One ped's tick after the view check.
     fn think(&mut self, i: usize, mut p: Ped, ctx: &TickCtx, say: &mut dyn FnMut(String)) -> Ped {
         let map = ctx.map;
+        // Last tick's sidestep bend: off again below, once he is on his
+        // feet; a tick spent down, pulled or burning keeps the heading.
+        let bent = std::mem::take(&mut p.bent);
         if p.pull >= 0 {
             p.pull_tick += 1;
             if p.pull_tick >= PULL_TICKS {
@@ -1133,7 +1177,11 @@ impl Peds {
             p.down = 0;
             p.tx = 0;
             p.ty = 0;
-            say(format!("ped: {i} in the water at ({},{})", p.x >> 21, p.y >> 21));
+            say(format!(
+                "ped: {i} in the water at ({},{})",
+                p.x >> 21,
+                p.y >> 21
+            ));
             return p;
         }
         if p.panic > 0 {
@@ -1152,6 +1200,9 @@ impl Peds {
             return p;
         }
 
+        // Back to the heading the sidestep bent, so a mode that keeps his
+        // heading from tick to tick sees his own and not the bent one.
+        p.angle = (p.angle - bent) & 255;
         let here = ground_at(map, p.x, p.y, p.layer);
         if p.cop {
             if !self.cop_brain(&mut p, say) {
@@ -1204,7 +1255,7 @@ impl Peds {
             let (dgx, dgy) = ((p.x - p.gx) >> 16, (p.y - p.gy) >> 16);
             if here == ground::PAVEMENT
                 && p.panic == 0
-                && (dgx > 32 || dgx < -32 || dgy > 32 || dgy < -32)
+                && (!(-32..=32).contains(&dgx) || !(-32..=32).contains(&dgy))
             {
                 p.mode = mode::IDLE;
                 p.sub = sub::WANDER;
@@ -1229,7 +1280,7 @@ impl Peds {
         if p.mode == mode::IDLE
             && p.tx == 0
             && p.down == 0
-            && self.rand() % 11 == 0
+            && self.rand().is_multiple_of(11)
             && hint_at(map, p.x, p.y, p.layer) == 1
         {
             const SX: [i32; 4] = [0, 1, 0, -1];
@@ -1244,7 +1295,8 @@ impl Peds {
                 )
             };
             let (nx, ny) = at(1);
-            if hint_at(map, nx, ny, p.layer) == 1 && ground_at(map, nx, ny, p.layer) == ground::ROAD {
+            if hint_at(map, nx, ny, p.layer) == 1 && ground_at(map, nx, ny, p.layer) == ground::ROAD
+            {
                 let mut found = 0;
                 for k in 2..=8 {
                     let (kx, ky) = at(k);
@@ -1393,8 +1445,17 @@ impl Peds {
         if p.dodge > 0 {
             let a = (p.angle + DODGE_TURN * p.dodge_side) & 255;
             p.dodge -= 1;
-            if p.dodge_side != 0 && p.speed > 0 && step_free(map, &p, a, 8) {
-                p.angle = a;
+            if p.dodge_side != 0 && p.speed > 0 {
+                if step_free(map, &p, a, 8) {
+                    p.angle = a;
+                    p.bent = DODGE_TURN * p.dodge_side;
+                } else {
+                    // Walled on that side: his own heading for the rest of
+                    // the sidestep (ours: AmiGTA1 tries the side again
+                    // next tick, and a man along a kerb turned a quarter
+                    // and back on alternate ticks).
+                    p.dodge_side = 0;
+                }
             }
             if p.speed == 1 {
                 p.speed = 2;
@@ -1418,6 +1479,23 @@ impl Peds {
 
     /// The step along his heading, and what refuses it.
     fn step(&mut self, p: &mut Ped, here: u8, map: &SimMap, i: usize, say: &mut dyn FnMut(String)) {
+        let a0 = p.angle;
+        self.step_on(p, here, map, i, say);
+        // Turned away from a wall or out of a jam: a new heading of his
+        // own, not a bent one.
+        if p.angle != a0 {
+            p.bent = 0;
+        }
+    }
+
+    fn step_on(
+        &mut self,
+        p: &mut Ped,
+        here: u8,
+        map: &SimMap,
+        i: usize,
+        say: &mut dyn FnMut(String),
+    ) {
         let v = (UNIT * i64::from(p.speed)) >> 8;
         let nx = p.x + ((i64::from(sin(p.angle)) * v) >> 6);
         let ny = p.y - ((i64::from(cos(p.angle)) * v) >> 6);
@@ -1427,9 +1505,9 @@ impl Peds {
             there = ground::BUILDING;
         }
         let steered = p.cop || p.mode == mode::HUNT || p.mode == mode::SENDTO;
-        let blocked = if matches!(there, ground::BUILDING | ground::AIR | ground::WATER) {
-            true
-        } else if there == ground::FIELD && here != ground::FIELD && !steered {
+        let blocked = if matches!(there, ground::BUILDING | ground::AIR | ground::WATER)
+            || (there == ground::FIELD && here != ground::FIELD && !steered)
+        {
             true
         } else if there == ground::ROAD
             && here != ground::ROAD
@@ -1541,7 +1619,10 @@ impl Peds {
                 p.pulling += 1;
                 if p.pulling >= COP_PULL_TICKS && !p.arrest {
                     p.arrest = true;
-                    say(format!("police: pulled out of the car after {} ticks", p.pulling));
+                    say(format!(
+                        "police: pulled out of the car after {} ticks",
+                        p.pulling
+                    ));
                 }
             } else if de <= COP_DOOR_PX && self.pl_slow && p.arrest_wait == 0 {
                 p.pulling = 1;
@@ -1612,11 +1693,8 @@ impl Peds {
         } else if p.gang != 0 && p.hunt_pl {
             // A gunman: AmiGTA1's counts at 50 Hz.
             let (sdx, sdy) = ((self.pl_x - p.x) >> 16, (self.pl_y - p.y) >> 16);
-            let on_screen = sdx > -190
-                && sdx < 190
-                && sdy > -120
-                && sdy < 120
-                && self.pl_layer == p.layer;
+            let on_screen =
+                sdx > -190 && sdx < 190 && sdy > -120 && sdy < 120 && self.pl_layer == p.layer;
             let near = d < if self.pl_in_car { 48 } else { 16 };
             p.speed = if p.gang == 1 || near || p.gang_burst {
                 0
@@ -1712,7 +1790,16 @@ impl Peds {
 
 impl SimHash for Ped {
     fn sim_hash(&self, h: &mut StateHasher) {
-        for v in [self.x, self.y, self.tx, self.ty, self.gx, self.gy, self.pull_cx, self.pull_cy] {
+        for v in [
+            self.x,
+            self.y,
+            self.tx,
+            self.ty,
+            self.gx,
+            self.gy,
+            self.pull_cx,
+            self.pull_cy,
+        ] {
             h.bytes(&v.to_le_bytes());
         }
         for v in [
@@ -1731,6 +1818,7 @@ impl SimHash for Ped {
             self.stuck,
             self.dodge,
             self.dodge_side,
+            self.bent,
             self.blk_x,
             self.blk_y,
             self.blk_ticks,
@@ -1808,7 +1896,14 @@ impl SimHash for Peds {
         ] {
             h.i32(v);
         }
-        for v in [self.pl_x, self.pl_y, self.pl_door_x, self.pl_door_y, self.pl_hl, self.pl_hw] {
+        for v in [
+            self.pl_x,
+            self.pl_y,
+            self.pl_door_x,
+            self.pl_door_y,
+            self.pl_hl,
+            self.pl_hw,
+        ] {
             h.bytes(&v.to_le_bytes());
         }
         for v in [
@@ -1832,7 +1927,7 @@ mod tests {
     #[test]
     fn the_pool_keeps_amigta1_density() {
         assert_eq!(Peds::cap_for(SimView::AMIGTA1), 12);
-        assert_eq!(Peds::cap_for(SimView::GAME), 33);
+        assert_eq!(Peds::cap_for(SimView::GAME), 45);
     }
 
     #[test]

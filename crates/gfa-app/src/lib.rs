@@ -2,13 +2,15 @@
 //!
 //! It owns the window, the GPU surface and the frame loop. It loads a
 //! level, runs the simulation at its fixed tick ([`game`]), and draws the
-//! city with the player in it, followed by the camera. F1 shows the egui
+//! city with the player in it, followed by the camera. The backtick key shows the egui
 //! debug overlay. Game states (front end, briefing) arrive in later
 //! milestones.
 
 mod controls;
 mod game;
 mod overlay;
+#[cfg(test)]
+mod popin;
 mod scene;
 #[cfg(target_arch = "wasm32")]
 mod web;
@@ -48,6 +50,8 @@ pub struct AppConfig {
     pub no_hd: bool,
     /// Save the first frame of the city here as a PNG, then quit. Native only.
     pub screenshot: Option<std::path::PathBuf>,
+    /// The window's size in logical pixels.
+    pub size: (u32, u32),
 }
 
 impl Default for AppConfig {
@@ -58,6 +62,7 @@ impl Default for AppConfig {
             level: 1,
             no_hd: false,
             screenshot: None,
+            size: (1280, 800),
         }
     }
 }
@@ -116,7 +121,10 @@ impl App {
     fn create_window(&mut self, event_loop: &ActiveEventLoop) {
         let attrs = Window::default_attributes()
             .with_title(TITLE)
-            .with_inner_size(winit::dpi::LogicalSize::new(1280.0, 800.0));
+            .with_inner_size(winit::dpi::LogicalSize::new(
+                f64::from(self.config.size.0),
+                f64::from(self.config.size.1),
+            ));
         #[cfg(target_arch = "wasm32")]
         let attrs = web::attach_canvas(attrs);
 
@@ -204,13 +212,30 @@ impl App {
         let now = Instant::now();
         let elapsed = now - self.last_frame;
         self.last_frame = now;
-        let follow = self.game.as_mut().map(|g| {
-            g.advance(elapsed.as_micros() as u64, self.controls.input());
-            g.frame().follow
+        // Paused, no time reaches the simulation, so none is owed after.
+        let sim_us = if self.controls.paused {
+            0
+        } else {
+            elapsed.as_micros() as u64
+        };
+        let frame = self.game.as_mut().map(|g| {
+            g.advance(sim_us, self.controls.input());
+            (g.frame(), g.floor_z())
         });
         let dt = elapsed.as_secs_f32().min(0.1);
+        // The zoom cap: no higher than shows the simulation's view, at the
+        // shape the scene is drawn (pillarboxed past 21:9).
+        let ceiling = match (frame, self.gfx.as_ref()) {
+            (Some((f, floor)), Some((_, surface))) => {
+                let (w, h) = surface.size();
+                let [_, _, vw, vh] = gfa_render::camera::pillarbox(w, h);
+                let aspect = vw as f32 / vh.max(1) as f32;
+                Some(floor + gfa_render::camera::max_depth(f.view.0, f.view.1, aspect))
+            }
+            _ => None,
+        };
         self.controls
-            .update(dt, follow.map(|p| (p.pos, p.velocity)));
+            .update(dt, frame.map(|(f, _)| (f.follow.pos, f.zoom)), ceiling);
 
         let Some((gpu, surface)) = self.gfx.as_mut() else {
             return;
@@ -419,7 +444,9 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::KeyboardInput {
                 event:
                     KeyEvent {
-                        physical_key: PhysicalKey::Code(KeyCode::F1),
+                        // Off the original's keys: its F1 to F4 were
+                        // network messages (controls.rs).
+                        physical_key: PhysicalKey::Code(KeyCode::Backquote),
                         state: ElementState::Pressed,
                         repeat: false,
                         ..

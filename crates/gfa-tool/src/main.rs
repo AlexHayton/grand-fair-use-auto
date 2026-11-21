@@ -140,6 +140,9 @@ enum Command {
         /// Print every car in the fleet every tick (traffictrace's format).
         #[arg(long)]
         trace_traffic: bool,
+        /// Print every living ped every tick (the oracle harnesses' `p` lines).
+        #[arg(long)]
+        trace_peds: bool,
         /// Run as AmiGTA1's harnesses do, to compare with the oracle: its
         /// view size, and no parked cars from the map.
         #[arg(long)]
@@ -255,6 +258,7 @@ fn main() -> Result<()> {
             trace,
             trace_trains,
             trace_traffic,
+            trace_peds,
             oracle,
             out,
             record,
@@ -269,6 +273,7 @@ fn main() -> Result<()> {
                 trace,
                 trace_trains,
                 trace_traffic,
+                trace_peds,
                 oracle,
                 out,
                 record,

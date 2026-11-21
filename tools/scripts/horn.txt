@@ -1,0 +1,24 @@
+# The special key (TAB) on foot and in an ordinary car.
+#
+# On foot a press is a shout. In a saloon (record 0) it is the horn, held
+# for as long as the key is down: two seconds here.
+#
+# section: 1
+# expect: special key - a shout
+# expect: car: in - model 0
+# expect: special key - horn down (model 0)
+# expect: special key - horn up (model 0)
+# reject: siren
+start 62 60
+wait 20
+tab 1
+wait 5
+tab 0
+wait 20
+park 0 -20 0 128
+enter
+wait 100
+tab 1
+wait 100
+tab 0
+wait 20

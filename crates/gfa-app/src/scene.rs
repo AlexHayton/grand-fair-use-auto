@@ -80,14 +80,35 @@ impl Scene {
         let sprite = style.sprite_index(SpriteCategory::Ped, usize::from(frame))?;
         own_sprite(style, &self.atlas, sprite, pos, angle)
     }
-    /// The simulation's sprites this frame: standing cars, the player's
-    /// car (dents, door, fire) and the player.
+    /// The simulation's sprites this frame: the traffic lights, the crowd
+    /// (first, so a car at the same height is drawn over a body), standing
+    /// cars, the player's car (dents, door, fire) and the player.
     pub fn game_sprites(&self, game: &crate::game::Game) -> Vec<SpriteInstance> {
-        use gfa_render::sprites::{from_sim, push_car, sim_angle};
+        use gfa_render::sprites::{from_sim, ped_sprite, push_car, sim_angle};
         let world = &game.world;
         let frame = game.frame();
         let style = &self.level.style;
-        let mut out = Vec::with_capacity(world.traffic.n + 8);
+        let mut out = Vec::with_capacity(world.traffic.n + world.peds.p.len() + 64);
+        // The traffic lights first: on the pavement, under whoever passes.
+        for (light, pos, angle) in game.lamps() {
+            if let Some(sprite) = style.sprite_index(SpriteCategory::TrafficLight, light.sprite()) {
+                out.extend(own_sprite(style, &self.atlas, sprite, pos, angle));
+            }
+        }
+        for p in game.peds() {
+            let pos = p.pose.pos.to_array();
+            out.extend(ped_sprite(
+                style,
+                &self.atlas,
+                p.frame,
+                p.table,
+                pos,
+                p.pose.draw_angle,
+            ));
+            if let Some(f) = p.burning {
+                out.extend(flames(style, &self.atlas, f, pos));
+            }
+        }
         for c in world.standing_cars() {
             let angle = sim_angle(c.face + 128);
             push_car(
@@ -178,7 +199,9 @@ impl Scene {
     ) {
         self.depth.fit(&gpu.device, size);
         self.city.animate(&gpu.queue, seconds);
-        let aspect = size.0 as f32 / size.1.max(1) as f32;
+        // Past 21:9 the scene is drawn in a band, black either side.
+        let [x, y, w, h] = gfa_render::camera::pillarbox(size.0, size.1);
+        let aspect = w as f32 / h.max(1) as f32;
         self.city.prepare(&gpu.queue, camera, aspect);
         self.batch.clear();
         self.batch.extend(&self.statics);
@@ -188,17 +211,23 @@ impl Scene {
         self.sprites
             .prepare(&gpu.device, &gpu.queue, camera, aspect, &mut self.batch);
         let mut pass = gfa_render::city::begin_scene(encoder, view, &self.depth, SKY);
+        pass.set_viewport(x as f32, y as f32, w as f32, h as f32, 0.0, 1.0);
+        pass.set_scissor_rect(x, y, w, h);
         self.city.draw(&mut pass);
         self.sprites.draw(&mut pass);
     }
 
     /// The top block under a window pixel, described for the overlay.
     pub fn inspect(&self, camera: &Camera, size: (u32, u32), px: [f32; 2]) -> Option<String> {
-        let aspect = size.0 as f32 / size.1.max(1) as f32;
-        let ndc = [
-            px[0] / size.0 as f32 * 2.0 - 1.0,
-            1.0 - px[1] / size.1 as f32 * 2.0,
-        ];
+        // In the band the scene is drawn in.
+        let [x, y, w, h] = gfa_render::camera::pillarbox(size.0, size.1);
+        let (w, h) = (w as f32, h.max(1) as f32);
+        let (px, py) = (px[0] - x as f32, px[1] - y as f32);
+        if !(0.0..w).contains(&px) || !(0.0..h).contains(&py) {
+            return None;
+        }
+        let aspect = w / h;
+        let ndc = [px / w * 2.0 - 1.0, 1.0 - py / h * 2.0];
         let map = &self.level.map;
         let block_px = f32::from(BLOCK_PX);
         // Walk down the layers: the first lid the ray meets is what shows.
@@ -252,9 +281,18 @@ pub fn fire_sprite(
     fuse: i32,
     pos: [f32; 3],
 ) -> Option<SpriteInstance> {
+    flames(style, atlas, ((fuse / 3) % 7) as usize, pos)
+}
+
+/// Frame `frame` of the fire object at `pos`.
+fn flames(
+    style: &gfa_formats::style::Style,
+    atlas: &SpriteAtlas,
+    frame: usize,
+    pos: [f32; 3],
+) -> Option<SpriteInstance> {
     const FIRE: usize = 0x2e;
-    let frame = ((fuse / 3) % 7) as usize;
-    // A pixel above the car, so the flames win against its roof.
+    // A pixel above what burns, so the flames win against its top.
     let pos = [pos[0], pos[1], pos[2] + 1.0];
     gfa_render::sprites::object_sprite(style, atlas, FIRE, frame, pos, 0.0)
 }

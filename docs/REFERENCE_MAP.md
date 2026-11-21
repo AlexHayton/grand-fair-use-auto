@@ -20,28 +20,42 @@ relative to sibling checkouts `../carnage3d` and `../AmiGTA1`.
 | `gfa-render::style_tables` | `src/SpriteManager.cpp` (palette tables, `InitBlocksAnimations`) | `native/gta_main.c` (25 Hz frame, door note) | done |
 | `gfa-render::city`, `shaders/city.wgsl` | `gamedata/shaders/city_mesh.glsl` | | done |
 | `gfa-render::sprites`, `shaders/sprites.wgsl` | `src/SpriteBatch.cpp`, `gamedata/shaders/sprites.glsl`, `src/StyleData.cpp` (`GetSpritePaletteIndex`), `src/GameObjectsManager.cpp` (`CreateStartupObjects`) | `native/gta_player.h` (`GTA_SPRITE_ART_SOUTH`), `native/gta_render.c` (sprite rotation) | done |
-| `gfa-render::camera` | `src/FollowCameraController.cpp` | | done |
+| `gfa-render::camera` | `src/FollowCameraController.cpp` (field of view, height zoom) | | done |
 | `gfa-assets::level` | `src/GameMapManager.cpp` (`GetStyleFileName`) | | done |
 | `gfa-tool holecheck` | | `tools/bin/holecheck.sh` | done |
 | `gfa-fixed::trig`, `gfa-fixed::rng` | | `native/gta_trig.c`; generators in `gta_traffic.c`, `gta_peds.c`, `gta_train.c`, `gta_main.c` (`voice_rand`) | done |
 | `gfa-sim::clock` | | `native/gta_main.c` (`SIM_HZ`, `MAX_CATCHUP`), `gta_vehphys.c` (`TIME_NUM`/`TIME_DEN`), `gta_script_run.c`, `gta_marks.c`, `gta_train.c` (`half`), `gta_peds.c` (`FRAMES`) | done |
 | `gfa-sim::map` | `src/GameDefs.h` (`eGroundType`) | `native/gta_map.c` (`gta_map_ground_type`, ramps), `gta_nav.c` (nav byte, thin walls, `seg_cross`) | done |
 | `gfa-sim::player` | `gamedata/entities/ped_animations.json` (frames) | `native/gta_player.c`, `gta_player.h` | done |
-| `gfa-sim::view` | | `native/gta_main.c` (`gta_peds_set_view`, `gta_traffic_set_view_blocks`) | done |
+| `gfa-sim::view` | `src/FollowCameraController.cpp` (the lead's 0.35 s) | `native/gta_main.c` (`gta_peds_set_view`, `gta_traffic_set_view_blocks`) | done |
+| `gfa-app` pop-in check (`popin.rs`) | | `tools/bin/holecheck.sh` (the idea) | done |
 | `gfa-sim::script`, `gfa-sim::replay` | | `native/gta_main.c` (autodrive orders), `tools/gtadump.c` (`cmd_walk`) | done |
 | `gfa-sim::script_world` | | `native/gta_script.h` (`gta_script_world`) | skeleton |
 | `tools/oracle/walktrace.c` | | links `native/gta_map.c`, `gta_nav.c`, `gta_player.c`, `gta_trig.c`, `gta_style.c`, and the fleet (`fleet.h`) | done |
-| `tools/oracle/fleet.h` | | links `native/gta_traffic.c`, `gta_route.c`, `gta_car.c`, `gta_train.c`; restates `gta_main.c`'s `fleet_car_at`/`ped_car_block` and `gta_weapon.c`'s `wreck_sweep` | done |
+| `tools/oracle/ped_sidestep.pl` | | patches a copy of `native/gta_peds.c` under `build/` with gfa-sim's sidestep fix; `build.sh` links the copy | done |
+| `tools/oracle/traffic_giveup.pl` | | patches a copy of `native/gta_traffic.c` under `build/` with gfa-sim's dead-end rule; `build.sh` links the copy | done |
+| `tools/oracle/traffic_lights.pl` | | patches the same copy after `traffic_giveup.pl`: lights timed by the crossing, a stop line asking about the box ahead | done |
+| `tools/oracle/traffic_corner.pl` | | patches the same copy after `traffic_lights.pl`: a turn checks the street it leads into; a car refused its turn where there is no way on waits for it | done |
+| `tools/oracle/traffic_rejoin.pl` | | patches the same copy after `traffic_corner.pl`: a car shoved out of its lane drives by the lane beside it (`lane_block`) | done |
+| `tools/oracle/traffic_fits.pl` | | patches the same copy after `traffic_rejoin.pl`: a move judged by the block it enters (`fits_entering`); a must-make turn starts off straight | done |
+| `tools/oracle/traffic_follow.pl` | | patches the same copy after `traffic_fits.pl`: no following a car past the corner the route turns at (`turn_ahead`); mid-turn, the exit street watched too | done |
+| `tools/oracle/traffic_spawn.pl` | | patches the same copy after `traffic_follow.pl`: a new car clear of every car's body (`body_in_way`) | done |
+| `tools/oracle/traffic_stopline.pl` | | patches the same copy after `traffic_spawn.pl`: the light holds a car by its nose (`light_red_ahead`) | done |
+| `tools/oracle/fleet.h` | | links `native/gta_traffic.c` (patched), `gta_route.c`, `gta_car.c`, `gta_train.c`, `gta_peds.c` (patched); restates `gta_main.c`'s `fleet_car_at`/`ped_car_block`, `ped_light_green`, the walkers handed to traffic and the ram's speed, and `gta_weapon.c`'s `wreck_sweep` | done |
 | `gfa-sim::vehicle` | | `native/gta_vehphys.c`, `gta_vehphys.h` | done |
 | `gfa-sim::cars` | `src/GameObjectsManager.cpp` (`CreateStartupObjects`) | `native/gta_main.c` (`car_door_point`, `car_door_pos`, enter and exit, the jump, `ped_car_block`, `car_body_hit`, the vault and the slide) | wip |
+| `gfa-sim::cars::Siren`, `World::special_key` (the special key: siren, horn, shout) | | `native/gta_main.c` (`special_key`, the siren and horn notes in the main loop), `gta_traffic.h` (`GTA_DELTA_LIGHT0`) | done |
+| `gfa-sim::traffic` `pull_over` (pulling over for the horn) | | `native/gta_main.c:3957` (the NOT PORTED note), `gta_traffic.h` (the original's lane offsets 7, 0x1f, 0x37) | wip: provisional, (verify) M6b |
 | `tools/oracle/drivetrace.c` | | links `native/gta_vehphys.c`, `gta_style.c`, `gta_nav.c`, `gta_map.c`, `gta_trig.c`, and the fleet (`fleet.h`); restates the ram glue in `gta_main.c` | done |
 | `gfa-sim::trains` | | `native/gta_train.c`, `gta_train.h` | done |
 | `tools/oracle/traintrace.c` | | links `native/gta_train.c`, `gta_map.c`, `gta_trig.c` | done |
 | `gfa-sim` boats, tank, specials | | `native/gta_car.c`, `gta_traffic.c:1152` | M4 |
 | `gfa-sim::traffic` (fleet, driving, junction bookings, lights, collisions between cars) | | `native/gta_traffic.c`, `gta_traffic.h` | wip (M5) |
+| `gfa-sim::traffic::roads` lamps (`Light`, `light`, `Lamp`, `lamps`, `Boxes::crossing`) | `GameDefs.h` (the lamp sprites: red, green, yellow, off, shadow) | `gta_traffic.c` `gta_traffic_lights_scan`, `gta_traffic_light_state`, `gta_traffic_light_green`, `gta_traffic_draw` (the lamps) | done; ours: one light per crossing, lamps facing the drivers |
 | `gfa-sim::traffic::contact` (cars put into the fleet, taken out of it, the ram, walkers held off, write-offs) | | `native/gta_traffic.c` (`car_place`, `gta_traffic_abandon`, `_leave_wreck`, `_grab_car`, `_rename_car`, `_box_free`, `_sweep_box`, `_ram`), `gta_main.c` (`fleet_car_at`, `ped_car_block`, `leave_car`), `gta_weapon.c` (`wreck_sweep`) | done |
 | `gfa-sim::route` | | `native/gta_route.c`, `gta_route.h` | done |
-| `tools/oracle/traffictrace.c` | | links `native/gta_traffic.c`, `gta_route.c`, `gta_nav.c`, `gta_map.c`, `gta_car.c`, `gta_style.c`, `gta_trig.c`, `gta_vehphys.c` | done |
+| `tools/oracle/traffictrace.c` | | links `native/gta_traffic.c` (patched), `gta_route.c`, `gta_nav.c`, `gta_map.c`, `gta_car.c`, `gta_style.c`, `gta_trig.c`, `gta_vehphys.c` | done |
 | `gfa-sim` police | | `native/gta_traffic.c:9681-10500` | M6 |
-| `gfa-sim` peds | | `native/gta_peds.c` | M5 |
+| `gfa-sim::peds` (the crowd: spawning, brain, gaits, crossings, knockdowns, bodies, pull-out, ram) | | `native/gta_peds.c`, `gta_peds.h`; `gta_main.c` (the main loop's ped calls, walkers to traffic, fixture 11) | done (M5); shooting, punching, cops, script peds M6/M7 |
+| `gfa_formats::style::PED_REMAP_TABLES` | | measured from the user's styles (decision log, 2026-11-21) | done |
 | `gfa-sim` mission VM | | `native/gta_script*.c`, `gta_trig.c` | M7 |

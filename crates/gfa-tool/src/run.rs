@@ -27,6 +27,7 @@ pub struct RunArgs {
     pub trace: bool,
     pub trace_trains: bool,
     pub trace_traffic: bool,
+    pub trace_peds: bool,
     pub oracle: bool,
     pub out: Option<PathBuf>,
     pub record: Option<PathBuf>,
@@ -91,6 +92,11 @@ pub fn run(src: &dyn AssetSource, args: RunArgs) -> Result<()> {
         }
         if args.trace_traffic {
             for line in w.traffic.trace_lines(u64::from(w.tick)) {
+                println!("{line}");
+            }
+        }
+        if args.trace_peds {
+            for line in w.peds.trace_lines(w.tick) {
                 println!("{line}");
             }
         }
@@ -166,12 +172,27 @@ pub fn render_world(scene: &mut render::Scene, world: &World) -> Vec<u8> {
     )
 }
 
-/// The simulation's sprites: standing cars, the player's car, the player.
+/// The simulation's sprites: the traffic lights, the crowd, standing cars,
+/// the fleet, the player's car, the trains and the player.
 pub fn world_sprites(
     scene: &render::Scene,
     world: &World,
 ) -> Vec<gfa_render::sprites::SpriteInstance> {
     let mut out = Vec::new();
+    // The lights first: on the pavement, under whoever passes.
+    let tick = world.traffic.light_tick();
+    for l in world.traffic.lamps(&world.map) {
+        let (x, y) = l.pos();
+        let pos = [x, y, world.map.ground_z(x, y, l.z)];
+        out.extend(scene.lamp_sprite(l.light(tick).sprite(), pos, l.toward));
+    }
+    // The crowd first, so a car at the same height is drawn over a body.
+    for p in world.peds.p.iter().filter(|p| p.shown()) {
+        let (x, y) = (p.x as i32, p.y as i32);
+        let pos = [x, y, world.map.ground_z(x, y, p.layer)];
+        let table = p.remap.clamp(0, 255) as u8;
+        out.extend(scene.ped_sprite(p.sprite_frame(), table, pos, p.angle + 128));
+    }
     for c in world.standing_cars() {
         scene.push_car(&mut out, c.model, c.remap, c.pos, c.face + 128, c.deltas);
     }
@@ -202,7 +223,7 @@ pub fn world_sprites(
     }
     if let Some(frame) = world.player_frame() {
         let p = &world.player;
-        out.extend(scene.ped_sprite(frame, world.player_pos(), p.draw_angle()));
+        out.extend(scene.ped_sprite(frame, 0, world.player_pos(), p.draw_angle()));
     }
     out
 }

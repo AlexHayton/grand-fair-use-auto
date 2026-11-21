@@ -47,35 +47,40 @@ AmiGTA1 references are to `native/` in a sibling `../AmiGTA1` checkout.
 | Enter/exit by door, bikes | ✓ | full | wip | M4/M6b | `gta_main.c` (door point, enter and exit steps). Known issue (user report, 2026-11-21): the get-in animation does not match the original. He seems to enter the door from the wrong side. Compare frame by frame under DOSBox-X |
 | Vault over a car | ✓ | full | done | M4 | `gta_main.c` (vault states, far-side entry, blocked-door exit); `tools/scripts/vault.txt` |
 | Slide under a tall vehicle | ✓ | partial | done | M4/M6b | only while one is over him, as AmiGTA1; the original's approach from outside to verify |
-| Drag out the driver | ✓ | full | — | M5 | the driver needs M5's peds |
+| Drag out the driver | ✓ | full | done | M5 | `gta_peds_pull` (door fully open, 6 states × 4 ticks, then lying 84 ticks) and `_knock_off` for a bike; `taking_a_car_drags_its_driver_out`. The carjack's score and a cop car's driver chasing him are M6 |
 | Tank: handling | ✓ | full | — | M6b | engine cut, `gta_vehphys.c:395`, is in the physics; check against the original |
 | Tank: turret and cannon | ✓? | none | — | M6b | not modelled anywhere in AmiGTA1; measure under DOSBox-X |
 | Boats: driving on water | ✓? | none | — | M6b | placed as an object only, `gta_traffic.c:1152`; no doors in the car table; measure under DOSBox-X |
-| Cars sinking; drowning | ✓ | partial | done (player) | M4/M5 | `gta_main.c:2253`, the walk into water and the jump falling short; `walk_water.txt` and `drive_sink.txt` match the oracle. Peds in the water: M5 |
+| Cars sinking; drowning | ✓ | partial | done | M4/M5 | `gta_main.c:2253`, the walk into water and the jump falling short; `walk_water.txt` and `drive_sink.txt` match the oracle. Peds in the water drown (ours: AmiGTA1's stand on it), gone after 67 ticks; `a_ped_in_the_water_drowns` |
 | Helicopter (scripted escape) | ✓ | none | — | M6b/M7 | filtered from traffic, `gta_traffic.c:1186`; drivable? measure under DOSBox-X |
 | RC car / map-placed specials | ? | partial | — | M6b | `gta_traffic.c:1152`; model 47, no doors; measure under DOSBox-X |
 | Trains: routes, stops, boarding, crush | ✓ | partial | done | M4 | `gta_train.c`; straights and quarter circles, not yet the original's path table; oracle matches |
 | Trams | ✓ (static) | full | done | M4 | the original's trams stand still |
-| Horn / pull-over look-ahead | ✓ | none | — | M5 | `gta_main.c:3957` NOT PORTED |
+| Horn / pull-over look-ahead | ✓ | partial | wip | M5/M6b | The horn: TAB held in a car without a siren (`special_key`), done, `horn.txt`. The pull-over (`gta_main.c:3957`, NOT PORTED there): TAB held in a car, the nearest car up to five blocks ahead moves to the kerb (the original's offsets 7 and 0x37 of 0x40) and stops; `Traffic::pull_over`, `the_car_ahead_pulls_over_for_the_horn`. **(verify)** under DOSBox-X: how far to the side the look reaches, how slowly it moves over, that it stops, for how long, and whether the siren left on does it too |
 | Bombs: timed, speed | ✓ | full | — | M6 | `gta_main.c:4266` |
 | Bombs: tanker (type 4, five blasts) | ✓ | none | — | M6 | `gta_main.c:4272` |
 | Chain explosions of wrecks | ✓? | none | — | M6 | `gta_weapon.h:34` |
-| Siren/lights toggle in emergency vehicles | ? | partial | — | M5 | |
+| Siren/lights toggle in emergency vehicles | ✓ | partial | done | M5 | `special_key` (from the original's routine; `car+0x113`): models 4, 5 and 0x2a; first press on, a press after that sounds it while held, off when he gets out. AmiGTA1 plays the sound but does not light his car; ours flashes lighting deltas 15 and 16 as its dispatched cops do. `siren.txt`, `the_special_key_works_the_siren_then_sounds_it`. The sound itself is M8 |
 
 ## Living city (M5)
 
 | Feature | Original | AmiGTA1 | GFA | M | Evidence / notes |
 |---|---|---|---|---|---|
-| Traffic spawn/despawn, lanes, junctions, lights | ✓ | full | wip | M5 | `gfa_sim::traffic` matches AmiGTA1 car for car (`oracle_traffic`: 4 sites × 3 seeds × 3,000 ticks). The rings follow the fixed logical view, not the window; the pop-in check and the camera lead are still to do |
-| Junction wobble, corner landing error | ✓ | partial | — | M5 | `gta_traffic.c:5871`, `:5666` |
+| Traffic spawn/despawn, lanes, junctions, lights | ✓ | full | wip | M5 | `gfa_sim::traffic` matches AmiGTA1 car for car (`oracle_traffic`: 4 sites × 3 seeds × 3,000 ticks). The rings follow the simulation's view (`SimCamera`: lead and speed zoom), not the window, and the camera never shows more than it: the pop-in check finds nothing coming or going in sight in all three cities. Ours: a car stuck at a dead end gives up only out of sight (AmiGTA1 deletes it in view; the oracle carries the change, `traffic_giveup.pl`). The lamps are drawn on the crossings' corners, facing the drivers coming in; each crossing has one light (AmiGTA1's timing split most crossings so both roads were green at once; `traffic_lights.pl`). The light cycle is AmiGTA1's own: **(verify)** the original's. Ours: a car refused its turn at a corner with no way on waits for it rather than driving onto the pavement (`traffic_corner.pl`), a car shoved out of its lane steers back into it rather than standing at a "dead end" (`traffic_rejoin.pl`), long vehicles take corners whose far side is a building or grass (`traffic_fits.pl`), and a car does not queue behind one past the corner it turns at (`traffic_follow.pl`). The 12,000-tick gate's traces match AmiGTA1; and all twelve pass its checks (AmiGTA1 unpatched: 3). Also ours: new cars put down clear of other bodies, a turning car watching the street it turns into, and the light holding a car by its nose (`traffic_spawn.pl`, `traffic_follow.pl`, `traffic_stopline.pl`) |
+| Camera: zoom out with speed | ✓ | none | done | M5/M6b | Ours: up to 1.5× at a sports car's top speed, as simulation state. AmiGTA1 zooms only on a key. **(verify)** the original's curve under DOSBox-X |
+| Camera: lead ahead of a moving car | ? | none | done | M5 | Carnage3D's 0.35 s, capped at a third of the view so the car stays on screen; **(verify)** against the original |
+| Junction wobble, corner landing error | ✓ | partial | done | M5 | `gta_traffic.c:5871`, `:5666`. Measured over the gate's twelve runs: no car turns twice in a crossing (the wobble came from cars with no route, now 0.2% of car-ticks); 99.3% of straight crossings and of turns end within a pixel of the line. `cars_keep_their_lanes_through_junctions`. AmiGTA1's rule of not steering inside a crossing is kept (decision log) |
 | Collisions between cars (SAT + impulse) | ✓ | full | done | M5 | `gta_traffic.c:8067`, `gta_traffic_ram`, `gta_traffic_sweep_box`; within the fleet and the player's car against it. Walk and drive oracles compare the fleet every tick (46 rams across the random drives) |
-| Traffic and the player: rams, taking a driven car | ✓ | full | wip | M5 | `gta_traffic_ram`, `gta_traffic_grab_car`, `gta_traffic_abandon`: done. The driver of a taken car is not thrown out until the peds arrive |
+| Traffic and the player: rams, taking a driven car | ✓ | full | done | M5 | `gta_traffic_ram`, `gta_traffic_grab_car`, `gta_traffic_abandon`; the driver of a taken car is dragged out |
 | Traffic and the map's parked cars | ✓ | n/a | done | M5 | AmiGTA1 has no map-placed cars. Ours stand in the fleet all level (decision log); at rest they do not push each other |
 | Write-offs in the fleet burn out | ✓ | full | wip | M5/M6 | `gta_weapon.c` `wreck_sweep`; the blast's harm to others is M6 |
-| Peds: pavements, crossings, panic, knockdown | ✓ | full | — | M5 | |
-| Ped counter-punch | ✓ | none | — | M5 | `gta_peds.c:1675` |
-| Gang roles | ✓ | partial | — | M5 | `gta_peds.c:1111` |
-| Hare Krishna / Elvis groups | ✓? | none | — | M5 | needed for bonuses |
+| Peds: pavements, crossings, panic, knockdown | ✓ | full | done | M5 | `gfa_sim::peds` matches AmiGTA1's crowd ped for ped in all 71 walk and drive oracle runs. Pool sized to the view (33 in the game, 12 at AmiGTA1's). Panic at gunfire, shooting and punching wait for M6's weapons |
+| Peds: AmiGTA1's anti-pileup rules | ? | full | done | M5/M6b | AmiGTA1 departs from the original in four places so people do not bunch: corner targets spread across the pavement, separation and relax between people, no resting near corners, a coin per ped at a T-junction. Kept; compare with the original under DOSBox-X. Ours: the sidestep's bend no longer piles up into a spin or flicks along a kerb (decision log 2026-11-21; the oracle carries the fix, `ped_sidestep.pl`) |
+| Peds run over, killed by trains | ✓ | full | done | M5 | `gta_peds_ram` (a man lying down is killed but not counted, as AmiGTA1), `gta_train.c`'s crush; `ped_runover.txt`, `a_car_runs_a_ped_over` |
+| Ped dress (remaps) | ✓ | full | done | M5 | GRY tables, and in the G24 the ped remap CLUTs, paired by measurement (`PED_REMAP_TABLES`); `people_wear_the_same_in_either_style` |
+| Ped counter-punch | ✓ | none | — | M6 | `gta_peds.c:1675`. Moved from M5: needs the player's punch. What it does is not in AmiGTA1: **(verify)** M6b |
+| Gang roles | ✓ | partial | — | M7 | `gta_peds.c:1111`. Moved from M5: only the mission script makes gangs. AmiGTA1 has not read their state machine: **(verify)** M6b |
+| Hare Krishna / Elvis groups | ✓? | none | — | M6 | Moved from M5: needed for the bonuses. Carnage3D's `docs/ped.txt` lists ped type 143 "Hare Krishnas" for mission scripts; where they walk, how often and which levels have Elvises: **(verify)** M6b |
 
 ## Combat, police, services (M6)
 
@@ -123,7 +128,8 @@ AmiGTA1 references are to `native/` in a sibling `../AmiGTA1` checkout.
 | High-score table | ✓ | partial | — | M8 | `gfa_formats::career` reads the six tables; display and entry to do |
 | Briefing stills CUT0-5 with voice | ✓ | none | — | M8 | |
 | Attract-mode demos (.REP) | ✓ | none | — | M8 | `{u32 tick, u32 input}` change logs, one per city (FORMATS.md); input bits not decoded |
-| Pause menu, options | ✓ | none | — | M8 | |
+| Pause menu, options | ✓ | none | wip | M8 | F6 pauses, the original's key (its README); the menu and options are M8 |
+| The original's keys | ✓ | partial | done | M5 | Default layout from the 1997 README: arrows, Space, Enter, Ctrl, Z/X, Tab, F5 radio, F6 pause, F7/F10 repeat messages, F9 area name, F11 screen mode, Esc. Our debug keys keep off them (decision log). The "Classic" layout is M12 |
 | SFX banks, positional mix, engine pitch | ✓ | full | — | M8 | `gta_sfx.c`, `gta_audio.c` |
 | VOCALCOM speech, MISBRIEF briefings | ✓ | partial | — | M8 | |
 | CD-audio radio stations | ✓ | partial | — | M8 | clock-based, `CDAUDIO.DAT` |

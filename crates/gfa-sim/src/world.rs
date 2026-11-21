@@ -2,9 +2,8 @@
 
 use crate::cars::{
     self, BIKE_ENTER_FIRST, BIKE_EXIT_FIRST, BIKE_FRAMES, BIKE_SIT, DOOR_OPEN, Driven, ENTER_SEQ,
-    ENTER_TICKS,
-    EXIT_FIRST, EXIT_FRAMES, EXIT_TICKS, PED_CAR_MARGIN, Parked, REACH, body_hit, door_point,
-    door_pos, lerp_angle, lerp_fp, panel_delta,
+    ENTER_TICKS, EXIT_FIRST, EXIT_FRAMES, EXIT_TICKS, PED_CAR_MARGIN, Parked, REACH, body_hit,
+    door_point, door_pos, lerp_angle, lerp_fp, panel_delta,
 };
 use crate::hash::{SimHash, StateHasher};
 use crate::input::{Buttons, TickInput};
@@ -14,7 +13,7 @@ use crate::player::{Anim, Player, RUN_SPEED, Stick};
 use crate::traffic::{self, Traffic};
 use crate::trains::{Carriage, TrainEvent, Trains};
 use crate::vehicle::{CLASS_BIKE, Pedals, Veh};
-use crate::view::SimView;
+use crate::view::{SimCamera, SimView};
 use gfa_fixed::fx::{BLOCK_SHIFT, FP, block_centre};
 use gfa_fixed::trig::{cos, sin};
 use gfa_formats::style::CarInfo;
@@ -178,7 +177,10 @@ pub struct World {
     pub map: SimMap,
     /// The style's car table.
     pub cars: Vec<CarInfo>,
+    /// The view at rest.
     pub view: SimView,
+    /// Where the view is now: its lead and zoom.
+    pub camera: SimCamera,
     pub player: Player,
     pub doing: Doing,
     /// The player's car, while he drives it or gets out of it.
@@ -234,6 +236,7 @@ impl World {
             map,
             cars,
             view,
+            camera: SimCamera::REST,
             player,
             doing: Doing::OnFoot,
             driven: None,
@@ -279,6 +282,7 @@ impl World {
     pub fn step(&mut self, input: TickInput) {
         let b = input.buttons;
         let pressed = b.pressed_since(self.prev);
+        let was = (self.player.x, self.player.y);
         if pressed.contains(Buttons::ENTER) {
             match self.doing {
                 Doing::OnFoot => {
@@ -300,6 +304,14 @@ impl World {
         if pressed.contains(Buttons::HANDBRAKE) && self.doing == Doing::OnFoot {
             self.jump();
         }
+        let released = self.prev.pressed_since(b);
+        self.special_key(
+            pressed.contains(Buttons::SPECIAL),
+            released.contains(Buttons::SPECIAL),
+        );
+        if b.contains(Buttons::SPECIAL) {
+            self.pull_over();
+        }
         match self.doing {
             Doing::OnFoot => self.walk(b),
             Doing::Entering(e) => self.entering(e),
@@ -319,6 +331,7 @@ impl World {
             };
             self.drive(pedals);
         }
+        self.follow(was);
         let centre = self.run_traffic();
         self.run_trains();
         self.peds_view();
@@ -333,6 +346,77 @@ impl World {
         self.run_over();
         self.prev = b;
         self.tick += 1;
+    }
+
+    /// The special key, TAB (the original's control 7; AmiGTA1
+    /// `special_key`), on the ticks it goes `down` or comes `up`: in a car
+    /// with a siren, the siren ([`cars::Siren`]); in any other car, the
+    /// horn while it is held; on foot, a shout (its sample, one of two by
+    /// the voice's dice, is the sound's to pick: M8). Out of the car, the
+    /// siren and the horn stop.
+    fn special_key(&mut self, down: bool, up: bool) {
+        let mut line = None;
+        match self.doing {
+            Doing::Driving => {
+                let Some(d) = self.driven.as_mut() else {
+                    return;
+                };
+                let id = d.veh.model_id;
+                if cars::has_siren(id) {
+                    let was = d.siren;
+                    d.siren = match d.siren {
+                        cars::Siren::Off if down => cars::Siren::On,
+                        cars::Siren::On if down => cars::Siren::Sounding,
+                        cars::Siren::Sounding if up => cars::Siren::On,
+                        s => s,
+                    };
+                    if d.siren != was {
+                        let what = if d.siren == cars::Siren::Sounding {
+                            "sounding"
+                        } else {
+                            "on"
+                        };
+                        line = Some(format!("special key - siren {what} (model {id})"));
+                    }
+                } else if down || up {
+                    d.horn = down;
+                    let what = if down { "down" } else { "up" };
+                    line = Some(format!("special key - horn {what} (model {id})"));
+                }
+            }
+            Doing::OnFoot | Doing::Entering(_) if down => {
+                line = Some("special key - a shout".into());
+            }
+            _ => {}
+        }
+        if self.doing != Doing::Driving
+            && let Some(d) = self.driven.as_mut()
+        {
+            d.siren = cars::Siren::Off;
+            d.horn = false;
+        }
+        if let Some(l) = line {
+            self.say(l);
+        }
+    }
+
+    /// The special key held in a car: the car ahead pulls over
+    /// ([`Traffic::pull_over`]).
+    fn pull_over(&mut self) {
+        let Some(d) = self
+            .driven
+            .as_ref()
+            .filter(|_| self.doing == Doing::Driving)
+        else {
+            return;
+        };
+        let v = &d.veh;
+        let told = self
+            .traffic
+            .pull_over(&self.map, v.ox, v.oy, d.layer, v.angle(), v.len / 2);
+        if let Some(serial) = told {
+            self.say(format!("traffic: car {serial} pulls over"));
+        }
     }
 
     /// RETURN on foot beside a stopped train: get on (within 24 px of a
@@ -395,6 +479,40 @@ impl World {
             .filter(|_| self.doing == Doing::Driving || matches!(self.doing, Doing::Exiting(_)))
     }
 
+    /// The view after this tick's move: it leads him by his velocity and
+    /// widens with his speed. In a car the velocity is the car's (it moves
+    /// on 7 ticks in 15); on foot, how far he went since `was`, unless that
+    /// was a jump no walk makes.
+    fn follow(&mut self, was: (i32, i32)) {
+        let (vx, vy) = match self.in_car() {
+            Some(d) => (d.veh.vx * 7 / 15, d.veh.vy * 7 / 15),
+            None => {
+                let (dx, dy) = (self.player.x - was.0, self.player.y - was.1);
+                if dx.abs().max(dy.abs()) > 4 << FP {
+                    (0, 0)
+                } else {
+                    (i64::from(dx), i64::from(dy))
+                }
+            }
+        };
+        self.camera.follow(self.view, vx, vy);
+    }
+
+    /// The view now: the view at rest at the camera's zoom.
+    pub fn view_now(&self) -> SimView {
+        self.view.at(self.camera.zoom)
+    }
+
+    /// The view's centre now, 16.16: on the player (or his car), plus the
+    /// lead.
+    pub fn view_centre(&self) -> (i64, i64) {
+        let (x, y) = match self.in_car() {
+            Some(d) => (d.veh.ox, d.veh.oy),
+            None => (i64::from(self.player.x), i64::from(self.player.y)),
+        };
+        self.camera.centre(x, y)
+    }
+
     /// The fleet's tick, with the view on the player (or his car). The
     /// player and the peds are obstacles the fleet stops for. Returns the
     /// view's centre.
@@ -420,9 +538,10 @@ impl World {
         self.peds.set_player(x, y, layer, car, (x, y), false);
         self.traffic.set_player(true, x, y, speed, layer, hl);
         self.traffic.set_walkers(self.peds.walkers());
-        self.traffic.set_view_blocks(self.view.half_w);
-        self.traffic.step(&self.map, &self.cars, x, y);
-        (x, y)
+        self.traffic.set_view_blocks(self.view_now().half_w);
+        let centre = self.view_centre();
+        self.traffic.step(&self.map, &self.cars, centre.0, centre.1);
+        centre
     }
 
     /// The spawner's view: its size, and which way he is heading.
@@ -434,8 +553,8 @@ impl World {
                 matches!(self.player.anim, Anim::Run | Anim::Walk),
             ),
         };
-        self.peds
-            .set_view(self.view.half_w, self.view.half_h, angle, moving);
+        let view = self.view_now();
+        self.peds.set_view(view.half_w, view.half_h, angle, moving);
     }
 
     /// The peds' tick, with the view where the fleet's was.
@@ -465,7 +584,11 @@ impl World {
         };
         let v = &d.veh;
         let (avx, avy) = (v.vx.abs(), v.vy.abs());
-        let speed = if avx > avy { avx + avy / 2 } else { avy + avx / 2 };
+        let speed = if avx > avy {
+            avx + avy / 2
+        } else {
+            avy + avx / 2
+        };
         let hits = self
             .peds
             .ram(v.ox, v.oy, v.angle(), v.len / 2, v.wid / 2, d.layer, speed);
@@ -998,6 +1121,8 @@ impl World {
             door_tick: if e.bike { -1 } else { total },
             serial: e.serial,
             mission: e.mission,
+            siren: cars::Siren::Off,
+            horn: false,
         });
         self.player.anim = Anim::Stand;
         self.player.frame = 0;
@@ -1316,7 +1441,16 @@ impl World {
                 cars::exit_door_delta(e.step)
             };
         }
-        Some((d.veh.dmg_bits | door.map_or(0, |d| 1 << d), d.veh.fuse))
+        // The siren's lights, turn about.
+        let lights = if d.siren == cars::Siren::Off {
+            0
+        } else {
+            1 << (cars::DELTA_LIGHT0 + (self.tick / cars::LIGHT_FLASH_TICKS) % 2)
+        };
+        Some((
+            d.veh.dmg_bits | lights | door.map_or(0, |d| 1 << d),
+            d.veh.fuse,
+        ))
     }
 
     /// The ped sprite frame to draw the player with, or `None` while he is
@@ -1424,6 +1558,8 @@ impl World {
             door_tick: -1,
             serial: 0,
             mission: false,
+            siren: cars::Siren::Off,
+            horn: false,
         });
         self.player.x = x;
         self.player.y = y;
@@ -1474,6 +1610,43 @@ impl World {
             x >> 16,
             y >> 16,
         ));
+    }
+
+    /// A test fixture: a ped `(dx, dy)` world px from the player, facing
+    /// `angle` (AmiGTA1's `ped` order). The city keeps the pool full, so a
+    /// full pool gives up the ped farthest from the player first.
+    pub fn drop_ped(&mut self, dx: i32, dy: i32, angle: i32) {
+        let (px, py) = (i64::from(self.player.x), i64::from(self.player.y));
+        if self.peds.p.iter().all(|p| p.alive) {
+            let far = self
+                .peds
+                .p
+                .iter()
+                .enumerate()
+                .map(|(i, p)| {
+                    let (dx, dy) = ((p.x - px) >> 16, (p.y - py) >> 16);
+                    (dx * dx + dy * dy, i)
+                })
+                // The first of equals, as AmiGTA1's strict `>` keeps.
+                .fold(None, |best: Option<(i64, usize)>, (d, i)| match best {
+                    Some((bd, _)) if bd >= d => best,
+                    _ => Some((d, i)),
+                });
+            if let Some((_, i)) = far {
+                self.peds.p[i].alive = false;
+            }
+        }
+        let (x, y) = (px + (i64::from(dx) << 16), py + (i64::from(dy) << 16));
+        let layer = self.player.layer;
+        if self.peds.drop_ped(x, y, layer, angle & 255, -1, 0) {
+            self.say(format!(
+                "ped: dropped a ped at ({},{})",
+                (px >> 16) + i64::from(dx),
+                (py >> 16) + i64::from(dy)
+            ));
+        } else {
+            self.say("ped: drop - pool full".into());
+        }
     }
 
     /// Add a line to the run log.
@@ -1561,6 +1734,9 @@ impl World {
         self.traffic.sim_hash(&mut h);
         self.peds.sim_hash(&mut h);
         h.i32(self.health);
+        h.bytes(&self.camera.lead.0.to_le_bytes());
+        h.bytes(&self.camera.lead.1.to_le_bytes());
+        h.i32(self.camera.zoom);
         h.finish()
     }
 

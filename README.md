@@ -32,11 +32,11 @@ cargo run --release -p gfa-native -- --game london69 --level 2
 cargo run -p gfa-tool -- info                             # what's in your data folder
 ```
 
-You start on foot at the level's starting point. Traffic drives the streets,
-and any car can be taken: the ones parked around the city, or one out of the
-traffic. Your car rams traffic and traffic shunts back. People and missions
-arrive in later milestones; until the people do, nobody is thrown out of a car
-you take.
+You start on foot at the level's starting point. Traffic drives the streets
+and people walk the pavements. Any car can be taken: the ones parked around
+the city, or one out of the traffic, whose driver you drag out. Your car rams
+traffic and traffic shunts back, and runs people over. Weapons, police and
+missions arrive in later milestones.
 
 ### Choosing a city
 
@@ -82,14 +82,20 @@ A script runs on Vice City if its header says `# section: 202`.
 | Shift | walk instead of run |
 | Return | get into the nearest car, or out of yours |
 | Space | handbrake; on foot, jump: over a low car, under a tall one |
-| Scroll wheel, `+` / `-` | zoom |
+| Scroll wheel, `+` / `-` | zoom. Zooming out stops where the picture would show the edge of the living city, where people and cars come and go; the camera also pulls back by itself as you speed up |
 | F | free look: drag with the right mouse button to tilt and turn |
 | R | look straight down again |
 | C | detach the camera and fly over the city with the arrows (Shift: faster); C again returns to the player |
-| F1 | debug overlay: frame rate, the player's tick and block, the camera, the block under the cursor |
+| Ctrl | fire (once there are weapons) |
+| Tab | the special key: the horn, or in a police car, ambulance or fire engine the siren |
+| Z / X | previous and next weapon (once there are weapons) |
+| F6 | pause |
+| `` ` `` | debug overlay: frame rate, the player's tick and block, the camera, the block under the cursor |
 | Esc | quit |
 
-`--screenshot shot.png` saves the first frame and quits.
+The original's keys (its default layout) do what they did there; the debug keys keep off them. F5 (the radio), F7 and F10 (repeat a message), F9 (the area's name), F8 (the frame limiter) and F11 (the screen mode) are kept for when those arrive.
+
+`--screenshot shot.png` saves the first frame and quits; `--size 1600x900` sets the window's size. Windows wider than 21:9 get black bars at the sides.
 
 Inspecting the data (`gfa-tool --help` lists everything):
 
@@ -136,8 +142,8 @@ cargo clippy --workspace --all-targets
 `cargo oracle-test` builds AmiGTA1's own walking, driving, train and traffic
 code from a sibling `../AmiGTA1` checkout (or `$AMIGTA1`) with clang, runs the
 scripts in `tools/scripts/` marked `# oracle: walk` or `# oracle: drive`, 48
-random walks and drives over the three cities (with the traffic and trains
-around the player, every car compared), 12,000 ticks of every city's
+random walks and drives over the three cities (with the traffic, trains and
+crowd around the player, every car and every ped compared), 12,000 ticks of every city's
 trains, and AmiGTA1's traffic test (four Liberty City sites, three seeds,
 3,000 ticks each; `GFA_TRAFFIC_TICKS` changes the length) through both, and
 compares every tick. Nothing of AmiGTA1 is copied into this

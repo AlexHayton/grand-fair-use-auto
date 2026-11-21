@@ -354,7 +354,41 @@ pub struct Driven {
     /// mission had marked it.
     pub serial: u64,
     pub mission: bool,
+    /// The police car's, ambulance's or fire engine's siren and lights
+    /// (the original's `car+0x113`, AmiGTA1's `g_pl_siren`).
+    pub siren: Siren,
+    /// The special key held down in a car without a siren: the horn (the
+    /// original's `car+0x12d`).
+    pub horn: bool,
 }
+
+/// The player's siren (AmiGTA1 `special_key`, from the original's
+/// routine): the first press of the special key puts it on and it stays
+/// on until he leaves the car; a press after that sounds it (the yelp)
+/// for as long as the key is held, and letting go goes back to on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Siren {
+    #[default]
+    Off,
+    /// The lights flash and the siren wails.
+    On,
+    /// Held: the yelp.
+    Sounding,
+}
+
+/// The models with a siren: the police car, the ambulance and the fire
+/// engine (AmiGTA1 `special_key`; their horn byte, 60 and over, is a
+/// siren's).
+pub fn has_siren(model_id: u8) -> bool {
+    matches!(model_id, 4 | 5 | 0x2a)
+}
+
+/// The first of the two lighting deltas a siren car flashes, turn about
+/// ten ticks each (AmiGTA1 `GTA_DELTA_LIGHT0`: the police car and the
+/// ambulance carry them).
+pub const DELTA_LIGHT0: u32 = 15;
+/// Ticks each light shows.
+pub const LIGHT_FLASH_TICKS: u32 = 10;
 
 impl SimHash for Driven {
     fn sim_hash(&self, h: &mut StateHasher) {
@@ -363,6 +397,8 @@ impl SimHash for Driven {
         h.i32(self.door_tick);
         h.bytes(&self.serial.to_le_bytes());
         h.bool(self.mission);
+        h.u8(self.siren as u8);
+        h.bool(self.horn);
         match self.air {
             Some(a) => {
                 h.bytes(&a.z.to_le_bytes());

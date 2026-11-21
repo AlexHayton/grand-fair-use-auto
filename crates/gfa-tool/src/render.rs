@@ -9,7 +9,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use gfa_assets::AssetSource;
-use gfa_formats::style::{SpriteCategory, Style};
+use gfa_formats::style::Style;
 use gfa_render::Gpu;
 use gfa_render::camera::Camera;
 use gfa_render::city::{CityRenderer, DebugView, DepthTarget, begin_scene};
@@ -230,17 +230,37 @@ impl Scene {
         self.target.read(&self.gpu)
     }
 
-    /// A ped sprite: `frame` within the ped category, at a simulation
-    /// position, drawn at a simulation angle.
+    /// A ped sprite: `frame` within the ped category, dressed in GRY remap
+    /// table `table` (0 for its own colours), at a simulation position,
+    /// drawn at a simulation angle.
     pub fn ped_sprite(
         &self,
         frame: u16,
+        table: u8,
+        pos16: [i32; 3],
+        draw_angle: i32,
+    ) -> Option<SpriteInstance> {
+        gfa_render::sprites::ped_sprite(
+            &self.style,
+            &self.atlas,
+            frame,
+            table,
+            gfa_render::sprites::from_sim(pos16),
+            gfa_render::sprites::sim_angle(draw_angle),
+        )
+    }
+
+    /// Sprite `n` of the style's traffic lights at a simulation position,
+    /// drawn at a simulation angle.
+    pub fn lamp_sprite(
+        &self,
+        n: usize,
         pos16: [i32; 3],
         draw_angle: i32,
     ) -> Option<SpriteInstance> {
         let sprite = self
             .style
-            .sprite_index(SpriteCategory::Ped, usize::from(frame))?;
+            .sprite_index(gfa_formats::style::SpriteCategory::TrafficLight, n)?;
         gfa_render::sprites::own_sprite(
             &self.style,
             &self.atlas,

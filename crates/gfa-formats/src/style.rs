@@ -38,6 +38,19 @@ pub const CAR_REMAPS: usize = 12;
 pub const CAR_DOORS: usize = 4;
 /// G24: the remap CLUTs end with this many pedestrian remaps.
 pub const PED_REMAPS: usize = 64;
+/// The GRY remap table that each G24 pedestrian remap stands for. Measured,
+/// not documented: every ped sprite's pixels through each G24 ped remap,
+/// against the GRY palette through every GRY table, in STYLE001..003 and
+/// London's Style001. Each remap's best table is within the error the
+/// sprites' own CLUTs show against the GRY palette (about 10 in squared
+/// 8-bit RGB), and the next best is at least 60 times worse. Tables 9 and
+/// 14 are the same table; 141 has no G24 remap.
+pub const PED_REMAP_TABLES: [u8; PED_REMAPS] = [
+    4, 3, 5, 9, 39, 40, 41, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 142, 143, 144, 145,
+    146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164,
+    165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183,
+    184, 185, 186, 187, 33,
+];
 const TILES_PER_ROW: usize = PAGE_DIM / TILE_DIM;
 const CLUT_BYTES: usize = 256 * 4;
 const CLUT_PAGE: usize = 64 * 1024;
@@ -408,6 +421,13 @@ impl G24Colour {
     /// `n * 12 ..`; the last [`PED_REMAPS`] are the pedestrians'.
     pub fn remap_palette(&self, remap: usize) -> Option<u16> {
         self.index_in(self.tile_cluts + self.sprite_cluts, self.remap_cluts, remap)
+    }
+
+    /// The physical palette for a pedestrian dressed in GRY remap table
+    /// `table` ([`PED_REMAP_TABLES`]).
+    pub fn ped_palette(&self, table: u8) -> Option<u16> {
+        let j = PED_REMAP_TABLES.iter().position(|&t| t == table)?;
+        self.remap_palette(self.remap_cluts.checked_sub(PED_REMAPS)? + j)
     }
 
     pub fn font_palette(&self, font: usize) -> Option<u16> {
