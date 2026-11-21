@@ -51,6 +51,15 @@ pub mod frames {
     pub const VAULT_FRAMES: u16 = 6;
     /// Lying on his back under a vehicle too tall to vault.
     pub const SLIDE_UNDER: u16 = 41;
+    /// The standing punch: one frame a punch state.
+    pub const PUNCH_FIRST: u16 = 50;
+    pub const PUNCH_FRAMES: u16 = 6;
+    /// Standing with a gun out while fire is held.
+    pub const ARMED_STAND: u16 = 89;
+    /// Walking or running with a gun out: added to the cycle's frame.
+    pub const ARMED_OFFSET: u16 = 99;
+    /// Punching on the run: added to the run frame.
+    pub const RUN_PUNCH_OFFSET: u16 = 173;
 }
 
 /// What the player is doing, for the sprite.
@@ -63,6 +72,22 @@ pub enum Anim {
     Vault,
     /// Sliding under a tall vehicle.
     SlideUnder,
+    /// The standing punch; `frame` is the punch state.
+    Punch,
+}
+
+impl Anim {
+    /// AmiGTA1's number for the state, as the traces print it.
+    pub fn trace_code(self) -> u8 {
+        match self {
+            Anim::Stand => 0,
+            Anim::Walk => 1,
+            Anim::Run => 2,
+            Anim::Vault => 7,
+            Anim::SlideUnder => 8,
+            Anim::Punch => 9,
+        }
+    }
 }
 
 /// The player's controls for one tick.
@@ -207,6 +232,9 @@ impl Player {
                 frames::VAULT_FIRST + u16::from(self.frame).min(frames::VAULT_FRAMES - 1)
             }
             Anim::SlideUnder => frames::SLIDE_UNDER,
+            Anim::Punch => {
+                frames::PUNCH_FIRST + u16::from(self.frame).min(frames::PUNCH_FRAMES - 1)
+            }
         }
     }
 

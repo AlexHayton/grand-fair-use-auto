@@ -882,3 +882,36 @@ fn the_special_key_is_a_horn_in_a_car_and_a_shout_on_foot() {
     );
     assert!(!log.iter().any(|l| l.text.contains("siren")));
 }
+
+#[test]
+fn heavy_bodies_take_less_from_a_bullet_and_any_finishes_at_75() {
+    use gfa_sim::weapons::bullet_damage;
+    let car = saloon();
+    assert_eq!(bullet_damage(&car, 0), 5);
+    assert_eq!(bullet_damage(&car, 80), 20);
+    let bus = CarInfo { vtype: 0, ..bus() };
+    assert_eq!(bullet_damage(&bus, 50), 2);
+    assert_eq!(bullet_damage(&bus, 75), 25);
+}
+
+#[test]
+fn the_top_up_gives_every_gun_99_rounds_once_a_press() {
+    let mut b = CmpBuilder::new(1);
+    street(&mut b, 5..25, 5..40);
+    let mut w = world(&b, south(15, 8));
+    w.give_weapon(1, 3);
+    run(&mut w, Buttons::ALL_WEAPONS, 5);
+    assert_eq!(w.arms.ammo, [0, 99, 99, 99, 99]);
+    assert_eq!(w.arms.weapon, 1, "the gun in hand stays");
+    // Held, it does not count as pressed again.
+    w.arms.ammo[1] = 10;
+    run(&mut w, Buttons::ALL_WEAPONS, 3);
+    assert_eq!(w.arms.ammo[1], 10);
+    let log = w.drain_log();
+    assert_eq!(
+        log.iter()
+            .filter(|l| l.text.starts_with("cheat: keypad-*"))
+            .count(),
+        1
+    );
+}

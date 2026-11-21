@@ -150,7 +150,8 @@ pub(crate) const LANE_SWAP_MAX: i32 = 200;
 pub(crate) const LANE_SWAP_LOOK: i32 = 3;
 pub(crate) const UTURN_SCAN: i32 = 3;
 const RECOVER_RINGS: i32 = 6;
-const COP_MODEL: u8 = 4;
+/// The police car's model.
+pub const COP_MODEL: u8 = 4;
 const HELICOPTER: u8 = 88;
 
 /// Why a car is not moving.
@@ -2173,8 +2174,17 @@ impl Traffic {
     pub fn trace_lines(&self, tick: u64) -> impl Iterator<Item = String> + '_ {
         self.cars[..self.n].iter().enumerate().map(move |(i, c)| {
             format!(
-                "f {tick} {i} {} {} {} {} {} {} {} {}",
-                c.serial, c.x, c.y, c.layer, c.face, c.angle, c.speed, c.model
+                "f {tick} {i} {} {} {} {} {} {} {} {} {} {}",
+                c.serial,
+                c.x,
+                c.y,
+                c.layer,
+                c.face,
+                c.angle,
+                c.speed,
+                c.model,
+                c.damage,
+                u8::from(c.wrecked)
             )
         })
     }

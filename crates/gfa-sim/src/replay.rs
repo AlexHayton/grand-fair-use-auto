@@ -128,7 +128,8 @@ impl Runner {
                     walk,
                     ..
                 } => {
-                    self.held = Buttons::NONE
+                    // The fire key stays as it was, as under a `run`.
+                    self.held = Buttons(self.held.0 & Buttons::FIRE.0)
                         .with(Buttons::RIGHT, turn > 0)
                         .with(Buttons::LEFT, turn < 0)
                         .with(Buttons::UP, forward > 0)
@@ -163,6 +164,9 @@ impl Runner {
                     },
                     ("ped", &[dx, dy, angle]) => world.drop_ped(dx, dy, angle),
                     ("tab", &[down]) => self.tab = down != 0,
+                    ("weapon", &[w, rounds]) => world.give_weapon(w, rounds),
+                    ("hurt", &[points]) => world.hurt(points),
+                    ("shootped", &[range]) => world.shoot_ped(range),
                     _ => world.say(format!(
                         "script: line {}: `{name}` is not supported yet",
                         line.number
@@ -339,7 +343,7 @@ pub fn trace_line(world: &World) -> String {
         p.y as u32,
         p.layer,
         p.angle,
-        p.anim as u8,
+        p.anim.trace_code(),
         p.frame,
         p.frame_tick,
         u8::from(p.blocked_x),

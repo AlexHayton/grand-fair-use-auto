@@ -12,6 +12,9 @@ workspace = true
 
 [dependencies]
 gfa-formats.workspace = true
+crc32fast.workspace = true
+miniz_oxide.workspace = true
+rars.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 toml.workspace = true

@@ -319,6 +319,11 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
 
 **M6: Combat, police, services.** Ref: `gta_weapon.c`, `gta_pickup.c`, `gta_score.c` (heat thresholds such as LC 151/251/351/501), `gta_traffic.c:9681-10500` (cop dispatch, roadblocks), `gta_peds.c:1912-2066` (arrest, shooting), `gta_service.c`, `gta_marks.c`, plus the `gta_main.c` busted/wasted/siren code.
 - [ ] Five weapons, rockets and flames, fires and explosions; crates.
+  - Stage 1 (2026-11-21), the weapons: `gfa_sim::weapons`, AmiGTA1's `gta_weapon.c`. The fist (the standing punch, its blow on the third state, ten of thirteen landing), the pistol, the machine gun, the rocket launcher and the flamethrower; the shot pool of 40 with its muzzles, speeds, ranges and grace ticks; hits in the original's order (flat faces, then the player, people, cars, the block); bullet damage by body class; the panic a shot starts; explosions (kill, burn and write-off rings), the three fires a rocket leaves on a wall, the script's face explosion for M7, and cars blowing up in one, three or five blasts, which write off their neighbours: the chain. The player is a target too (bullets, his car's bodywork, blasts, burning) down to WASTED, which takes his guns and the heat.
+  - The score with it: `gfa_sim::score`, AmiGTA1's `gta_score.c` (awards by type, reason and streak; the heat and each city's thresholds; the crime counters), wired to the run-over, the carjack, the shunt, touching a police car, the hijacked train and every hit above.
+  - The walk oracle runs AmiGTA1's weapons and score with the fleet and the crowd, and compares every shot, explosion, fire, ped state, car's damage and the score on every tick: 6 new scripts (`punch`, `shoot_ped`, `rocket`, `rocket_wall`, `rocket_close`, `flame`) match, and so do all 71 earlier runs.
+  - Drawn in the app and in `gfa-tool` pictures (the shots, the splats, the fires and the explosion's four quarters; the punching and armed player).
+  - Next: the crates (stage 2), which also hold the power-ups.
 - [ ] Wanted levels, chases and rams, roadblocks, arrest; BUSTED and WASTED, lives, hospital.
 - [ ] Ambulance and fire engine. Spray and bomb shops.
 - [ ] Tyre marks, blood and oil for all cars. AmiGTA1 only marks the player's car.
@@ -337,6 +342,7 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
 - [ ] The counter-punch: what the victim's punch back does to the player (AmiGTA1 has only the 13-step counter whose last two are it). For M6.
 - [ ] Gang roles: the state machine of the original's gang AI types (`gta_peds.c:1111`: AmiGTA1 has read the police ones only). For M7.
 - [ ] Special ped groups: where Hare Krishnas and Elvises appear, in which cities, how often and how they walk. For M6.
+- [ ] The weapons where AmiGTA1 chose for itself: how long the original's bullet splat stays on the map; whether every car blowing up pays the player 100, whoever wrote it off; whether a held fire key fires again after WASTED; whether a drowning man can fire.
 - [ ] The pull-over: how far to the side the look reaches, how slowly the car moves over, whether it stops and for how long, whether the siren left on does it too. And the keys for the game's police and zoom toggles, which its README does not list.
 - [ ] Getting into a car, frame by frame against the original. The owner reports that ours looks as if he goes in through the wrong side of the door (2026-11-21). Check the door point, the walk-in path, the sprite frames and the door's opening delta.
 - Exit: each drives as measured; the numbers and the probe scripts that produced them are in the decision log.
@@ -412,7 +418,7 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
 **M12: Polish and release**
 - [ ] Settings: render scale, HD toggle, key rebinding, gamepad (gilrs).
 - [ ] macOS `.app` bundle.
-- [ ] Static web deploy with no data in it.
+- [ ] Static web deploy with no data in it. (Configured 2026-11-21: `tools/web/build.sh`, GitHub Pages workflow, `vercel.json`. Not yet deployed.)
 - [ ] Performance: 60 fps on M-series and in Safari.
 - [ ] Docs.
 
@@ -454,13 +460,13 @@ Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.m
 - [ ] The victim's ped counter-punch (`gta_peds.c:1675`; moved from M5 on 2026-11-21: needs the player's punch). What it does: **(verify)** in M6b.
 - [ ] **Special ped groups** that the bonuses need: Hare Krishna lines; Elvis impersonators **(verify which levels)** in M6b. Spawn rules come from the style and ped tables. (Moved from M5 on 2026-11-21: the bonuses are here.)
 - [ ] **Bombs**: the type-4 tanker bomb, whose wreck blows five times (`gta_main.c:4272`, not ported). Find the global that triggers it.
-- [ ] **Chain explosions**: a burning wreck sets off its neighbours (`gta_weapon.h:34`).
-- [ ] **Blast damage**: a car blowing up hurts the cars and people around it (`gta_weapons_wreck_car`); burnt-out wrecks look burnt (moved from M4).
+- [x] **Chain explosions**: a burning wreck sets off its neighbours (`gta_weapon.h:34`). 2026-11-21: AmiGTA1 already writes off every car in a blast's reach, whose own fuse then runs; ported with the weapons (`rocket.txt`).
+- [ ] **Blast damage**: a car blowing up hurts the cars and people around it (`gta_weapons_wreck_car`); burnt-out wrecks look burnt (moved from M4). 2026-11-21: the blast is done (people killed or set alight, cars written off, the player too); the burnt look remains.
 - [ ] Re-audit `gta_weapon.h:34`, since that list is partly stale, and finish whatever is still missing:
   - weapon crates;
   - friendly-fire groups;
   - armour absorbing hits (the pickup sets `player_armour`; confirm it is read);
-  - free-standing fires that rockets leave on walls.
+  - free-standing fires that rockets leave on walls. (Done 2026-11-21: `rocket_wall.txt`. Armour now stops a bullet a point; the pickup that sets it comes with the crates.)
 - [ ] **Power-ups that "nothing reads"** (`gta_main.c:10291`). Enumerate every pickup kind from the style's object table, then implement each one's effect and timer: speed-up, the multiplier, the kill-frenzy crate handed to the script, extra life, and the rest.
 - [ ] **In-game bonuses AmiGTA1 lacks** (`gta_score.h:17`: "GOURANGA!" not built).
   - GOURANGA, the Elvis bonus, cop-kill bonuses, and any others. **Build the list from the FXT bonus strings**, so nothing is invented.
@@ -514,6 +520,23 @@ Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.m
 ## Decision log
 
 Newest first. Each entry: date, decision, why.
+
+- **2026-11-21. The game is read from the archive it came in; the web app is a static bundle hosted on GitHub Pages or Vercel.** Asked by the owner: players select their `.rar` or `.zip` instead of unpacking it.
+  - The archive directory (RAR 5 from RARLAB's technical note, ZIP from PKWARE's APPNOTE) is our own code, behind an async read-at-offset trait, so the browser reads only the slices it needs from the chosen `File`. About 41 MB of the 215 MB Director's Cut archive, without loading the archive into memory. RAR 5's LZ comes from the `rars` crate's decoder (Apache-2.0, `default-features = false`: no writer, crypto, recovery or threads). Of the pure-Rust RAR crates on offer it was the only one with real use behind it, and we read its source before taking it. ZIP's deflate comes from `miniz_oxide`. Every member is checked against its CRC-32.
+  - Each member must unpack alone. Solid RAR, RAR 4, volume sets and passwords are refused with a message. The owner's archive is non-solid RAR 5; RAR 4 is a possible later addition (`rars` decodes it too).
+  - Desktop order: `--data`, `GFA_DATA`, `gfa.local.toml`, an archive beside the program (or its app bundle), the archive chosen last time, then a file dialog (`rfd`). The winit event loop is made before the dialog, because on macOS winit must own the application object.
+  - Web: a start screen telling the player to search for the game, then **Select game archive**; the unpacked level files are cached in IndexedDB as before. A content security policy limits the page to its own site.
+  - Hosting: the bundle is static, so the suggested multi-service Vercel layout (one service per native crate) does not apply. There is nothing to serve but files, and no service calls another. One build script (`tools/web/build.sh`, Trunk pinned by SHA-256) serves a GitHub Pages workflow and a plain static `vercel.json`.
+  - Touch screens get buttons along the bottom for the keys. They are held in the controls like keys, so they reach the simulation through the recorded input.
+
+- **2026-11-21. The weapons and the score are AmiGTA1's, measured against it; where it chose for itself, so do we for now.**
+  - Ported from `gta_weapon.c` and `gta_score.c`, whose rules AmiGTA1 read out of the original (its header notes: muzzle offsets, speeds, ranges, hit order, blast rings, bullet damage by class, award types and reasons, heat per crime, each city's thresholds). The walk oracle compares every shot, explosion, fire and score on every tick, and matches.
+  - A crate holds the original's rounds, 20/20/5/10. AmiGTA1 triples them because it has no crates; ours come in the next stage.
+  - Kept from AmiGTA1, **(verify)** in M6b: the bullet's splat shows for 8 ticks (the original leaves an object on the map); every car that blows up pays the player 100, whoever wrote it off.
+  - Ours: the fire key is read from each tick's buttons. AmiGTA1 latches it on the key's events and clears the latch on WASTED, so a key still held does nothing until pressed again; ours punches again at once. A drowning man cannot fire (AmiGTA1's test lets him). Both **(verify)**.
+  - The player is a target the weapons see where he was at the end of the last tick, which is AmiGTA1's order. So a driver who stays in his car until it blows up is inside its blast and dies, as in the original.
+  - Keypad `*` gives every gun 99 rounds. That is the original's key for it, which needs a name-entry cheat; until the cheats come (M8) it is always on. The original's keys keep their actions (the decision below).
+  - The traces now give the player's animation in AmiGTA1's numbers (vault 7, slide 8, punch 9), where they had our own order; no compared trace had shown a vault or a slide.
 
 - **2026-11-21. The counter-punch and special ped groups move to M6, gang roles to M7.** Agreed with the owner.
   - Each needs a system that comes later. The counter-punch needs the player's punch (M6). The special groups exist for the bonuses (M6). Gangs are made only by the mission script (M7).
@@ -666,6 +689,20 @@ Newest first. Each entry: date, decision, why.
 ## Progress log
 
 Newest first.
+
+- **2026-11-21. The game from its archive; hosting; touch buttons.**
+  - `gfa_assets::archive` reads RAR 5 and ZIP in place. The owner's `GTA1-Directors.rar` (RAR 5, 483 members): the directory reads in 42 ms; the 180 level files (41 MB) unpack in 0.2 s; all 471 files (300 MB) at 210 MB/s with every checksum matching (`gfa-tool archive --all`). The data test `the_archive_serves_the_folders_bytes` finds all 180 level files byte-identical to the unpacked folder's.
+  - Desktop: found beside the program, and remembered after a dialog (both run headless with `--screenshot`). Liberty City loads from the archive in 40 ms.
+  - Web, in Chrome: the archive selected, 180 files unpacked from `File` slices, the level running; on reload, straight from IndexedDB. As a landscape phone with touch, the buttons show and holding Forward walks the player.
+  - `tools/web/build.sh` builds the bundle (7.2 MB wasm) and fails if anything but the page, script and wasm lands in it. `.github/workflows/pages.yml` and `vercel.json` use it; neither has been run yet.
+  - Unit tests build ZIP and RAR 5 archives in memory: damage, refusals, the `__MACOSX` shadow, the game's root at any depth. `.gitignore` now keeps `.rar`, `.zip` and `.7z` out.
+- **2026-11-21. The debug menu.** The overlay (backtick) is now a menu: a frame counter with the frame time, rate and simulation tick; the simulation's counts (cars, people, shots, fires, explosions) and the renderer's; the player's state with a **Top up ammo** button; the camera and view mode in a fold; the block inspector. It starts hidden; backtick shows it. The button is a press of keypad `*` queued in the controls until a tick runs with it, so it goes into the recording like any key. Tests: `a_menu_press_is_held_until_a_tick_has_run`, `the_top_up_gives_every_gun_99_rounds_once_a_press`.
+
+- **2026-11-21. M6 stage 1: the weapons, explosions and the score.**
+  - `gfa_sim::weapons` and `gfa_sim::score` (AmiGTA1's `gta_weapon.c`, `gta_score.c`), the ped hit functions (shot, punched, panicked, set alight), shot-stopping flat faces in the map, and the player's guns, punch, armour and burning in the world. Scripts orders `weapon`, `hurt` and `shootped`. Keys: Ctrl fires, Z and X change weapon, keypad `*` gives every gun (decision log).
+  - The walk oracle now runs AmiGTA1's weapons and score in the street (`fleet.h`), and the harness restates the fire key and what hits the player. Six new scripts match tick for tick: the punch, the pistol and machine gun, rockets on cars and the chain they set off, a rocket on a wall and its fires, a rocket fired too close, and the flamethrower. The trace lines carry each car's damage, each ped's shot, fall and burn, every shot, explosion and fire, and the score.
+  - Every tier green: unit, data (the gate unchanged), oracle (77 runs and the traffic gate), native against wasm, clippy, fmt, wasm-check.
+  - Next: the crates and power-ups, then the police.
 
 - **2026-11-21. M5 gap items: the siren, the horn and the pull-over; the junctions measured; the original's keys.**
   - The special key (TAB): the siren in a police car, ambulance or fire engine, with its lights; the horn in any other car; a shout on foot. Scripts `siren.txt` and `horn.txt` (both pass on Liberty City), synthetic tests for each state.

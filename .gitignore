@@ -44,6 +44,11 @@ gfa.local.toml
 *.[pP][aA][kK]
 *.[gG][fF][vV]
 *.[iI][sS][oO]
+# The archives the game comes in (the desktop program looks for one beside
+# itself, so one may well be dropped into a checkout).
+*.[rR][aA][rR]
+*.[zZ][iI][pP]
+*.7[zZ]
 *.[mM][pP]4
 *.[eE][xX][eE]
 [eE][nN][gG][uU][kK].[tT][xX][tT]
@@ -55,3 +60,6 @@ tools/hdtex/work/
 
 # AmiGTA1 oracle build (built from the sibling checkout, never vendored)
 tools/oracle/build/
+
+# Vercel's local link to a project
+.vercel/

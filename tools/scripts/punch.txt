@@ -1,0 +1,24 @@
+# Fists: a man put down just ahead of the player is punched over.
+#
+# He starts facing south on the pavement at (64,60). With no gun the fire key
+# throws a punch: six states of four ticks, the blow landing as the third
+# ends, in a 3 px box 4 px ahead. Of every thirteen blows the original's
+# counter lets ten land; the other three are the victim's (the
+# counter-punch, which M6b measures). Held, the key punches again as each
+# punch ends. Then he runs with it held, punching on the run.
+#
+# oracle: walk
+# section: 1
+# expect: player: punch - ped
+# reject: no walkable layer
+start 64 60
+
+0 0 0 20
+ped 0 6 0
+fire 60
+0 0 0 40
+wait 10
+ped 0 6 0
+fire 1
+0 1 0 40
+wait 20

@@ -36,6 +36,7 @@
 //! The police on foot, the script's own people and gunmen are AmiGTA1's
 //! too; their brain is here, and what sets them going comes with M6 and M7.
 
+use gfa_fixed::fx::{BLOCK_SHIFT, FP};
 use gfa_fixed::trig::{cos, dir16, sin};
 use gfa_formats::style::CarInfo;
 
@@ -103,6 +104,15 @@ const PULL_STATES: i32 = 6;
 const PULL_TICKS: i32 = 4;
 const PULL_DOWN_TICKS: i32 = 21 * PULL_TICKS;
 const CORPSE_TICKS: i32 = 1500;
+/// A ped set alight burns to death in this many ticks.
+pub const BURN_TICKS: i32 = 100;
+/// A frightened ped runs at least this long before the pavement may calm
+/// him.
+const PANIC_TICKS: i32 = 150;
+/// Of the original's 13-step punch counter, the first 10 land; the last
+/// three are the victim's (the counter-punch, M6b).
+const PUNCH_WHEEL: i32 = 13;
+const PUNCH_LANDS: i32 = 10;
 const RETIRE_TICKS: i32 = 45;
 
 const APART_PX: i64 = 5;
@@ -288,6 +298,8 @@ pub struct PedStats {
     pub crossed: u64,
     pub drowned: u64,
     pub cops_killed: u64,
+    pub shot: u64,
+    pub punched: u64,
 }
 
 /// The pool, and what every ped shares.
@@ -763,6 +775,179 @@ impl Peds {
         p.tx = 0;
         p.ty = 0;
         self.stats.killed += 1;
+    }
+
+    /// The first ped a shot's box meets: the box runs `len_px` along
+    /// `heading` from `(x, y)` and `hw_px` either side, each grown by a
+    /// two-pixel body. Nearest along the line wins; `skip` is the shooter.
+    /// Somebody already down, shot or being pulled out is not hit again.
+    #[allow(clippy::too_many_arguments)]
+    pub fn hit_segment(
+        &self,
+        x: i64,
+        y: i64,
+        heading: i32,
+        len_px: i64,
+        hw_px: i64,
+        layer: i32,
+        skip: Option<usize>,
+    ) -> Option<usize> {
+        let (fx, fy) = (i64::from(sin(heading)), -i64::from(cos(heading)));
+        let (rx, ry) = (i64::from(cos(heading)), i64::from(sin(heading)));
+        let mut best: Option<(usize, i64)> = None;
+        for (i, p) in self.p.iter().enumerate() {
+            if !p.alive || p.corpse || p.pull >= 0 || p.shot != 0 || p.layer != layer {
+                continue;
+            }
+            if skip == Some(i) {
+                continue;
+            }
+            let (dx, dy) = ((p.x - x) >> FP, (p.y - y) >> FP);
+            if dx.abs() > 64 || dy.abs() > 64 {
+                continue;
+            }
+            let along = (dx * fx + dy * fy) >> 14;
+            let side = ((dx * rx + dy * ry) >> 14).abs();
+            if along < -2 || along > len_px + 2 || side > hw_px + 2 {
+                continue;
+            }
+            if best.is_none_or(|(_, b)| along < b) {
+                best = Some((i, along));
+            }
+        }
+        best.map(|(i, _)| i)
+    }
+
+    /// Ped `i` takes a bullet travelling along `heading`. Within a quarter
+    /// turn of it he was shot in the back: he keeps the bullet's heading
+    /// and falls forward. Otherwise he turns to face the shooter and falls
+    /// back. Either way the body is carried along the bullet's line.
+    pub fn shoot(&mut self, i: usize, heading: i32) {
+        let Some(p) = self.p.get_mut(i) else {
+            return;
+        };
+        if !p.alive || p.corpse || p.shot != 0 {
+            return;
+        }
+        let d = (p.angle - heading) & 255;
+        if !(64..=192).contains(&d) {
+            p.shot = 2;
+            p.angle = heading & 255;
+        } else {
+            p.shot = 1;
+            p.angle = (heading + 128) & 255;
+        }
+        p.shot_dir = heading & 255;
+        p.shot_step = 0;
+        p.shot_tick = 0;
+        p.speed = 0;
+        p.down = 0;
+        p.fall = 0;
+        p.tx = 0;
+        p.ty = 0;
+        self.stats.shot += 1;
+    }
+
+    /// A punch from `(x, y)` along `angle`: the original's 6×6-unit box
+    /// 8 units ahead (3 px either way, 4 px ahead). The first ped standing
+    /// in it is knocked down facing the puncher. Returns `Ok(i)` for him,
+    /// `Err(true)` when the punch met him but missed (the counter-punch's
+    /// turn on the original's wheel), `Err(false)` when it met nobody.
+    pub fn punch(&mut self, x: i64, y: i64, angle: i32, layer: i32) -> Result<usize, bool> {
+        let (ax, ay) = ahead(x, y, angle, 4);
+        let hit = self.p.iter().position(|p| {
+            p.alive
+                && !p.corpse
+                && p.pull < 0
+                && p.shot == 0
+                && p.fall == 0
+                && p.down == 0
+                && p.layer == layer
+                && ((p.x - ax) >> FP).abs() <= 3
+                && ((p.y - ay) >> FP).abs() <= 3
+        });
+        let i = hit.ok_or(false)?;
+        self.punch_wheel = (self.punch_wheel + 1) % PUNCH_WHEEL;
+        if self.punch_wheel >= PUNCH_LANDS {
+            return Err(true);
+        }
+        let p = &mut self.p[i];
+        p.angle = (angle + 128) & 255;
+        p.fall = FALL_TICKS;
+        p.speed = 0;
+        p.tx = 0;
+        p.ty = 0;
+        p.mode = mode::IDLE;
+        p.panic = 0;
+        self.stats.punched += 1;
+        Ok(i)
+    }
+
+    /// A shot at `(x, y)` frightens everybody on their feet in its two-block
+    /// cell and the eight around it (AmiGTA1 reads the original's cell
+    /// list): they run straight away from it, at full speed, for a while.
+    pub fn panic(&mut self, x: i64, y: i64, layer: i32) {
+        let cell = |v: i64| v >> (FP + BLOCK_SHIFT + 1);
+        for i in 0..self.p.len() {
+            let p = &self.p[i];
+            if !p.alive
+                || p.corpse
+                || p.pull >= 0
+                || p.shot != 0
+                || p.fall != 0
+                || p.down != 0
+                || p.layer != layer
+                || p.speed >= 4
+            {
+                continue;
+            }
+            if (cell(p.x) - cell(x)).abs() > 1 || (cell(p.y) - cell(y)).abs() > 1 {
+                continue;
+            }
+            let still = (p.x - x) >> FP == 0 && (p.y - y) >> FP == 0;
+            let angle = if still {
+                (self.rand() & 255) as i32
+            } else {
+                angle_to(x, y, p.x, p.y)
+            };
+            let p = &mut self.p[i];
+            p.mode = mode::FLEE;
+            p.gx = x;
+            p.gy = y;
+            p.flee_aim = 0;
+            p.tx = 0;
+            p.ty = 0;
+            p.speed = 4;
+            p.panic = PANIC_TICKS;
+            p.angle = angle;
+        }
+    }
+
+    /// Ped `i` is set alight by a fire at `(fx, fy)`: he runs from it and
+    /// burns to death in [`BURN_TICKS`].
+    pub fn burn(&mut self, i: usize, fx: i64, fy: i64) {
+        let Some(p) = self.p.get_mut(i) else {
+            return;
+        };
+        if !p.alive || p.corpse || p.shot != 0 || p.pull >= 0 || p.burn > 0 {
+            return;
+        }
+        p.burn = BURN_TICKS;
+        p.burn_frame = 0;
+        p.burn_tick = 0;
+        p.mode = mode::FLEE;
+        p.gx = fx;
+        p.gy = fy;
+        p.flee_aim = 0;
+        p.panic = PANIC_TICKS;
+        p.tx = 0;
+        p.ty = 0;
+        p.speed = 4;
+        p.down = 0;
+        p.fall = 0;
+        if (p.x >> FP) != (fx >> FP) || (p.y >> FP) != (fy >> FP) {
+            p.angle = angle_to(fx, fy, p.x, p.y);
+        }
     }
 
     /// The player's car against the crowd, centred at `(px, py)` facing
@@ -1770,7 +1955,7 @@ impl Peds {
             .filter(|(_, p)| p.alive)
             .map(|(i, p)| {
                 format!(
-                    "p {tick} {i} {} {} {} {} {} {} {} {} {} {} {}",
+                    "p {tick} {i} {} {} {} {} {} {} {} {} {} {} {} {} {} {}",
                     p.x,
                     p.y,
                     p.layer,
@@ -1781,7 +1966,10 @@ impl Peds {
                     p.frame,
                     i32::from(p.corpse),
                     p.down,
-                    p.pull
+                    p.pull,
+                    p.shot,
+                    p.fall,
+                    p.burn
                 )
             })
             .collect()

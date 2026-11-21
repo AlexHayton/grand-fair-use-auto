@@ -2,3 +2,7 @@
 # `data` is the folder that contains GTADATA/ (and optionally MUSIC/).
 # The GFA_DATA environment variable and the --data flag override this.
 data = "/path/to/GTA"
+
+# Optional, for the data tests only: the archive the game came in (.rar or
+# .zip), which they check against the folder above. GFA_ARCHIVE overrides it.
+# archive = "/path/to/GTA1-Directors.rar"

@@ -32,7 +32,8 @@ pub use gfa_assets::DataPath;
 
 use controls::Controls;
 use game::Game;
-use overlay::{Overlay, OverlayInfo};
+use gfa_sim::input::Buttons;
+use overlay::{Overlay, OverlayInfo, SimInfo};
 use scene::Scene;
 
 pub const TITLE: &str = "Grand Fair Use Auto";
@@ -40,8 +41,8 @@ pub const TITLE: &str = "Grand Fair Use Auto";
 /// Start-up options.
 #[derive(Debug, Clone)]
 pub struct AppConfig {
-    /// The user's game data, if found. On the web it arrives later from the
-    /// folder picker.
+    /// The user's game data, if found: a folder or an archive. On the web
+    /// it arrives later, from the archive or folder the player selects.
     pub data: Option<DataPath>,
     /// Which game, and which mission-file section, to load.
     pub game: Dataset,
@@ -71,9 +72,12 @@ impl Default for AppConfig {
 enum UserEvent {
     /// The GPU finished initialising (async on the web).
     GpuReady(Box<Result<(Gpu, WindowSurface), gfa_render::GpuError>>),
-    /// The web build's folder picker delivered the game files.
+    /// The web build's archive or folder picker delivered the game files.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     DataReady(Box<dyn AssetSource>),
+    /// An on-screen button went down or up (the web page's touch buttons).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    Touch(gfa_sim::input::Buttons, bool),
 }
 
 struct App {
@@ -218,10 +222,16 @@ impl App {
         } else {
             elapsed.as_micros() as u64
         };
+        let input = self.controls.input();
         let frame = self.game.as_mut().map(|g| {
-            g.advance(sim_us, self.controls.input());
-            (g.frame(), g.floor_z())
+            let ticks = g.advance(sim_us, input);
+            (g.frame(), g.floor_z(), ticks)
         });
+        // A debug menu press is let go once a tick has run with it.
+        if frame.is_some_and(|f| f.2 > 0) {
+            self.controls.ticked();
+        }
+        let frame = frame.map(|(f, floor, _)| (f, floor));
         let dt = elapsed.as_secs_f32().min(0.1);
         // The zoom cap: no higher than shows the simulation's view, at the
         // shape the scene is drawn (pillarboxed past 21:9).
@@ -261,10 +271,24 @@ impl App {
             (Some(s), Some(g)) => s.game_sprites(g),
             _ => Vec::new(),
         };
-        let player_line = self
-            .game
-            .as_ref()
-            .map(|g| format!("tick {}  {}", g.world.tick, g.world.player_summary()));
+        let sim = self.game.as_ref().map(|g| {
+            let w = &g.world;
+            SimInfo {
+                tick: w.tick,
+                cars: w.traffic.live().count(),
+                peds: w.peds.count(),
+                shots: w.weapons.alive(),
+                fires: w.weapons.fires.iter().filter(|f| f.ticks > 0).count(),
+                blasts: w.weapons.blasts.iter().filter(|b| b.frame > 0).count(),
+                player: w.player_summary(),
+                status: w.status_summary(),
+            }
+        });
+        let top_up_waiting = self.controls.tapped(Buttons::ALL_WEAPONS);
+        let paused = self.controls.paused;
+        let frames = self.stats.total;
+        let frame_ms = elapsed.as_secs_f32() * 1000.0;
+        let mut actions = overlay::OverlayActions::default();
         let fps = self.stats.fps;
         let status = self.status.clone();
         let target = self.controls.target;
@@ -278,20 +302,27 @@ impl App {
             if let Some(o) = overlay.as_mut() {
                 let info = OverlayInfo {
                     fps,
+                    frames,
+                    frame_ms,
+                    paused,
+                    sim,
+                    top_up_waiting,
                     level: scene.as_ref().map(|s| s.level.files.name.as_str()),
                     status: &status,
                     camera: camera.eye.to_array(),
                     target: target.to_array(),
                     free_look,
                     flying,
-                    player: player_line.as_deref(),
                     draw: scene.as_ref().map(|s| s.city.last_draw),
                     mesh: scene.as_ref().map(|s| s.city.mesh_stats),
                     inspect,
                 };
-                o.draw(&window, gpu, encoder, view, size, &info);
+                actions = o.draw(&window, gpu, encoder, view, size, &info);
             }
         });
+        if actions.top_up {
+            self.controls.tap(Buttons::ALL_WEAPONS);
+        }
         match outcome {
             FrameOutcome::Presented => self.stats.frame(),
             FrameOutcome::Skipped => {}
@@ -382,14 +413,21 @@ impl ApplicationHandler<UserEvent> for App {
             match self.config.data.clone() {
                 Some(d) => {
                     log::info!("game data: {} (from {})", d.root.display(), d.origin);
-                    #[cfg(not(target_arch = "wasm32"))]
-                    self.load_level(&gfa_assets::FsSource::new(&d.root));
+                    match d.open() {
+                        Ok(src) => self.load_level(src.as_ref()),
+                        Err(e) => {
+                            log::error!("{e}");
+                            self.status = e.to_string();
+                        }
+                    }
                 }
                 None => {
                     self.status = if cfg!(target_arch = "wasm32") {
-                        "choose your game folder to begin".into()
+                        "select your game archive to begin".into()
                     } else {
-                        "no game data: pass --data, set GFA_DATA or create gfa.local.toml".into()
+                        "no game data: put the game's .rar or .zip beside the program, \
+                         or pass --data"
+                            .into()
                     };
                     log::warn!("{}", self.status);
                 }
@@ -420,6 +458,7 @@ impl ApplicationHandler<UserEvent> for App {
                 }
             },
             UserEvent::DataReady(src) => self.load_level(src.as_ref()),
+            UserEvent::Touch(b, down) => self.controls.touch(b, down),
         }
     }
 
@@ -519,12 +558,31 @@ impl FrameStats {
     }
 }
 
+/// The native event loop. Make it first: on macOS it must own the
+/// application object before anything else touches it, the file dialog
+/// that asks for the game included.
+#[cfg(not(target_arch = "wasm32"))]
+pub struct NativeLoop(EventLoop<UserEvent>);
+
+#[cfg(not(target_arch = "wasm32"))]
+impl NativeLoop {
+    pub fn new() -> Result<Self, winit::error::EventLoopError> {
+        EventLoop::<UserEvent>::with_user_event()
+            .build()
+            .map(NativeLoop)
+    }
+
+    /// Run the game in a native window until it closes.
+    pub fn run(self, config: AppConfig) -> Result<(), winit::error::EventLoopError> {
+        let mut app = App::new(config, self.0.create_proxy());
+        self.0.run_app(&mut app)
+    }
+}
+
 /// Run the game in a native window until it closes.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn run_native(config: AppConfig) -> Result<(), winit::error::EventLoopError> {
-    let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
-    let mut app = App::new(config, event_loop.create_proxy());
-    event_loop.run_app(&mut app)
+    NativeLoop::new()?.run(config)
 }
 
 /// Start the game in the page's `<canvas id="{canvas_id}">`. Returns at once;
@@ -543,6 +601,10 @@ pub fn run_web(canvas_id: &str) {
     let proxy = event_loop.create_proxy();
     web::set_data_sink(move |src| {
         let _ = proxy.send_event(UserEvent::DataReady(src));
+    });
+    let proxy = event_loop.create_proxy();
+    web::set_touch_sink(move |b, down| {
+        let _ = proxy.send_event(UserEvent::Touch(b, down));
     });
     let app = App::new(web::config_from_url(), event_loop.create_proxy());
     event_loop.spawn_app(app);

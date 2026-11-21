@@ -6,12 +6,15 @@
 //!   so `GTADATA/NYC.CMP` finds `gtadata/nyc.cmp` on any filesystem.
 //! - [`dataset`] detects which games are present: GTA, London 1969, London 1961.
 //! - [`level`] finds and loads a level's map and style.
+//! - [`archive`] reads the game from the `.rar` or `.zip` it came in.
 
+pub mod archive;
 pub mod datapath;
 pub mod dataset;
 pub mod level;
 pub mod source;
 
+pub use archive::{Archive, ArchiveError, ArchiveSource, GameIndex, ReadAt};
 pub use datapath::{DataPath, DataPathError, DataPathOrigin};
 pub use dataset::{Dataset, Datasets};
-pub use source::{AssetError, AssetSource, FsSource, MemSource};
+pub use source::{AssetError, AssetSource, FsSource, MemSource, is_play_file, split_at_gtadata};

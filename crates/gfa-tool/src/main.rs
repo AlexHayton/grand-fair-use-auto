@@ -13,12 +13,13 @@ use std::str::FromStr;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use gfa_assets::{AssetSource, DataPath, Dataset, Datasets, FsSource};
+use gfa_assets::{AssetSource, DataPath, Dataset, Datasets};
 
 #[derive(Parser)]
 #[command(version, about)]
 struct Cli {
-    /// Folder containing GTADATA/. Overrides GFA_DATA and gfa.local.toml.
+    /// Folder containing GTADATA/, or the game's .rar or .zip. Overrides
+    /// GFA_DATA and gfa.local.toml.
     #[arg(long, global = true)]
     data: Option<PathBuf>,
     #[command(subcommand)]
@@ -27,6 +28,19 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Check an archive of the game: what is in it, where the game is, and
+    /// whether the files a level needs (or with --all, every member) unpack
+    /// and match their checksums.
+    Archive {
+        /// The .rar or .zip.
+        path: PathBuf,
+        /// Unpack every member, not only the level files.
+        #[arg(long)]
+        all: bool,
+        /// List every member.
+        #[arg(long)]
+        list: bool,
+    },
     /// Show where the data is, which games it holds, and its files.
     Info {
         /// Also list every file under GTADATA/.
@@ -186,18 +200,23 @@ fn parse_xy_f(s: &str) -> Result<(f32, f32), String> {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    if let Command::Archive { path, all, list } = &cli.command {
+        return archive(path, *all, *list);
+    }
     let data = DataPath::resolve(cli.data.as_deref()).context("finding the game data")?;
-    let src = FsSource::new(&data.root);
+    let owned = data.open()?;
+    let src: &dyn AssetSource = owned.as_ref();
     match cli.command {
-        Command::Info { files } => info(&data, &src, files),
-        Command::Map { path, at } => map(&src, &path, at),
-        Command::Style { path, cars } => style(&src, &path, cars),
+        Command::Archive { .. } => unreachable!("handled above"),
+        Command::Info { files } => info(&data, src, files),
+        Command::Map { path, at } => map(src, &path, at),
+        Command::Style { path, cars } => style(src, &path, cars),
         Command::Mission {
             path,
             section,
             dump,
-        } => mission(&src, &path, section, dump),
-        Command::Text { path, key, grep } => text(&src, &path, key.as_deref(), grep.as_deref()),
+        } => mission(src, &path, section, dump),
+        Command::Text { path, key, grep } => text(src, &path, key.as_deref(), grep.as_deref()),
         Command::Render {
             path,
             at,
@@ -218,7 +237,7 @@ fn main() -> Result<()> {
                 Some(d) => anyhow::bail!("unknown debug view {d:?} (faces, flat)"),
             };
             let size = (size.0 as u32, size.1 as u32);
-            let mut scene = render::Scene::load(&src, &path, style.as_deref(), size)?;
+            let mut scene = render::Scene::load(src, &path, style.as_deref(), size)?;
             println!("{path} with {}: {}", scene.style_path, scene.mesh_summary());
             println!("{}", scene.sprite_summary);
             let view = render::View {
@@ -263,7 +282,7 @@ fn main() -> Result<()> {
             out,
             record,
         } => run::run(
-            &src,
+            src,
             run::RunArgs {
                 script,
                 game,
@@ -280,7 +299,7 @@ fn main() -> Result<()> {
             },
         ),
         Command::Holecheck { path, height, save } => {
-            let mut scene = render::Scene::load(&src, &path, None, (640, 400))?;
+            let mut scene = render::Scene::load(src, &path, None, (640, 400))?;
             scene.show_sprites = false;
             let mut total = 0;
             for &at in &render::HOLECHECK_POSITIONS {
@@ -332,7 +351,7 @@ fn main() -> Result<()> {
             if let Some((stem, ext)) = file.rsplit_once('.')
                 && (ext == "raw" || ext == "rat")
             {
-                let img = load_screen(&src, &path, stem, ext)?;
+                let img = load_screen(src, &path, stem, ext)?;
                 let out = out.unwrap_or_else(|| PathBuf::from("export/screens"));
                 let name = format!("{stem}_{ext}");
                 export::screen(&img, &out, &name)?;
@@ -344,7 +363,7 @@ fn main() -> Result<()> {
                 );
                 return Ok(());
             }
-            let s = load_style(&src, &path)?;
+            let s = load_style(src, &path)?;
             let out = out.unwrap_or_else(|| PathBuf::from("export").join(file.replace('.', "_")));
             export::style(&s, &out)?;
             println!(
@@ -367,7 +386,7 @@ fn tally<'a>(names: impl Iterator<Item = &'a str>) -> Vec<(&'a str, usize)> {
     v
 }
 
-fn mission(src: &FsSource, path: &str, section: Option<u32>, dump: bool) -> Result<()> {
+fn mission(src: &dyn AssetSource, path: &str, section: Option<u32>, dump: bool) -> Result<()> {
     use gfa_formats::mission;
     let sections = mission::parse(&src.read(path)?).with_context(|| format!("parsing {path}"))?;
     let Some(id) = section else {
@@ -417,7 +436,7 @@ fn mission(src: &FsSource, path: &str, section: Option<u32>, dump: bool) -> Resu
     Ok(())
 }
 
-fn text(src: &FsSource, path: &str, key: Option<&str>, grep: Option<&str>) -> Result<()> {
+fn text(src: &dyn AssetSource, path: &str, key: Option<&str>, grep: Option<&str>) -> Result<()> {
     use gfa_formats::fxt::{Fxt, cp1252_to_string};
     let f = Fxt::parse(&src.read(path)?).with_context(|| format!("parsing {path}"))?;
     let grep = grep.map(str::to_lowercase);
@@ -439,7 +458,7 @@ fn text(src: &FsSource, path: &str, key: Option<&str>, grep: Option<&str>) -> Re
 /// A `.RAW` as it is, or a `.RAT` through its palette: the same-named `.ACT`
 /// for a briefing still, `F_PAL.RAW` beside it for the front end.
 fn load_screen(
-    src: &FsSource,
+    src: &dyn AssetSource,
     path: &str,
     stem: &str,
     ext: &str,
@@ -465,11 +484,11 @@ fn load_screen(
     })
 }
 
-fn load_style(src: &FsSource, path: &str) -> Result<gfa_formats::style::Style> {
+fn load_style(src: &dyn AssetSource, path: &str) -> Result<gfa_formats::style::Style> {
     gfa_formats::style::Style::parse(&src.read(path)?).with_context(|| format!("parsing {path}"))
 }
 
-fn style(src: &FsSource, path: &str, cars: bool) -> Result<()> {
+fn style(src: &dyn AssetSource, path: &str, cars: bool) -> Result<()> {
     use gfa_formats::style::{Colour, SpriteCategory};
     let s = load_style(src, path)?;
     println!("{path}: {:?}", s.kind);
@@ -541,7 +560,7 @@ fn style(src: &FsSource, path: &str, cars: bool) -> Result<()> {
     Ok(())
 }
 
-fn map(src: &FsSource, path: &str, at: Option<(usize, usize)>) -> Result<()> {
+fn map(src: &dyn AssetSource, path: &str, at: Option<(usize, usize)>) -> Result<()> {
     use gfa_formats::cmp::{Cmp, Face};
     let m = Cmp::parse(&src.read(path)?).with_context(|| format!("parsing {path}"))?;
     if let Some((x, y)) = at {
@@ -598,7 +617,84 @@ fn map(src: &FsSource, path: &str, at: Option<(usize, usize)>) -> Result<()> {
     Ok(())
 }
 
-fn info(data: &DataPath, src: &FsSource, files: bool) -> Result<()> {
+/// `gfa-tool archive`.
+fn archive(path: &std::path::Path, all: bool, list: bool) -> Result<()> {
+    use std::time::Instant;
+    let started = Instant::now();
+    let src = gfa_assets::ArchiveSource::open(path)
+        .with_context(|| format!("opening {}", path.display()))?;
+    let a = src.archive();
+    let game = src.game();
+    println!(
+        "{}: {}, {} members, directory read in {} ms",
+        path.display(),
+        a.format,
+        a.members.len(),
+        started.elapsed().as_millis()
+    );
+    println!(
+        "game:     in {:?}, {} files",
+        game.root,
+        game.files().count()
+    );
+    let ds = Datasets::detect(&src);
+    for d in &ds.present {
+        let music = if ds.music.contains(d) {
+            "music"
+        } else {
+            "no music"
+        };
+        println!("          {d} ({}, {music})", d.mission_ini());
+    }
+    if list {
+        for m in &a.members {
+            let kind = if m.is_dir { "dir" } else { "" };
+            println!(
+                "  {:>10} {:>10} {kind:3} {}{}",
+                m.size,
+                m.packed,
+                m.name,
+                m.refusal().map(|r| format!("  ({r})")).unwrap_or_default()
+            );
+        }
+    }
+    let wanted: Vec<usize> = if all {
+        (0..a.members.len())
+            .filter(|&i| !a.members[i].is_dir)
+            .collect()
+    } else {
+        game.files()
+            .filter(|(p, _)| gfa_assets::is_play_file(p))
+            .map(|(_, i)| i)
+            .collect()
+    };
+    let started = Instant::now();
+    let (mut bytes, mut failed) = (0u64, 0usize);
+    for &i in &wanted {
+        match src.unpack(i) {
+            Ok(b) => bytes += b.len() as u64,
+            Err(e) => {
+                failed += 1;
+                println!("  FAILED {e}");
+            }
+        }
+    }
+    let secs = started.elapsed().as_secs_f64();
+    println!(
+        "unpacked: {} of {} {} ({:.1} MB) in {:.2} s, {:.0} MB/s, checksums {}",
+        wanted.len() - failed,
+        wanted.len(),
+        if all { "members" } else { "level files" },
+        bytes as f64 / 1e6,
+        secs,
+        bytes as f64 / 1e6 / secs.max(1e-9),
+        if failed == 0 { "match" } else { "FAILED" }
+    );
+    anyhow::ensure!(failed == 0, "{failed} members did not unpack");
+    Ok(())
+}
+
+fn info(data: &DataPath, src: &dyn AssetSource, files: bool) -> Result<()> {
     println!("data:     {} (from {})", data.root.display(), data.origin);
     let ds = Datasets::detect(src);
     for d in &ds.present {
@@ -615,7 +711,7 @@ fn info(data: &DataPath, src: &FsSource, files: bool) -> Result<()> {
     Ok(())
 }
 
-fn list(src: &FsSource, dir: &str, depth: usize) -> Result<()> {
+fn list(src: &dyn AssetSource, dir: &str, depth: usize) -> Result<()> {
     for e in src.list(dir)? {
         let indent = "  ".repeat(depth + 1);
         if e.is_dir {

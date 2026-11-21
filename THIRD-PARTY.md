@@ -73,6 +73,22 @@ separate checkout, linked with our harness (`walktrace.c`), for differential
 testing. No AmiGTA1 source is vendored. The Q14 cosine and arctangent tables
 in `gfa-fixed` are generated from their formulas, which reproduce AmiGTA1's.
 
+## Archive and dialog crates
+
+Reading the game from the archive it came in uses these crates as ordinary
+dependencies (nothing of them is copied into this repository):
+
+- [`rars`](https://github.com/bitplane/rars) (Apache-2.0): RAR 5's LZ
+  decoder. Only the decoder is used; the archive directory is read by our own
+  code (`crates/gfa-assets/src/archive/`). Its licence ships in the crate as
+  `COPYING`; binaries that include it carry that licence with them.
+- [`miniz_oxide`](https://github.com/Frommi/miniz_oxide) (MIT, Zlib or
+  Apache-2.0): ZIP's deflate.
+- [`crc32fast`](https://github.com/srijs/rust-crc32fast) (MIT or Apache-2.0):
+  the checksums.
+- [`rfd`](https://github.com/PolyMeilex/rfd) (MIT): the desktop's file
+  dialog.
+
 ## Real-ESRGAN model weights
 
 The optional HD pipeline (`tools/hdtex/`) downloads Real-ESRGAN weights

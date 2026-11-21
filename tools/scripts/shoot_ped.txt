@@ -1,0 +1,27 @@
+# The pistol and the machine gun on foot.
+#
+# On the pavement at (64,60), facing south, a man is put down 30 px ahead
+# and the pistol fires: a round every ten ticks, each moving 7.5 px a tick
+# from a pixel behind the player's centre, tested against the people first.
+# The first round takes him; the shots panic everybody within a couple of
+# blocks. Then the machine gun, a round a tick, turning slowly through a
+# half circle, and running with it.
+#
+# oracle: walk
+# section: 1
+# expect: weapons: bullet 0 hit ped
+# expect: player: out of ammo - weapon 0
+# reject: no walkable layer
+start 64 60
+
+0 0 0 30
+ped 0 30 0
+weapon 1 3
+fire 40
+0 0 0 20
+wait 10
+weapon 2 6
+fire 1
+1 0 0 26
+0 1 0 30
+wait 40

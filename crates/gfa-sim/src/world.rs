@@ -10,16 +10,20 @@ use crate::input::{Buttons, TickInput};
 use crate::map::{SimMap, ground};
 use crate::peds::{self, Peds, TickCtx};
 use crate::player::{Anim, Player, RUN_SPEED, Stick};
+use crate::score::{self, Score, crime};
 use crate::traffic::{self, Traffic};
 use crate::trains::{Carriage, TrainEvent, Trains};
 use crate::vehicle::{CLASS_BIKE, Pedals, Veh};
 use crate::view::{SimCamera, SimView};
+use crate::weapons::{self, Arms, Street, Target, Trigger, Weapons};
 use gfa_fixed::fx::{BLOCK_SHIFT, FP, block_centre};
 use gfa_fixed::trig::{cos, sin};
 use gfa_formats::style::CarInfo;
 
 /// Health at the start and after a respawn.
 pub const FULL_HEALTH: i32 = 100;
+/// Ticks he burns once set alight, a point of health each.
+pub const BURN_TICKS: i32 = 100;
 
 /// Where the player starts: a block, and optionally a heading.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -193,6 +197,15 @@ pub struct World {
     pub peds: Peds,
     /// AmiGTA1's `player_health`: 100 full, wasted at 0.
     pub health: i32,
+    /// Each point stops one bullet.
+    pub armour: i32,
+    /// Ticks he has left alight: a point of health each.
+    pub burning: i32,
+    /// His guns and the fire key.
+    pub arms: Arms,
+    /// Everything in flight, every explosion and fire.
+    pub weapons: Weapons,
+    pub score: Score,
     /// Where the level put him, for the stopgap respawn.
     start: Start,
     /// Last tick's buttons, to find presses.
@@ -231,6 +244,7 @@ impl World {
         // The traffic starts parked around the level start, as in AmiGTA1.
         let cap = traffic.fleet_cap;
         traffic.park(&map, &cars, start.bx, start.by, 8, cap);
+        let score = Score::new(map.cmp().style_number);
         let mut world = World {
             tick: 0,
             map,
@@ -244,6 +258,11 @@ impl World {
             traffic,
             peds: Peds::new(peds::SEED, Peds::cap_for(view)),
             health: FULL_HEALTH,
+            armour: 0,
+            burning: 0,
+            arms: Arms::default(),
+            weapons: Weapons::default(),
+            score,
             start,
             prev: Buttons::NONE,
             log: Vec::new(),
@@ -283,6 +302,19 @@ impl World {
         let b = input.buttons;
         let pressed = b.pressed_since(self.prev);
         let was = (self.player.x, self.player.y);
+        // The cycle keys work anywhere, skipping guns with no rounds.
+        for (key, forward) in [(Buttons::WEAPON_NEXT, true), (Buttons::WEAPON_PREV, false)] {
+            if pressed.contains(key) {
+                self.arms.cycle(forward);
+                let w = self.arms.weapon;
+                self.say(format!("player: weapon {w} (ammo {})", self.arms.ammo[w]));
+            }
+        }
+        self.arms.fire_held = b.contains(Buttons::FIRE);
+        if pressed.contains(Buttons::ALL_WEAPONS) {
+            self.arms.ammo[weapons::weapon::PISTOL..].fill(99);
+            self.say("cheat: keypad-* - every weapon, 99 rounds".into());
+        }
         if pressed.contains(Buttons::ENTER) {
             match self.doing {
                 Doing::OnFoot => {
@@ -331,17 +363,17 @@ impl World {
             };
             self.drive(pedals);
         }
+        self.trigger();
         self.follow(was);
         let centre = self.run_traffic();
         self.run_trains();
         self.peds_view();
         self.burn();
+        self.score.tick();
         self.run_peds(centre);
-        let mut lines = Vec::new();
-        self.traffic.wreck_sweep(&mut |s| lines.push(s));
-        for l in lines {
-            self.say(l);
-        }
+        // The shots fly after the people have moved.
+        self.street(|w, st| w.tick(st));
+        self.aim_at_player();
         self.harm();
         self.run_over();
         self.prev = b;
@@ -458,6 +490,9 @@ impl World {
                 "train: {} train {t}",
                 if took { "hijacked" } else { "handed back" }
             ));
+            if took {
+                self.crime(crime::HIJACK);
+            }
         }
         self.trains
             .drive(t, b.contains(Buttons::UP), b.contains(Buttons::DOWN));
@@ -468,6 +503,82 @@ impl World {
         if self.trains.trains[t].wrecked {
             self.trains.rider = None;
             self.doing = Doing::OnFoot;
+        }
+    }
+
+    /// The fire key's tick: the cooldown and a punch in the air run every
+    /// tick; on his feet, a punch is thrown or a shot fired, and the shot
+    /// frightens the people around (AmiGTA1's main loop).
+    fn trigger(&mut self) {
+        let can = self.doing == Doing::OnFoot;
+        let p = &self.player;
+        let (x, y, layer, angle) = (i64::from(p.x), i64::from(p.y), p.layer, p.angle);
+        match self.arms.tick(can) {
+            None | Some(Trigger::Swing) => {}
+            Some(Trigger::Blow) => match self.peds.punch(x, y, angle, layer) {
+                Ok(i) => self.say(format!("player: punch - ped {i} down")),
+                Err(true) => self.say("player: punch - missed".into()),
+                Err(false) => {}
+            },
+            Some(Trigger::Shot(w)) => {
+                let running = p.anim == Anim::Run;
+                if self.weapons.fire(w, x, y, layer, angle, running, None) {
+                    self.peds.panic(x, y, layer);
+                    if self.arms.spent() {
+                        let w = self.arms.weapon;
+                        self.say(format!("player: out of ammo - weapon {w}"));
+                    }
+                }
+            }
+        }
+    }
+
+    /// The weapons' call, with the street they act on.
+    fn street<R>(&mut self, f: impl FnOnce(&mut Weapons, &mut Street) -> R) -> R {
+        let mut lines = Vec::new();
+        let r = {
+            let mut say = |s: String| lines.push(s);
+            let mut st = Street {
+                map: &self.map,
+                cars: &self.cars,
+                peds: &mut self.peds,
+                traffic: &mut self.traffic,
+                score: &mut self.score,
+                say: &mut say,
+            };
+            f(&mut self.weapons, &mut st)
+        };
+        for l in lines {
+            self.say(l);
+        }
+        r
+    }
+
+    /// Where the weapons will find him next tick: his car's box while he
+    /// is in it, else his body.
+    fn aim_at_player(&mut self) {
+        let layer = self.player.layer;
+        let target = match self.in_car() {
+            Some(d) => Target {
+                x: d.veh.ox,
+                y: d.veh.oy,
+                layer,
+                car: Some((d.veh.len / 2, d.veh.wid / 2)),
+            },
+            None => Target {
+                x: i64::from(self.player.x),
+                y: i64::from(self.player.y),
+                layer,
+                car: None,
+            },
+        };
+        self.weapons.set_target(target);
+    }
+
+    /// Report a crime, logging a change of wanted level.
+    fn crime(&mut self, c: usize) {
+        if let Some(l) = self.score.crime(c) {
+            self.say(l);
         }
     }
 
@@ -593,8 +704,23 @@ impl World {
             .peds
             .ram(v.ox, v.oy, v.angle(), v.len / 2, v.wid / 2, d.layer, speed);
         if hits > 0 {
+            // A run-over is a "hit and run"; from a motorbike the original
+            // files nothing.
+            let bike = self.cars[v.model].vtype == CLASS_BIKE;
+            let mut award = 0;
+            for _ in 0..hits {
+                award = self
+                    .score
+                    .event(score::kind::CIVILIAN, score::reason::RUNOVER);
+                if !bike {
+                    self.crime(crime::RUNOVER);
+                }
+            }
             let total = self.peds.stats.runover;
-            self.say(format!("car: ran over {hits} - {total} so far"));
+            self.say(format!(
+                "car: ran over {hits} - {total} so far, {award} points (score {}, heat {})",
+                self.score.score, self.score.heat
+            ));
         }
     }
 
@@ -709,6 +835,15 @@ impl World {
         };
         let before = self.player.layer;
         let (ox, oy) = (self.player.x, self.player.y);
+        if self.arms.punch_left > 0 && !b.contains(Buttons::UP) && !b.contains(Buttons::DOWN) {
+            // The standing punch is a state of its own; he may still turn.
+            let p = &mut self.player;
+            p.anim = Anim::Punch;
+            let thrown = weapons::PUNCH_TICKS * weapons::PUNCH_STATES - self.arms.punch_left;
+            p.frame = (thrown / weapons::PUNCH_TICKS) as u8;
+            p.angle = (p.angle + stick.turn * 5) & 255;
+            return;
+        }
         self.player.update(&self.map, stick);
         self.car_block(ox, oy);
         if self.player.layer != before {
@@ -752,9 +887,42 @@ impl World {
         (self.map.ground_type(bx, by, z) == ground::WATER).then_some(z)
     }
 
-    /// What hurts him this tick: the water takes 3 health every other tick
-    /// (a second and a half from full); at none he is wasted.
+    /// What hurts him this tick: bullets take 10 each, or a point of armour;
+    /// a bullet into his car 5 of its bodywork; a blast's inner ring kills
+    /// him; fire sets him alight for 100 ticks of a point each; the water
+    /// takes 3 every other tick (a second and a half from full). At none he
+    /// is wasted.
     fn harm(&mut self) {
+        let hurt = self.weapons.take_hurt();
+        for _ in 0..hurt.bullets {
+            if self.armour > 0 {
+                self.armour -= 1;
+            } else {
+                self.health -= 10;
+            }
+        }
+        if hurt.car_hits > 0
+            && self.in_car().is_some()
+            && let Some(d) = self.driven.as_mut()
+        {
+            d.veh.damage += 5 * hurt.car_hits;
+        }
+        if hurt.blast > 0 {
+            self.health = 0;
+        }
+        if hurt.burn > 0 && self.burning < BURN_TICKS {
+            self.burning = BURN_TICKS;
+        }
+        if self.burning > 0 {
+            self.burning -= 1;
+            self.health -= 1;
+        }
+        if hurt.bullets > 0 || hurt.car_hits > 0 || hurt.blast > 0 {
+            self.say(format!(
+                "player: hit - bullets {}, on the car {}, blast {}; health {} armour {}",
+                hurt.bullets, hurt.car_hits, hurt.blast, self.health, self.armour
+            ));
+        }
         if let Doing::Drowning(n) = self.doing {
             if n & 1 != 0 {
                 self.health -= 3;
@@ -766,14 +934,21 @@ impl World {
         }
     }
 
-    /// Wasted. Until M6 brings the card, lives and hospitals, he starts
+    /// Wasted: his guns and the wanted level go; the score and the
+    /// multiplier stay. Until the card, lives and hospitals come, he starts
     /// again where the level put him, with full health.
     fn wasted(&mut self) {
         let how = match self.doing {
             Doing::Drowning(_) => " - drowned",
+            _ if self.burning > 0 => " - burnt",
             _ => "",
         };
         self.say(format!("player: wasted{how}"));
+        self.burning = 0;
+        self.arms.disarm();
+        if let Some(l) = self.score.clear_heat() {
+            self.say(l);
+        }
         self.driven = None;
         let start = self.start;
         let (mut player, _) = Player::place(&self.map, start.bx, start.by);
@@ -1017,7 +1192,13 @@ impl World {
                 .pull(&self.cars, cx, cy, c.face, c.model, layer, -1)
         };
         match got {
-            Some(i) => self.say(format!("car: dragged the driver out (ped {i})")),
+            Some(i) => {
+                // Taking a car off somebody scores; a parked one is worth
+                // nothing.
+                self.score.event(score::kind::CAR, 0);
+                self.crime(crime::CARJACK);
+                self.say(format!("car: dragged the driver out (ped {i})"));
+            }
             None => self.say("car: driver lost - ped pool full".into()),
         }
     }
@@ -1301,6 +1482,8 @@ impl World {
                 v.oy = pos.1;
                 v.ang16 = pos.2;
             }
+            let (hvx, hvy) = (v.vx, v.vy);
+            let cops_before = self.traffic.rammed_cops;
             let r = self.traffic.ram(
                 &self.cars,
                 v.ox,
@@ -1322,6 +1505,21 @@ impl World {
             v.ox += r.dpx;
             v.y += r.dpy;
             v.oy += r.dpy;
+            // Touching a police car is a wanted level at once; a shunt at
+            // speed (five units on either axis, as a run-over needs) is
+            // two heat a car.
+            if self.traffic.rammed_cops != cops_before
+                && let Some(l) = self.score.force_level(1)
+            {
+                lines.push(l);
+            }
+            if r.hits > 0 && (hvx.abs() >= 5 * 32768 || hvy.abs() >= 5 * 32768) {
+                for _ in 0..r.hits {
+                    if let Some(l) = self.score.crime(crime::SHUNT) {
+                        lines.push(l);
+                    }
+                }
+            }
             if r.hits > 0 {
                 v.damage += r.damage;
                 // The push points out of the other car: the dent is the
@@ -1392,8 +1590,6 @@ impl World {
         let (x, y, face, layer) = (v.ox, v.oy, v.angle(), d.layer);
         let (model, remap) = (v.model, i32::from(v.remap.unwrap_or(0)) - 1);
         self.driven = None;
-        self.traffic
-            .leave_wreck(&self.cars, model, x, y, face, layer, remap);
         // A Q14 unit times 48 is 12 px.
         self.player.x = (x + i64::from(cos(face)) * 48) as i32;
         self.player.y = (y + i64::from(sin(face)) * 48) as i32;
@@ -1402,6 +1598,13 @@ impl World {
         self.player.anim = Anim::Stand;
         self.player.frame = 0;
         self.doing = Doing::OnFoot;
+        // The blast finds him where he last was: still in it, so a driver
+        // who stays in a burning car dies with it.
+        let cars = std::mem::take(&mut self.cars);
+        self.street(|w, st| w.wreck_car(st, &cars[model], x, y, face, layer, true));
+        self.cars = cars;
+        self.traffic
+            .leave_wreck(&self.cars, model, x, y, face, layer, remap);
         self.say(format!("car: blew up at ({},{})", x >> 16, y >> 16));
     }
 
@@ -1455,12 +1658,34 @@ impl World {
 
     /// The ped sprite frame to draw the player with, or `None` while he is
     /// hidden inside a car.
+    /// On his feet: punching on the run is the run frame moved on; with a
+    /// gun out and the fire key held, a walker or runner is the cycle's
+    /// frame moved on and a man standing has a pose of his own. Only the
+    /// sprite changes.
+    fn armed_frame(&self) -> u16 {
+        use crate::player::frames;
+        let p = &self.player;
+        let f = p.ped_frame();
+        let moving = matches!(p.anim, Anim::Walk | Anim::Run);
+        if self.arms.punch_left > 0 && p.anim == Anim::Run {
+            return f + frames::RUN_PUNCH_OFFSET;
+        }
+        if !self.arms.armed() {
+            return f;
+        }
+        match p.anim {
+            _ if moving => f + frames::ARMED_OFFSET,
+            Anim::Stand => frames::ARMED_STAND,
+            _ => f,
+        }
+    }
+
     pub fn player_frame(&self) -> Option<u16> {
         match self.doing {
             // Aboard a train he is out of sight, and in the water he has
             // gone under.
             Doing::Riding(_) | Doing::Drowning(_) => None,
-            Doing::OnFoot => Some(self.player.ped_frame()),
+            Doing::OnFoot => Some(self.armed_frame()),
             Doing::Entering(e) if e.walk_t < e.walk_len || e.over.is_some() => {
                 Some(self.player.ped_frame())
             }
@@ -1650,6 +1875,39 @@ impl World {
     }
 
     /// Add a line to the run log.
+    /// Hand him weapon `w` with `rounds` units (the scripts' `weapon`).
+    pub fn give_weapon(&mut self, w: i32, rounds: i32) {
+        if let Ok(w) = usize::try_from(w) {
+            self.arms.give(w, rounds);
+        }
+    }
+
+    /// Take `points` of health (the scripts' `hurt`).
+    pub fn hurt(&mut self, points: i32) {
+        self.health -= points;
+    }
+
+    /// Shoot the living ped nearest him, within `range` px measured along
+    /// both axes, along his facing (the scripts' `shootped`).
+    pub fn shoot_ped(&mut self, range: i32) {
+        let (px, py) = (i64::from(self.player.x), i64::from(self.player.y));
+        let mut best = (None, i64::from(range));
+        for (i, p) in self.peds.p.iter().enumerate() {
+            let d = ((p.x - px) >> FP).abs() + ((p.y - py) >> FP).abs();
+            if p.alive && !p.corpse && p.pull < 0 && d < best.1 {
+                best = (Some(i), d);
+            }
+        }
+        if let Some(i) = best.0 {
+            self.peds.shoot(i, self.player.angle);
+        }
+        self.say(format!(
+            "script: shootped - ped {}, {} px away",
+            best.0.map_or(-1, |i| i as i64),
+            best.1
+        ));
+    }
+
     pub fn say(&mut self, text: String) {
         self.log.push(LogLine {
             tick: self.tick,
@@ -1734,6 +1992,11 @@ impl World {
         self.traffic.sim_hash(&mut h);
         self.peds.sim_hash(&mut h);
         h.i32(self.health);
+        h.i32(self.armour);
+        h.i32(self.burning);
+        self.arms.sim_hash(&mut h);
+        self.weapons.sim_hash(&mut h);
+        self.score.sim_hash(&mut h);
         h.bytes(&self.camera.lead.0.to_le_bytes());
         h.bytes(&self.camera.lead.1.to_le_bytes());
         h.i32(self.camera.zoom);
@@ -1748,6 +2011,23 @@ impl World {
     }
 
     /// The gtadump-style one-line summary of the player, or of his car.
+    /// Health, his gun, the score and the wanted level, for the overlay.
+    pub fn status_summary(&self) -> String {
+        let a = &self.arms;
+        let s = &self.score;
+        format!(
+            "health {} armour {}  weapon {} ({})  score {} x{}  heat {} level {}",
+            self.health,
+            self.armour,
+            a.weapon,
+            a.ammo[a.weapon],
+            s.score,
+            s.multiplier,
+            s.heat,
+            s.level
+        )
+    }
+
     pub fn player_summary(&self) -> String {
         let p = &self.player;
         let part = |v: i32| {

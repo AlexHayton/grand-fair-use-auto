@@ -84,16 +84,31 @@ fn our_lines(script: &Script, prefix: &str) -> Vec<String> {
             lines.push(l);
             lines.extend(w.traffic.trace_lines(u64::from(w.tick)));
             lines.extend(w.peds.trace_lines(w.tick));
+            lines.extend(w.weapons.trace_lines(w.tick));
+            // The walk harness restates the score and his guns too.
+            if prefix == "t " {
+                let a = &w.arms;
+                let s = &w.score;
+                lines.push(format!(
+                    "s {} {} {} {} {} {} {}",
+                    w.tick, s.score, s.heat, s.level, w.health, a.weapon, a.ammo[a.weapon]
+                ));
+            }
         }
     });
     lines
 }
 
-/// The harness's lines for the player (`prefix`), the fleet and the crowd,
-/// in order.
+/// The harness's lines for the player (`prefix`), the fleet, the crowd,
+/// the weapons and the score, in order.
 fn their_lines(harness: &str, args: &[&Path], prefix: &str) -> Vec<String> {
     let mut lines = oracle_lines(harness, args, &[], "");
-    lines.retain(|l| l.starts_with(prefix) || l.starts_with("f ") || l.starts_with("p "));
+    lines.retain(|l| {
+        l.starts_with(prefix)
+            || ["f ", "p ", "w ", "x ", "h ", "s "]
+                .iter()
+                .any(|p| l.starts_with(p))
+    });
     lines
 }
 

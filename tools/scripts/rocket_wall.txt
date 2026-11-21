@@ -1,0 +1,18 @@
+# A rocket into a wall leaves fires.
+#
+# Block (66,62) is a building; the player stands three blocks north of it,
+# on the road at (66,59), facing south. The rocket bursts on the wall and
+# leaves three fires on this side of it, 10 px back along its line and 10 px
+# either side, which burn for 250 ticks and set alight anybody who comes
+# within 8 px.
+#
+# oracle: walk
+# section: 1
+# expect: weapons: rocket burst on a wall at block (66,62,2)
+# reject: no walkable layer
+start 66 59
+
+weapon 3 1
+fire 1
+0 0 0 30
+wait 270

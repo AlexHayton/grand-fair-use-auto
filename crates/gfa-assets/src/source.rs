@@ -5,9 +5,10 @@
 //! `/`-separated path relative to the data root and finds the file whatever
 //! its case on disk.
 //!
-//! The web build reads the user's chosen folder into a [`MemSource`] up
-//! front, so the rest of the engine sees the same synchronous interface on
-//! both targets.
+//! The web build copies the files it needs out of the user's chosen folder
+//! or archive into a [`MemSource`] up front ([`is_play_file`]), so the rest
+//! of the engine sees the same synchronous interface on both targets. On
+//! the desktop an archive is read in place ([`crate::archive`]).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -22,6 +23,12 @@ pub enum AssetError {
         path: String,
         #[source]
         source: std::io::Error,
+    },
+    #[error("{path}: {source}")]
+    Archive {
+        path: String,
+        #[source]
+        source: crate::archive::ArchiveError,
     },
 }
 
@@ -43,9 +50,91 @@ pub trait AssetSource: Send + Sync {
     fn list(&self, dir: &str) -> Result<Vec<Entry>, AssetError>;
 }
 
-fn components(path: &str) -> impl Iterator<Item = &str> {
+pub(crate) fn components(path: &str) -> impl Iterator<Item = &str> {
     path.split(['/', '\\'])
         .filter(|c| !c.is_empty() && *c != ".")
+}
+
+/// The extensions of the files a level is built from.
+const PLAY_EXTENSIONS: [&str; 6] = ["cmp", "g24", "gry", "ini", "fxt", "fon"];
+
+/// Whether the engine reads `game_path` to start a level: the maps,
+/// styles, mission scripts, texts and fonts under `GTADATA/`, but not its
+/// sounds. The browser copies these out of the user's folder or archive up
+/// front; the rest (sounds, music, films) stays where it is until a later
+/// milestone asks for it.
+pub fn is_play_file(game_path: &str) -> bool {
+    let parts: Vec<&str> = components(game_path).collect();
+    let (Some(first), Some(name)) = (parts.first(), parts.last()) else {
+        return false;
+    };
+    first.eq_ignore_ascii_case("GTADATA")
+        && parts.len() > 1
+        && !parts.iter().any(|p| p.eq_ignore_ascii_case("AUDIO"))
+        && name
+            .rsplit_once('.')
+            .is_some_and(|(_, ext)| PLAY_EXTENSIONS.iter().any(|e| ext.eq_ignore_ascii_case(e)))
+}
+
+/// Split a path inside a folder or archive at its `GTADATA` folder:
+/// `"Some/GTA/GTADATA/NYC.CMP"` is `("Some/GTA", "GTADATA/NYC.CMP")`. The
+/// first part is the game's root, the second the game path the engine
+/// asks for. `None` when there is no `GTADATA` folder on the way.
+pub fn split_at_gtadata(path: &str) -> Option<(String, String)> {
+    let parts: Vec<&str> = components(path).collect();
+    let i = parts
+        .iter()
+        .position(|p| p.eq_ignore_ascii_case("GTADATA"))?;
+    (i + 1 < parts.len()).then(|| (parts[..i].join("/"), parts[i..].join("/")))
+}
+
+/// List `dir` among `files` (clean `/`-separated paths with sizes): its
+/// files and the folders implied by deeper paths, matched ignoring case
+/// and spelt as stored, sorted by lower-case name.
+pub(crate) fn list_paths<'a>(
+    files: impl Iterator<Item = (&'a str, u64)>,
+    dir: &str,
+) -> Result<Vec<Entry>, AssetError> {
+    let dir: Vec<&str> = components(dir).collect();
+    let prefix = if dir.is_empty() {
+        String::new()
+    } else {
+        format!("{}/", dir.join("/"))
+    };
+    let prefix_lc = prefix.to_ascii_lowercase();
+    let mut out: HashMap<String, Entry> = HashMap::new();
+    for (orig, size) in files {
+        let key = orig.to_ascii_lowercase();
+        let Some(rest) = key.strip_prefix(&prefix_lc) else {
+            continue;
+        };
+        let orig_rest = &orig[prefix.len()..];
+        match rest.find('/') {
+            Some(i) => {
+                out.entry(rest[..i].to_string()).or_insert(Entry {
+                    name: orig_rest[..i].to_string(),
+                    is_dir: true,
+                    size: 0,
+                });
+            }
+            None => {
+                out.insert(
+                    rest.to_string(),
+                    Entry {
+                        name: orig_rest.to_string(),
+                        is_dir: false,
+                        size,
+                    },
+                );
+            }
+        }
+    }
+    if out.is_empty() && !dir.is_empty() {
+        return Err(AssetError::NotFound(dir.join("/")));
+    }
+    let mut v: Vec<Entry> = out.into_values().collect();
+    v.sort_by_key(|e| e.name.to_ascii_lowercase());
+    Ok(v)
 }
 
 /// Files on a local filesystem, under a root folder.
@@ -180,46 +269,12 @@ impl AssetSource for MemSource {
     }
 
     fn list(&self, dir: &str) -> Result<Vec<Entry>, AssetError> {
-        let dir: Vec<&str> = components(dir).collect();
-        let prefix = if dir.is_empty() {
-            String::new()
-        } else {
-            format!("{}/", dir.join("/"))
-        };
-        let prefix_lc = prefix.to_ascii_lowercase();
-        let mut out: HashMap<String, Entry> = HashMap::new();
-        for (key, (orig, bytes)) in &self.files {
-            let Some(rest) = key.strip_prefix(&prefix_lc) else {
-                continue;
-            };
-            let orig_rest = &orig[prefix.len()..];
-            match rest.find('/') {
-                Some(i) => {
-                    let name = orig_rest[..i].to_string();
-                    out.entry(rest[..i].to_string()).or_insert(Entry {
-                        name,
-                        is_dir: true,
-                        size: 0,
-                    });
-                }
-                None => {
-                    out.insert(
-                        rest.to_string(),
-                        Entry {
-                            name: orig_rest.to_string(),
-                            is_dir: false,
-                            size: bytes.len() as u64,
-                        },
-                    );
-                }
-            }
-        }
-        if out.is_empty() && !dir.is_empty() {
-            return Err(AssetError::NotFound(dir.join("/")));
-        }
-        let mut v: Vec<Entry> = out.into_values().collect();
-        v.sort_by_key(|e| e.name.to_ascii_lowercase());
-        Ok(v)
+        list_paths(
+            self.files
+                .values()
+                .map(|(orig, bytes)| (orig.as_str(), bytes.len() as u64)),
+            dir,
+        )
     }
 }
 
@@ -264,5 +319,32 @@ mod tests {
         );
         assert!(l[1].is_dir && l[1].name == "UK");
         assert!(m.list("NOPE").is_err());
+    }
+
+    #[test]
+    fn play_files_are_the_level_data_under_gtadata() {
+        assert!(is_play_file("GTADATA/NYC.CMP"));
+        assert!(is_play_file("gtadata/uk/missuke.ini"));
+        assert!(is_play_file("GTADATA/STYLE001.G24"));
+        assert!(!is_play_file("GTADATA/AUDIO/LEVEL001.SDT"));
+        assert!(!is_play_file("GTADATA/AUDIO/FOO.INI"));
+        assert!(!is_play_file("MUSIC/GTA/CDAUDIO.DAT"));
+        assert!(!is_play_file("GTADATA/1.REP"));
+        assert!(!is_play_file("GTADATA"));
+        assert!(!is_play_file("NYC.CMP"));
+    }
+
+    #[test]
+    fn a_path_splits_at_its_gtadata_folder() {
+        assert_eq!(
+            split_at_gtadata("GTA1-Directors/C/GTA/GTADATA/UK/x.cmp"),
+            Some(("GTA1-Directors/C/GTA".into(), "GTADATA/UK/x.cmp".into()))
+        );
+        assert_eq!(
+            split_at_gtadata("gtadata/NYC.CMP"),
+            Some((String::new(), "gtadata/NYC.CMP".into()))
+        );
+        assert_eq!(split_at_gtadata("GTA/GTADATA"), None);
+        assert_eq!(split_at_gtadata("GTA/MUSIC/GTA/Track02.ogg"), None);
     }
 }

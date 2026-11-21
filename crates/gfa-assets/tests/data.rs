@@ -1,7 +1,9 @@
 //! Tests against the user's own game data. Run with `cargo data-test`.
 //!
 //! Every test here is `#[ignore]`d so `cargo test` passes without the data.
-//! The data folder comes from `GFA_DATA` or `gfa.local.toml`.
+//! The data folder comes from `GFA_DATA` or `gfa.local.toml`; an archive of
+//! the same game, if any, from `GFA_ARCHIVE` or `archive` in
+//! `gfa.local.toml`.
 
 use gfa_assets::{AssetSource, DataPath, Dataset, Datasets, FsSource};
 
@@ -561,4 +563,38 @@ fn every_mission_file_parses() {
             );
         }
     }
+}
+
+#[test]
+#[ignore = "needs game data (cargo data-test)"]
+fn the_archive_serves_the_folders_bytes() {
+    let Some(path) = DataPath::test_archive() else {
+        println!("no archive configured (GFA_ARCHIVE, or archive in gfa.local.toml): skipped");
+        return;
+    };
+    let folder = data();
+    let archive = gfa_assets::ArchiveSource::open(&path).unwrap_or_else(|e| panic!("{e}"));
+    println!(
+        "{}: {}, game in {:?}",
+        archive.archive().format,
+        archive.archive().members.len(),
+        archive.game().root
+    );
+    assert_eq!(Datasets::detect(&archive), Datasets::detect(&folder));
+    let mut checked = 0;
+    for (p, _) in archive.game().files() {
+        if !gfa_assets::is_play_file(p) {
+            continue;
+        }
+        let a = archive.read(p).unwrap_or_else(|e| panic!("{e}"));
+        let f = folder.read(p).unwrap_or_else(|e| panic!("{e}"));
+        assert!(a == f, "{p} differs from the folder's");
+        checked += 1;
+    }
+    println!("{checked} level files identical to the folder's");
+    assert!(checked > 0);
+    assert_eq!(
+        archive.list("GTADATA").unwrap().len(),
+        folder.list("GTADATA").unwrap().len()
+    );
 }

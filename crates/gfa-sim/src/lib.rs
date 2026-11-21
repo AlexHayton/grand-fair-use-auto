@@ -30,12 +30,14 @@ pub mod peds;
 pub mod player;
 pub mod replay;
 pub mod route;
+pub mod score;
 pub mod script;
 pub mod script_world;
 pub mod traffic;
 pub mod trains;
 pub mod vehicle;
 pub mod view;
+pub mod weapons;
 pub mod world;
 
 pub use gfa_fixed;

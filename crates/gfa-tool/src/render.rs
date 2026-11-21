@@ -250,6 +250,39 @@ impl Scene {
         )
     }
 
+    /// Frame `frame` of map object `object`'s sprite at a simulation
+    /// position, drawn at a simulation angle.
+    pub fn object_sprite(
+        &self,
+        object: usize,
+        frame: usize,
+        pos16: [i32; 3],
+        draw_angle: i32,
+    ) -> Option<SpriteInstance> {
+        gfa_render::sprites::object_sprite(
+            &self.style,
+            &self.atlas,
+            object,
+            frame,
+            gfa_render::sprites::from_sim(pos16),
+            gfa_render::sprites::sim_angle(draw_angle),
+        )
+    }
+
+    /// Sprite `n` of the explosion category at a simulation position.
+    pub fn blast_sprite(&self, n: usize, pos16: [i32; 3]) -> Option<SpriteInstance> {
+        let sprite = self
+            .style
+            .sprite_index(gfa_formats::style::SpriteCategory::Ex, n)?;
+        gfa_render::sprites::own_sprite(
+            &self.style,
+            &self.atlas,
+            sprite,
+            gfa_render::sprites::from_sim(pos16),
+            0.0,
+        )
+    }
+
     /// Sprite `n` of the style's traffic lights at a simulation position,
     /// drawn at a simulation angle.
     pub fn lamp_sprite(

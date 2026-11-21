@@ -84,7 +84,8 @@ impl Scene {
     /// (first, so a car at the same height is drawn over a body), standing
     /// cars, the player's car (dents, door, fire) and the player.
     pub fn game_sprites(&self, game: &crate::game::Game) -> Vec<SpriteInstance> {
-        use gfa_render::sprites::{from_sim, ped_sprite, push_car, sim_angle};
+        use gfa_render::sprites::{from_sim, object_sprite, ped_sprite, push_car, sim_angle};
+        use gfa_sim::weapons::{self, Kind};
         let world = &game.world;
         let frame = game.frame();
         let style = &self.level.style;
@@ -94,6 +95,15 @@ impl Scene {
             if let Some(sprite) = style.sprite_index(SpriteCategory::TrafficLight, light.sprite()) {
                 out.extend(own_sprite(style, &self.atlas, sprite, pos, angle));
             }
+        }
+        // Where bullets stopped, on the ground under everybody.
+        let ground = |x: i64, y: i64, layer: i32, lift: i32| {
+            let z = world.map.ground_z(x as i32, y as i32, layer);
+            from_sim([x as i32, y as i32, z + (lift << 16)])
+        };
+        for sp in world.weapons.splats.iter().filter(|s| s.ticks > 0) {
+            let pos = ground(sp.x, sp.y, sp.layer, 0);
+            out.extend(object_sprite(style, &self.atlas, OBJ_SPLAT, 0, pos, 0.0));
         }
         for p in game.peds() {
             let pos = p.pose.pos.to_array();
@@ -181,6 +191,46 @@ impl Scene {
         }
         if let Some((pose, f)) = frame.player {
             out.extend(self.ped_sprite(f, pose.pos.to_array(), pose.draw_angle));
+        }
+        // In the air, over everything: the shots, the fires and the
+        // explosions. The art of a shot faces south; the rocket's and the
+        // flame's point back along the flight.
+        let w = &world.weapons;
+        for sh in w.shots.iter().filter(|s| s.alive) {
+            let pos = ground(sh.x, sh.y, sh.layer, 4);
+            let (object, frame, angle) = match sh.kind {
+                Kind::Bullet => (OBJ_BULLET, 0, sh.heading + 128),
+                Kind::Rocket => (OBJ_ROCKET, sh.frame - 1, sh.heading),
+                Kind::Flame => (OBJ_FLAME, sh.frame - 1, sh.heading),
+            };
+            let frame = usize::try_from(frame).unwrap_or(0);
+            out.extend(object_sprite(
+                style,
+                &self.atlas,
+                object,
+                frame,
+                pos,
+                sim_angle(angle),
+            ));
+        }
+        for f in w.fires.iter().filter(|f| f.ticks > 0) {
+            let pos = ground(f.x, f.y, f.layer, 0);
+            out.extend(flames(style, &self.atlas, f.frame as usize, pos));
+        }
+        // An explosion is four quarter sprites a block across, each with
+        // its own run of frames, a pixel short of a block apart down the
+        // screen so the halves meet.
+        for b in w.blasts.iter().filter(|b| b.frame > 0) {
+            for q in 0..4usize {
+                let dx = if q & 1 != 0 { 16 } else { -16 };
+                let dy = if q & 2 != 0 { 15 } else { -15 };
+                let n = q * weapons::BLAST_FRAMES as usize + (b.frame - 1) as usize;
+                let Some(sprite) = style.sprite_index(SpriteCategory::Ex, n) else {
+                    continue;
+                };
+                let pos = ground(b.x + (dx << 16), b.y + (dy << 16), b.layer, 8);
+                out.extend(own_sprite(style, &self.atlas, sprite, pos, 0.0));
+            }
         }
         out
     }
@@ -296,6 +346,12 @@ fn flames(
     let pos = [pos[0], pos[1], pos[2] + 1.0];
     gfa_render::sprites::object_sprite(style, atlas, FIRE, frame, pos, 0.0)
 }
+
+/// The map objects the weapons draw with.
+const OBJ_SPLAT: usize = 0x0d;
+const OBJ_ROCKET: usize = 0x1f;
+const OBJ_BULLET: usize = 0x4a;
+const OBJ_FLAME: usize = 0x4b;
 
 /// Behind everything: only visible past the map's edge.
 pub const SKY: wgpu::Color = wgpu::Color {

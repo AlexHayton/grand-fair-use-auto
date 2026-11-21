@@ -15,12 +15,24 @@ roadmap, decision log and progress log.
 
 1. Install Rust (stable) with `rustup`. The `rust-toolchain.toml` adds the
    wasm target.
-2. Point the engine at your data. Choose one:
-   - `cp gfa.local.toml.example gfa.local.toml`, then edit `data` (this file is gitignored);
-   - set `GFA_DATA=/path/to/GTA`;
-   - pass `--data /path/to/GTA`.
+2. Get the game: search for **GTA1 Director's Cut** and download it. It
+   comes as a `.rar` or `.zip`; there is no need to unpack it.
+3. Point the engine at it. The desktop program takes the first of:
+   - `--data <archive or folder>`;
+   - `GFA_DATA=<archive or folder>`;
+   - `data = "..."` in `gfa.local.toml` (`cp gfa.local.toml.example gfa.local.toml`;
+     the file is gitignored);
+   - a `.rar` or `.zip` of the game in the same folder as the program (for an
+     app bundle, the folder holding it);
+   - the archive you chose last time;
+   - otherwise it asks you to select the archive, and remembers it
+     (`~/Library/Application Support/GrandFairUseAuto/game.toml` on macOS).
 
-   The folder is the one that **contains** `GTADATA/`.
+   A folder is the one that **contains** `GTADATA/`. An archive may hold it
+   at any depth. RAR 5 and ZIP archives are read in place and each file is
+   checked against its checksum. Solid RAR archives, RAR 4 and archives
+   split into parts are not read; `cargo run -p gfa-tool -- archive <file>`
+   says whether an archive will do.
 
 ## Running
 
@@ -29,7 +41,8 @@ cargo run --release -p gfa-native                         # Liberty City, level 
 cargo run --release -p gfa-native -- --level 102          # San Andreas
 cargo run --release -p gfa-native -- --level 202          # Vice City
 cargo run --release -p gfa-native -- --game london69 --level 2
-cargo run -p gfa-tool -- info                             # what's in your data folder
+cargo run -p gfa-tool -- info                             # what's in your game data
+cargo run --release -p gfa-tool -- archive game.rar --all # will this archive do?
 ```
 
 You start on foot at the level's starting point. Traffic drives the streets
@@ -61,8 +74,9 @@ cargo run --release -p gfa-native -- --level 203     # Vice City, second chapter
 ```
 
 - **Web:** run `trunk serve` and open `http://127.0.0.1:8080/?level=202`.
-- **Data:** add `--data /path/to/GTA` if you have not set `gfa.local.toml` or
-  `GFA_DATA`.
+- **Data:** add `--data <archive or folder>` if you have not set
+  `gfa.local.toml` or `GFA_DATA`, kept the archive beside the program or
+  chosen one before.
 - **Checking it loaded:** the log should show `GTADATA/miami.cmp: … faces`
   and Vice City's trains (2 trains, 3 stations).
 - **Without a window:** `--screenshot vc.png` saves the first frame and quits.
@@ -86,11 +100,12 @@ A script runs on Vice City if its header says `# section: 202`.
 | F | free look: drag with the right mouse button to tilt and turn |
 | R | look straight down again |
 | C | detach the camera and fly over the city with the arrows (Shift: faster); C again returns to the player |
-| Ctrl | fire (once there are weapons) |
+| Ctrl | fire: a punch with no gun, else the gun you hold (held, it keeps firing) |
 | Tab | the special key: the horn, or in a police car, ambulance or fire engine the siren |
-| Z / X | previous and next weapon (once there are weapons) |
+| Z / X | previous and next weapon, skipping any with no rounds |
+| Keypad `*` | every gun with 99 rounds: the original's own key for it, which needed a cheat; always on until the cheats come (M8) |
 | F6 | pause |
-| `` ` `` | debug overlay: frame rate, the player's tick and block, the camera, the block under the cursor |
+| `` ` `` | debug menu (hidden at start): the frame counter, frame time and rate, the simulation's tick and counts (cars, people, shots, fires, explosions), the renderer's counts, the player's block, health, gun, score and wanted level with a **Top up ammo** button (as keypad `*`), the camera and view mode, and the block under the cursor |
 | Esc | quit |
 
 The original's keys (its default layout) do what they did there; the debug keys keep off them. F5 (the radio), F7 and F10 (repeat a message), F9 (the area's name), F8 (the frame limiter) and F11 (the screen mode) are kept for when those arrive.
@@ -119,13 +134,35 @@ Web (needs `cargo install trunk`):
 
 ```sh
 cd crates/gfa-web && trunk serve     # http://127.0.0.1:8080
+sh tools/web/build.sh                # the release bundle, in crates/gfa-web/dist
 ```
 
-The page asks for the folder that contains `GTADATA`. It reads the files it
-needs in the browser and keeps them in the browser's storage (IndexedDB), so
-later visits start straight away; nothing is uploaded. "Game data" (bottom
-right) chooses another folder or forgets the saved one. `?level=102` or
+The page tells the player to search for the game and to **Select game
+archive**. It reads only the files a level needs out of the chosen `.rar` or
+`.zip`, a slice at a time (about 41 MB of a 215 MB archive), and keeps them in
+the browser's storage (IndexedDB), so later visits start straight away.
+Nothing is uploaded, and the page's content security policy lets it talk
+only to its own site. An unpacked folder works too. "Game data" (top right)
+chooses another or forgets the saved files. `?level=102` or
 `?game=london69&level=2` picks the level.
+
+On a touch screen the keys appear as buttons along the bottom: a pad for
+moving and turning on the left; on the right, Fire, Car (in and out), Jump
+(and handbrake), Horn and the weapon buttons. `?touch` shows them anywhere.
+
+### Hosting the web app
+
+The bundle is static and holds no game data. `tools/web/build.sh` builds it
+the same way everywhere. Two ways to host it:
+
+- **GitHub Pages:** `.github/workflows/pages.yml` builds and publishes it on
+  each push to `main`. Turn it on once under Settings > Pages > Source:
+  GitHub Actions. Pages needs a public repository, or a paid plan for a
+  private one.
+- **Vercel:** `vercel.json` builds it on Vercel (installing Rust and Trunk
+  first) and serves `crates/gfa-web/dist`. Import the GitHub repository at
+  vercel.com/new, or from a checkout: `npx vercel link`, then `npx vercel`
+  for a preview and `npx vercel --prod` for production.
 
 ## Checks
 

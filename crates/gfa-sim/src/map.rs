@@ -68,6 +68,10 @@ pub const WALL_N: u8 = 2;
 pub const POST_W: u8 = 4;
 /// A post in the middle of a block's north edge.
 pub const POST_N: u8 = 8;
+/// A flat face on a block's west edge that stops a shot.
+const SHOT_W: u8 = 16;
+/// A flat face on a block's north edge that stops a shot.
+const SHOT_N: u8 = 32;
 
 /// The flat-face tiles that stop a person, for one style.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,6 +80,9 @@ pub struct WallTiles {
     /// Flat-face tiles that are posts: an 8×8 px square in the middle of the
     /// edge that stops a car, and nothing else.
     pub post: &'static [u8],
+    /// Flat-face tiles a shot goes through; every other flat face stops it.
+    /// `None`: no flat face stops a shot.
+    pub shot_through: Option<&'static [u8]>,
 }
 
 impl WallTiles {
@@ -83,6 +90,7 @@ impl WallTiles {
     pub const NONE: WallTiles = WallTiles {
         solid: &[],
         post: &[],
+        shot_through: None,
     };
 
     /// The lists for GTA's three cities, by the map's style number. From
@@ -97,12 +105,22 @@ impl WallTiles {
             69, 70, 100, 101, 102, 106, 124, 125, 155, 156, 159, 160, 161, 162, 163, 164, 169, 170,
             184, 185, 186, 197,
         ];
-        let (solid, post): (&[u8], &[u8]) = match style {
-            2 => (STYLE2, &[21, 180]),
-            3 => (STYLE3, &[140]),
-            _ => (STYLE1, &[97]),
+        // The faces a shot passes, AmiGTA1's reading of the original's
+        // per-style table: each list holds its style's post tile, since a
+        // shot goes past the post that stops a car.
+        const SHOT1: &[u8] = &[108, 109, 110, 168, 190, 194, 97];
+        const SHOT2: &[u8] = &[20, 58, 108, 112, 126, 160, 188, 193, 21];
+        const SHOT3: &[u8] = &[101, 102, 140, 171, 197];
+        let (solid, post, shot): (&[u8], &[u8], &[u8]) = match style {
+            2 => (STYLE2, &[21, 180], SHOT2),
+            3 => (STYLE3, &[140], SHOT3),
+            _ => (STYLE1, &[97], SHOT1),
         };
-        WallTiles { solid, post }
+        WallTiles {
+            solid,
+            post,
+            shot_through: Some(shot),
+        }
     }
 
     /// The list for a map: GTA's by style number; none for London's maps
@@ -122,6 +140,10 @@ impl WallTiles {
     /// A solid tile is a wall, not a post, even where the lists meet.
     fn is_post(&self, tile: u8) -> bool {
         tile != 0 && !self.is_solid(tile) && self.post.contains(&tile)
+    }
+
+    fn stops_shot(&self, tile: u8) -> bool {
+        tile != 0 && self.shot_through.is_some_and(|l| !l.contains(&tile))
     }
 }
 
@@ -248,7 +270,7 @@ impl SimMap {
     #[inline]
     pub fn post(&self, x: i32, y: i32, z: i32) -> u8 {
         if in_map(x, y, z) {
-            self.walls[cell(x, y, z)] >> 2
+            (self.walls[cell(x, y, z)] >> 2) & (WALL_W | WALL_N)
         } else {
             0
         }
@@ -330,6 +352,31 @@ impl SimMap {
     /// `z`? An edge counts when the segment crosses its line inside the
     /// edge's span, both ends included (AmiGTA1 `seg_cross`).
     pub fn wall_cross(&self, z: i32, x0: i32, y0: i32, x1: i32, y1: i32) -> bool {
+        self.seg_cross(z, x0, y0, x1, y1, |m, x, y, z| m.wall(x, y, z))
+    }
+
+    /// Does a shot's step between two 16.16 points cross a flat face that
+    /// stops it on layer `z`? Most flat faces do; posts and a short list
+    /// per style do not (AmiGTA1 `gta_nav_shot_cross`).
+    pub fn shot_cross(&self, z: i32, x0: i32, y0: i32, x1: i32, y1: i32) -> bool {
+        self.seg_cross(z, x0, y0, x1, y1, |m, x, y, z| {
+            if in_map(x, y, z) {
+                (m.walls[cell(x, y, z)] >> 4) & (WALL_W | WALL_N)
+            } else {
+                0
+            }
+        })
+    }
+
+    fn seg_cross(
+        &self,
+        z: i32,
+        x0: i32,
+        y0: i32,
+        x1: i32,
+        y1: i32,
+        bits: impl Fn(&SimMap, i32, i32, i32) -> u8,
+    ) -> bool {
         let (ax, ay) = (x0 >> FP, y0 >> FP);
         let (qx, qy) = (x1 >> FP, y1 >> FP);
         if ax == qx && ay == qy {
@@ -345,10 +392,10 @@ impl SimMap {
             }
             let y = ay + (i64::from(qy - ay) * i64::from(edge - ax) / i64::from(qx - ax)) as i32;
             let r = y >> BLOCK_SHIFT;
-            if self.wall(c, r, z) & WALL_W != 0 {
+            if bits(self, c, r, z) & WALL_W != 0 {
                 return true;
             }
-            if y & (block - 1) == 0 && self.wall(c, r - 1, z) & WALL_W != 0 {
+            if y & (block - 1) == 0 && bits(self, c, r - 1, z) & WALL_W != 0 {
                 return true;
             }
         }
@@ -361,10 +408,10 @@ impl SimMap {
             }
             let x = ax + (i64::from(qx - ax) * i64::from(edge - ay) / i64::from(qy - ay)) as i32;
             let r = x >> BLOCK_SHIFT;
-            if self.wall(r, c, z) & WALL_N != 0 {
+            if bits(self, r, c, z) & WALL_N != 0 {
                 return true;
             }
-            if x & (block - 1) == 0 && self.wall(r - 1, c, z) & WALL_N != 0 {
+            if x & (block - 1) == 0 && bits(self, r - 1, c, z) & WALL_N != 0 {
                 return true;
             }
         }
@@ -451,6 +498,12 @@ impl SimMap {
         }
         if self.walls_from.is_post(north) {
             w |= POST_N;
+        }
+        if self.walls_from.stops_shot(west) {
+            w |= SHOT_W;
+        }
+        if self.walls_from.stops_shot(north) {
+            w |= SHOT_N;
         }
         w
     }

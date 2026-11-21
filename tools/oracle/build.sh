@@ -22,8 +22,8 @@ mkdir -p "$here/build"
 cc=${CC:-clang}
 # C89 as AmiGTA1 is written; its host build relies on 64-bit long only where
 # it masks the result, and the walk code never overflows 32 bits.
-# The walk and drive harnesses run the fleet, the trains and the crowd too
-# (fleet.h).
+# The walk and drive harnesses run the fleet, the trains, the crowd, the
+# weapons and the score too (fleet.h).
 # AmiGTA1's drive_one reads two locals before it sets them (gta_traffic.c,
 # the crossing check); zero them so every run agrees.
 # The crowd is AmiGTA1's with gfa-sim's sidestep fix (ped_sidestep.pl), and
@@ -48,7 +48,7 @@ perl "$here/traffic_giveup.pl" < "$src/gta_traffic.c" |
     perl "$here/traffic_follow.pl" |
     perl "$here/traffic_spawn.pl" |
     perl "$here/traffic_stopline.pl" > "$patched/gta_traffic.c"
-street="$patched/gta_traffic.c $src/gta_route.c $src/gta_car.c $src/gta_train.c $patched/gta_peds.c"
+street="$patched/gta_traffic.c $src/gta_route.c $src/gta_car.c $src/gta_train.c $patched/gta_peds.c $src/gta_weapon.c $src/gta_score.c"
 $cc -std=c89 -O1 -w -ftrivial-auto-var-init=zero -I"$src" -I"$here" \
     -o "$here/build/walktrace" "$here/walktrace.c" "$src/gta_map.c" \
     "$src/gta_nav.c" "$src/gta_player.c" "$src/gta_trig.c" \

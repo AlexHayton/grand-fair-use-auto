@@ -31,7 +31,7 @@ relative to sibling checkouts `../carnage3d` and `../AmiGTA1`.
 | `gfa-app` pop-in check (`popin.rs`) | | `tools/bin/holecheck.sh` (the idea) | done |
 | `gfa-sim::script`, `gfa-sim::replay` | | `native/gta_main.c` (autodrive orders), `tools/gtadump.c` (`cmd_walk`) | done |
 | `gfa-sim::script_world` | | `native/gta_script.h` (`gta_script_world`) | skeleton |
-| `tools/oracle/walktrace.c` | | links `native/gta_map.c`, `gta_nav.c`, `gta_player.c`, `gta_trig.c`, `gta_style.c`, and the fleet (`fleet.h`) | done |
+| `tools/oracle/walktrace.c` | | links `native/gta_map.c`, `gta_nav.c`, `gta_player.c`, `gta_trig.c`, `gta_style.c`, and the fleet (`fleet.h`: the traffic, trains, crowd, weapons and score); restates the fire key and the harm from `gta_main.c` | done |
 | `tools/oracle/ped_sidestep.pl` | | patches a copy of `native/gta_peds.c` under `build/` with gfa-sim's sidestep fix; `build.sh` links the copy | done |
 | `tools/oracle/traffic_giveup.pl` | | patches a copy of `native/gta_traffic.c` under `build/` with gfa-sim's dead-end rule; `build.sh` links the copy | done |
 | `tools/oracle/traffic_lights.pl` | | patches the same copy after `traffic_giveup.pl`: lights timed by the crossing, a stop line asking about the box ahead | done |
@@ -56,6 +56,10 @@ relative to sibling checkouts `../carnage3d` and `../AmiGTA1`.
 | `gfa-sim::route` | | `native/gta_route.c`, `gta_route.h` | done |
 | `tools/oracle/traffictrace.c` | | links `native/gta_traffic.c` (patched), `gta_route.c`, `gta_nav.c`, `gta_map.c`, `gta_car.c`, `gta_style.c`, `gta_trig.c`, `gta_vehphys.c` | done |
 | `gfa-sim` police | | `native/gta_traffic.c:9681-10500` | M6 |
-| `gfa-sim::peds` (the crowd: spawning, brain, gaits, crossings, knockdowns, bodies, pull-out, ram) | | `native/gta_peds.c`, `gta_peds.h`; `gta_main.c` (the main loop's ped calls, walkers to traffic, fixture 11) | done (M5); shooting, punching, cops, script peds M6/M7 |
+| `gfa-sim::peds` (the crowd: spawning, brain, gaits, crossings, knockdowns, bodies, pull-out, ram) | | `native/gta_peds.c`, `gta_peds.h`; `gta_main.c` (the main loop's ped calls, walkers to traffic, fixture 11) | done (M5); shooting and punching (M6 stage 1); cops, script peds M6/M7 |
+| `gfa-sim::weapons` | | `native/gta_weapon.c` (shots, hits, explosions, fires, `wreck_sweep`, `wreck_car`, `explode_face`), `gta_main.c` (the fire latch, the punch, the armed sprites, the player as a target) | done |
+| `gfa-sim::score` | | `native/gta_score.c` (awards, streaks, heat, each city's thresholds, crimes) | done |
+| `gfa-sim::peds` (`hit_segment`, `shoot`, `punch`, `panic`, `burn`) | | `native/gta_peds.c` (`gta_peds_hit_segment`, `_shoot`, `_punch`, `_panic`, `_burn`) | done |
+| `gfa-sim::map` (`shot_cross`) | | `native/gta_nav.c` (`gta_nav_shot_cross`, the per-style lists of faces a shot passes) | done |
 | `gfa_formats::style::PED_REMAP_TABLES` | | measured from the user's styles (decision log, 2026-11-21) | done |
 | `gfa-sim` mission VM | | `native/gta_script*.c`, `gta_trig.c` | M7 |

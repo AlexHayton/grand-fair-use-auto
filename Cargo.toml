@@ -56,6 +56,16 @@ toml = "1"
 clap = { version = "4", features = ["derive"] }
 png = "0.18"
 
+# Reading the game from the archive it came in (gfa-assets/src/archive).
+# rars: RAR 5's LZ decoder only; without its defaults there is no writer,
+# encryption, recovery or threads.
+rars = { version = "0.13", default-features = false }
+miniz_oxide = "0.8"
+crc32fast = "1.5"
+js-sys = "0.3"
+# The desktop's file dialog, when no game is found next to the program.
+rfd = "0.18"
+
 # Debug builds are unplayable with unoptimised wgpu and decoders; optimise
 # dependencies but keep our own code quick to rebuild and easy to debug.
 [profile.dev.package."*"]

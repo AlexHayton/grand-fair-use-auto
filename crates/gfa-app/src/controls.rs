@@ -6,6 +6,8 @@
 //! - Return gets in and out of cars; Space is the handbrake and jump;
 //!   Ctrl fires; Tab is the special key (horn, siren); Z and X change
 //!   weapon; F6 pauses; Esc quits.
+//! - Keypad `*` gives every gun 99 rounds, which the original did only with
+//!   a name-entry cheat on; until the cheats come (M8) it is always on.
 //! - Kept for what they did there, not built yet: F5 retunes the radio
 //!   (M8), F7 repeats the last pager message, F9 shows the area's name,
 //!   F10 repeats the last message (M7), F8 the frame limiter and F11 the
@@ -20,7 +22,14 @@
 //!   turn. `R` returns to straight down.
 //! - `C` detaches the camera to fly over the city with the movement keys
 //!   (Shift is faster); the player stands still meanwhile.
-//! - `` ` `` shows the debug overlay (in the app's event loop).
+//! - `` ` `` shows and hides the debug menu (in the app's event loop); it
+//!   starts hidden. Its buttons reach the simulation as presses queued here
+//!   ([`Controls::tap`]), held until a tick has run, so a recording replays
+//!   them.
+//!
+//! On a touch screen the web page draws buttons along the bottom for the
+//! keys above ([`touch_button`] names them) and holds them here
+//! ([`Controls::touch`]) for as long as a finger is on them.
 //!
 //! The keys reach the simulation only as a [`TickInput`] per tick.
 
@@ -56,6 +65,30 @@ pub struct Controls {
     last_cursor: Option<Vec2>,
     /// Cursor in window pixels, for the inspector.
     pub cursor: Option<Vec2>,
+    /// Buttons pressed from the debug menu, held until a tick has run
+    /// with them, so they reach the simulation (and its recording) as a
+    /// key press would.
+    queued: Buttons,
+    /// On-screen buttons a finger is holding.
+    touched: Buttons,
+}
+
+/// The on-screen button for each key, by the name the page uses.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub fn touch_button(name: &str) -> Option<Buttons> {
+    Some(match name {
+        "up" => Buttons::UP,
+        "down" => Buttons::DOWN,
+        "left" => Buttons::LEFT,
+        "right" => Buttons::RIGHT,
+        "fire" => Buttons::FIRE,
+        "enter" => Buttons::ENTER,
+        "jump" => Buttons::HANDBRAKE,
+        "special" => Buttons::SPECIAL,
+        "prev" => Buttons::WEAPON_PREV,
+        "next" => Buttons::WEAPON_NEXT,
+        _ => return None,
+    })
 }
 
 impl Controls {
@@ -74,7 +107,29 @@ impl Controls {
             dragging: false,
             last_cursor: None,
             cursor: None,
+            queued: Buttons::NONE,
+            touched: Buttons::NONE,
         }
+    }
+
+    /// A finger went down on (`down`) or came off an on-screen button.
+    pub fn touch(&mut self, b: Buttons, down: bool) {
+        self.touched.set(b, down);
+    }
+
+    /// Press `b` for the next tick that runs (a debug menu button).
+    pub fn tap(&mut self, b: Buttons) {
+        self.queued.set(b, true);
+    }
+
+    /// Is a debug menu press waiting for a tick?
+    pub fn tapped(&self, b: Buttons) -> bool {
+        self.queued.contains(b)
+    }
+
+    /// Ticks have run with the queued presses: let them go.
+    pub fn ticked(&mut self) {
+        self.queued = Buttons::NONE;
     }
 
     pub fn jump_to(&mut self, target: Vec3) {
@@ -139,6 +194,7 @@ impl Controls {
             }
             WindowEvent::Focused(false) => {
                 self.held.clear();
+                self.touched = Buttons::NONE;
                 self.dragging = false;
                 false
             }
@@ -176,10 +232,11 @@ impl Controls {
     const RIGHT: [KeyCode; 2] = [KeyCode::ArrowRight, KeyCode::KeyD];
     const SHIFT: [KeyCode; 2] = [KeyCode::ShiftLeft, KeyCode::ShiftRight];
 
-    /// The player's buttons this tick. Nothing while the camera flies.
+    /// The player's buttons this tick. Nothing but the debug menu's while
+    /// the camera flies.
     pub fn input(&self) -> TickInput {
         if self.flying {
-            return TickInput::default();
+            return TickInput::new(self.queued);
         }
         let b = Buttons::NONE
             .with(Buttons::UP, self.any(&Self::UP))
@@ -198,7 +255,9 @@ impl Controls {
             )
             .with(Buttons::SPECIAL, self.any(&[KeyCode::Tab]))
             .with(Buttons::WEAPON_PREV, self.any(&[KeyCode::KeyZ]))
-            .with(Buttons::WEAPON_NEXT, self.any(&[KeyCode::KeyX]));
+            .with(Buttons::WEAPON_NEXT, self.any(&[KeyCode::KeyX]))
+            .with(Buttons::ALL_WEAPONS, self.any(&[KeyCode::NumpadMultiply]));
+        let b = Buttons(b.0 | self.queued.0 | self.touched.0);
         TickInput::new(b)
     }
 
@@ -255,5 +314,41 @@ impl Controls {
             .max(Vec3::new(f32::MIN, f32::MIN, MIN_EYE_Z));
         }
         cam
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_menu_press_is_held_until_a_tick_has_run() {
+        let mut c = Controls::new(Vec3::ZERO);
+        assert!(!c.input().held(Buttons::ALL_WEAPONS));
+        c.tap(Buttons::ALL_WEAPONS);
+        assert!(c.tapped(Buttons::ALL_WEAPONS));
+        assert!(c.input().held(Buttons::ALL_WEAPONS));
+        // Flying, the keys are not the player's, but the menu's still are.
+        c.flying = true;
+        assert!(c.input().held(Buttons::ALL_WEAPONS));
+        c.ticked();
+        assert!(!c.input().held(Buttons::ALL_WEAPONS));
+    }
+
+    #[test]
+    fn a_touched_button_is_held_until_the_finger_lifts() {
+        let mut c = Controls::new(Vec3::ZERO);
+        let up = touch_button("up").unwrap();
+        let fire = touch_button("fire").unwrap();
+        c.touch(up, true);
+        c.touch(fire, true);
+        assert!(c.input().held(Buttons::UP) && c.input().held(Buttons::FIRE));
+        // Ticks do not release it, unlike a menu press.
+        c.ticked();
+        assert!(c.input().held(Buttons::UP));
+        c.touch(up, false);
+        assert!(!c.input().held(Buttons::UP) && c.input().held(Buttons::FIRE));
+        assert_eq!(touch_button("jump"), Some(Buttons::HANDBRAKE));
+        assert_eq!(touch_button("nope"), None);
     }
 }

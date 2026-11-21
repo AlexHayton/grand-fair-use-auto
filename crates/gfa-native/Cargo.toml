@@ -20,3 +20,6 @@ gfa-assets.workspace = true
 clap.workspace = true
 env_logger.workspace = true
 log.workspace = true
+rfd.workspace = true
+serde.workspace = true
+toml.workspace = true

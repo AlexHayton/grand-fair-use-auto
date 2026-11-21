@@ -1,13 +1,18 @@
-//! Resolving the game data folder.
+//! Resolving the game data: a folder, or the archive the game came in.
 //!
-//! The data folder is the one that contains `GTADATA/`. Its location is
+//! The data is the folder that contains `GTADATA/`, or a `.rar` or `.zip`
+//! with that folder somewhere inside ([`crate::archive`]). Its location is
 //! private to the user's machine, so it never appears in committed files.
-//! Sources, highest priority first:
+//! [`DataPath::resolve`] reads, highest priority first:
 //!
 //! 1. an explicit path (the `--data` flag);
 //! 2. the `GFA_DATA` environment variable;
 //! 3. `data = "..."` in a `gfa.local.toml`, searched for from the current
 //!    directory upwards.
+//!
+//! The desktop program then looks for an archive beside itself
+//! ([`DataPath::find_beside`], [`program_dirs`]), and last asks the player
+//! to choose one (`gfa-native`).
 //!
 //! A path that points at `GTADATA/` itself is accepted and lifted to its
 //! parent.
@@ -17,10 +22,18 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+use crate::archive::{ArchiveError, ArchiveSource};
+use crate::source::{AssetSource, FsSource};
+
 /// Name of the machine-local config file (gitignored).
 pub const LOCAL_CONFIG: &str = "gfa.local.toml";
 /// Environment variable naming the data folder.
 pub const ENV_VAR: &str = "GFA_DATA";
+/// Environment variable naming an archive of the same game, which the data
+/// tests check against the folder.
+pub const ARCHIVE_ENV_VAR: &str = "GFA_ARCHIVE";
+/// The archive extensions looked for beside the program.
+pub const ARCHIVE_EXTENSIONS: [&str; 2] = ["rar", "zip"];
 
 /// Where a resolved data path came from.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,6 +41,12 @@ pub enum DataPathOrigin {
     Explicit,
     Env,
     LocalConfig(PathBuf),
+    /// Found in the program's folder.
+    BesideProgram,
+    /// Chosen in the file dialog just now.
+    Chosen,
+    /// Chosen in the file dialog before, and remembered in this file.
+    Remembered(PathBuf),
 }
 
 impl fmt::Display for DataPathOrigin {
@@ -36,11 +55,15 @@ impl fmt::Display for DataPathOrigin {
             Self::Explicit => write!(f, "--data"),
             Self::Env => write!(f, "${ENV_VAR}"),
             Self::LocalConfig(p) => write!(f, "{}", p.display()),
+            Self::BesideProgram => write!(f, "beside the program"),
+            Self::Chosen => write!(f, "chosen"),
+            Self::Remembered(p) => write!(f, "remembered in {}", p.display()),
         }
     }
 }
 
-/// A validated data folder: it exists and contains `GTADATA/`.
+/// Validated game data: a folder that contains `GTADATA/`, or an archive
+/// with `GTADATA/` inside.
 #[derive(Debug, Clone)]
 pub struct DataPath {
     pub root: PathBuf,
@@ -58,6 +81,13 @@ pub enum DataPathError {
         path: PathBuf,
         origin: DataPathOrigin,
     },
+    #[error("{path} (from {origin}): {source}")]
+    Archive {
+        path: PathBuf,
+        origin: DataPathOrigin,
+        #[source]
+        source: ArchiveError,
+    },
     #[error("could not read {path}: {source}")]
     Config {
         path: PathBuf,
@@ -69,6 +99,33 @@ pub enum DataPathError {
 #[derive(Deserialize)]
 struct LocalConfig {
     data: Option<PathBuf>,
+    /// For the data tests only: an archive of the same game.
+    archive: Option<PathBuf>,
+}
+
+/// The folders to look in for an archive beside the program: its own, and
+/// on macOS, when it runs inside an app bundle (`X.app/Contents/MacOS/`),
+/// the folder that holds the bundle.
+pub fn program_dirs(exe: &Path) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Some(dir) = exe.parent() {
+        dirs.push(dir.to_path_buf());
+        let bundle = dir
+            .parent()
+            .filter(|c| c.file_name().is_some_and(|n| n == "Contents"))
+            .and_then(Path::parent)
+            .filter(|b| b.extension().is_some_and(|e| e.eq_ignore_ascii_case("app")));
+        if let Some(outside) = bundle.and_then(Path::parent) {
+            dirs.push(outside.to_path_buf());
+        }
+    }
+    dirs
+}
+
+fn is_archive_name(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| ARCHIVE_EXTENSIONS.iter().any(|a| e.eq_ignore_ascii_case(a)))
 }
 
 impl DataPath {
@@ -113,7 +170,84 @@ impl DataPath {
         Err(DataPathError::NotConfigured)
     }
 
+    /// The game in the first archive in `dir` (by name) that holds one.
+    /// The archives passed over come back as errors, to be reported.
+    pub fn find_beside(dir: &Path) -> (Option<Self>, Vec<DataPathError>) {
+        let mut archives: Vec<PathBuf> = std::fs::read_dir(dir)
+            .map(|rd| {
+                rd.flatten()
+                    .map(|e| e.path())
+                    .filter(|p| p.is_file() && is_archive_name(p))
+                    .collect()
+            })
+            .unwrap_or_default();
+        archives.sort();
+        let mut passed = Vec::new();
+        for a in archives {
+            match Self::check(&a, DataPathOrigin::BesideProgram) {
+                Ok(d) => return (Some(d), passed),
+                Err(e) => passed.push(e),
+            }
+        }
+        (None, passed)
+    }
+
+    /// Check that `path` is game data: a folder with `GTADATA/`, or an
+    /// archive with the game inside.
+    pub fn check(path: &Path, origin: DataPathOrigin) -> Result<Self, DataPathError> {
+        Self::validate(path, origin)
+    }
+
+    /// Whether the data is an archive rather than a folder.
+    pub fn is_archive(&self) -> bool {
+        self.root.is_file()
+    }
+
+    /// Open the data for reading.
+    pub fn open(&self) -> Result<Box<dyn AssetSource>, DataPathError> {
+        if self.is_archive() {
+            ArchiveSource::open(&self.root)
+                .map(|a| Box::new(a) as Box<dyn AssetSource>)
+                .map_err(|source| DataPathError::Archive {
+                    path: self.root.clone(),
+                    origin: self.origin.clone(),
+                    source,
+                })
+        } else {
+            Ok(Box::new(FsSource::new(&self.root)))
+        }
+    }
+
+    /// For the data tests: an archive of the same game, from
+    /// `GFA_ARCHIVE` or `archive = "..."` in `gfa.local.toml`.
+    pub fn test_archive() -> Option<PathBuf> {
+        if let Some(p) = std::env::var_os(ARCHIVE_ENV_VAR).filter(|p| !p.is_empty()) {
+            return Some(PathBuf::from(p));
+        }
+        let cwd = std::env::current_dir().ok()?;
+        let cfg = find_upwards(&cwd, LOCAL_CONFIG)?;
+        let parsed: LocalConfig = toml::from_str(&std::fs::read_to_string(&cfg).ok()?).ok()?;
+        let archive = parsed.archive?;
+        Some(match cfg.parent() {
+            Some(dir) if archive.is_relative() => dir.join(archive),
+            _ => archive,
+        })
+    }
+
     fn validate(path: &Path, origin: DataPathOrigin) -> Result<Self, DataPathError> {
+        if path.is_file() {
+            return match ArchiveSource::open(path) {
+                Ok(_) => Ok(Self {
+                    root: path.to_path_buf(),
+                    origin,
+                }),
+                Err(source) => Err(DataPathError::Archive {
+                    path: path.to_path_buf(),
+                    origin,
+                    source,
+                }),
+            };
+        }
         let is_gtadata = |p: &Path| {
             p.file_name()
                 .and_then(|n| n.to_str())
@@ -190,6 +324,71 @@ mod tests {
         std::fs::create_dir(top.join("GTADATA")).unwrap();
         let got = DataPath::resolve_from(Some(&top.join("GTADATA")), None, &top).unwrap();
         assert_eq!(got.root, top);
+    }
+
+    #[test]
+    fn an_archive_beside_the_program_is_found_and_others_reported() {
+        let top = scratch("beside");
+        std::fs::write(top.join("a-broken.zip"), b"PK not really").unwrap();
+        std::fs::write(top.join("readme.txt"), b"hello").unwrap();
+        let (none, passed) = DataPath::find_beside(&top);
+        assert!(none.is_none());
+        assert_eq!(passed.len(), 1);
+        assert!(matches!(passed[0], DataPathError::Archive { .. }));
+        // A game at the top of a stored ZIP.
+        std::fs::write(top.join("b-game.ZIP"), one_file_zip("GTADATA/MISSION.INI")).unwrap();
+        let (found, _) = DataPath::find_beside(&top);
+        let found = found.unwrap();
+        assert_eq!(found.root, top.join("b-game.ZIP"));
+        assert!(found.is_archive());
+        assert!(found.open().unwrap().exists("gtadata/mission.ini"));
+    }
+
+    #[test]
+    fn program_dirs_reach_out_of_an_app_bundle() {
+        let exe = Path::new("/Games/GFA.app/Contents/MacOS/gfa");
+        assert_eq!(
+            program_dirs(exe),
+            [
+                PathBuf::from("/Games/GFA.app/Contents/MacOS"),
+                PathBuf::from("/Games")
+            ]
+        );
+        assert_eq!(
+            program_dirs(Path::new("/Games/gfa")),
+            [PathBuf::from("/Games")]
+        );
+    }
+
+    /// A ZIP holding one empty stored file.
+    fn one_file_zip(name: &str) -> Vec<u8> {
+        let n = name.len() as u16;
+        let crc = 0u32; // CRC-32 of nothing
+        let mut z = Vec::new();
+        z.extend(0x0403_4b50u32.to_le_bytes());
+        z.extend([20, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        z.extend(crc.to_le_bytes());
+        z.extend([0; 8]);
+        z.extend(n.to_le_bytes());
+        z.extend([0, 0]);
+        z.extend(name.as_bytes());
+        let dir_at = z.len() as u32;
+        let mut c = Vec::new();
+        c.extend(0x0201_4b50u32.to_le_bytes());
+        c.extend([20, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        c.extend(crc.to_le_bytes());
+        c.extend([0; 8]);
+        c.extend(n.to_le_bytes());
+        c.extend([0; 12]);
+        c.extend(0u32.to_le_bytes());
+        c.extend(name.as_bytes());
+        z.extend(&c);
+        z.extend(0x0605_4b50u32.to_le_bytes());
+        z.extend([0, 0, 0, 0, 1, 0, 1, 0]);
+        z.extend((c.len() as u32).to_le_bytes());
+        z.extend(dir_at.to_le_bytes());
+        z.extend([0, 0]);
+        z
     }
 
     #[test]

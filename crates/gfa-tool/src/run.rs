@@ -225,5 +225,45 @@ pub fn world_sprites(
         let p = &world.player;
         out.extend(scene.ped_sprite(frame, 0, world.player_pos(), p.draw_angle()));
     }
+    push_weapons(scene, world, &mut out);
     out
+}
+
+/// What the weapons leave in the picture: the splats on the ground, and in
+/// the air the shots, the fires and the explosions (as the app draws them).
+fn push_weapons(
+    scene: &render::Scene,
+    world: &World,
+    out: &mut Vec<gfa_render::sprites::SpriteInstance>,
+) {
+    use gfa_sim::weapons::{BLAST_FRAMES, Kind};
+    let at = |x: i64, y: i64, layer: i32, lift: i32| {
+        let (x, y) = (x as i32, y as i32);
+        [x, y, world.map.ground_z(x, y, layer) + (lift << 16)]
+    };
+    let w = &world.weapons;
+    for s in w.splats.iter().filter(|s| s.ticks > 0) {
+        out.extend(scene.object_sprite(0x0d, 0, at(s.x, s.y, s.layer, 0), 0));
+    }
+    for s in w.shots.iter().filter(|s| s.alive) {
+        let (object, frame, angle) = match s.kind {
+            Kind::Bullet => (0x4a, 0, s.heading + 128),
+            Kind::Rocket => (0x1f, s.frame - 1, s.heading),
+            Kind::Flame => (0x4b, s.frame - 1, s.heading),
+        };
+        let frame = usize::try_from(frame).unwrap_or(0);
+        out.extend(scene.object_sprite(object, frame, at(s.x, s.y, s.layer, 4), angle));
+    }
+    for f in w.fires.iter().filter(|f| f.ticks > 0) {
+        out.extend(scene.object_sprite(0x2e, f.frame as usize, at(f.x, f.y, f.layer, 1), 0));
+    }
+    for b in w.blasts.iter().filter(|b| b.frame > 0) {
+        for q in 0..4usize {
+            let dx: i64 = if q & 1 != 0 { 16 } else { -16 };
+            let dy: i64 = if q & 2 != 0 { 15 } else { -15 };
+            let n = q * BLAST_FRAMES as usize + (b.frame - 1) as usize;
+            let pos = at(b.x + (dx << 16), b.y + (dy << 16), b.layer, 8);
+            out.extend(scene.blast_sprite(n, pos));
+        }
+    }
 }

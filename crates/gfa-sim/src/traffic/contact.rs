@@ -7,7 +7,7 @@
 //! `gta_traffic_leave_wreck`, `gta_traffic_grab_car`,
 //! `gta_traffic_rename_car`, `gta_traffic_box_free`, `gta_traffic_sweep_box`,
 //! `gta_traffic_ram`), `gta_main.c` (`fleet_car_at`) and `gta_weapon.c`
-//! (`wreck_sweep`, without the blast, which comes with the weapons).
+//! (`wreck_sweep`; the blast is the weapons').
 
 use gfa_fixed::trig::{cos, sin};
 use gfa_formats::style::CarInfo;
@@ -604,41 +604,46 @@ impl Traffic {
         out
     }
 
-    /// Write-offs in the fleet catch fire and, [`cars::FUSE`] ticks later,
-    /// burn out where they stand (AmiGTA1's `wreck_sweep`; the blast itself
-    /// comes with the weapons).
-    pub fn wreck_sweep(&mut self, say: &mut impl FnMut(String)) {
-        for i in 0..self.n {
-            let c = &mut self.cars[i];
-            if c.done || c.wrecked || c.damage < cars::WRECKED {
-                continue;
-            }
-            if c.fuse == 0 {
-                c.fuse = cars::FUSE;
-                c.dmg_bits |= cars::DAMAGE_MASK;
-                say(format!(
-                    "traffic: car {i} (model {}) is a write-off - burning",
-                    c.model
-                ));
-                continue;
-            }
-            c.fuse -= 1;
-            if c.fuse > 0 {
-                continue;
-            }
-            say(format!(
-                "traffic: car {i} (model {}) blew up at ({},{})",
-                c.model,
-                c.x >> 16,
-                c.y >> 16
-            ));
-            c.wrecked = true;
-            c.abandoned = true;
-            c.speed = 0;
-            c.knock = 0;
-            c.fuse = 0;
-            c.hold = hold::NONE;
+    /// One car's turn in the wreck sweep: a write-off catches fire and,
+    /// [`cars::FUSE`] ticks later, blows up and stays where it stood as a
+    /// wreck nobody drives (AmiGTA1's `wreck_sweep`). Returns the car's
+    /// model, centre, heading and layer on the tick it blows up, for the
+    /// blast.
+    pub fn wreck_step(
+        &mut self,
+        i: usize,
+        say: &mut dyn FnMut(String),
+    ) -> Option<(usize, i64, i64, i32, i32)> {
+        let c = &mut self.cars[i];
+        if c.done || c.wrecked || c.damage < cars::WRECKED {
+            return None;
         }
+        if c.fuse == 0 {
+            c.fuse = cars::FUSE;
+            c.dmg_bits |= cars::DAMAGE_MASK;
+            say(format!(
+                "traffic: car {i} (model {}) is a write-off - burning",
+                c.model
+            ));
+            return None;
+        }
+        c.fuse -= 1;
+        if c.fuse > 0 {
+            return None;
+        }
+        say(format!(
+            "traffic: car {i} (model {}) blew up at ({},{})",
+            c.model,
+            c.x >> 16,
+            c.y >> 16
+        ));
+        c.wrecked = true;
+        c.abandoned = true;
+        c.speed = 0;
+        c.knock = 0;
+        c.fuse = 0;
+        c.hold = hold::NONE;
+        Some((c.model, c.x, c.y, c.face, c.layer))
     }
 
     /// The cars standing with nobody in them: parked, left or wrecked.

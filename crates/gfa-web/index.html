@@ -2,7 +2,11 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!-- The page may talk only to its own site: the player's game files
+         cannot be sent anywhere else. -->
+    <meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'" />
     <title>Grand Fair Use Auto</title>
     <link data-trunk rel="rust" data-wasm-opt="2" />
     <style>
@@ -13,26 +17,62 @@
         --muted: #9a978f;
         --accent: #f2c14e;
         --line: #2b2e36;
+        --key: clamp(48px, 13vw, 66px);
       }
       html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden;
         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--text); }
-      canvas { display: block; width: 100vw; height: 100vh; outline: none; }
-      #data-panel { position: fixed; inset: 0; display: grid; place-items: center; padding: 16px; }
+      canvas { display: block; width: 100vw; height: 100vh; outline: none; touch-action: none; }
+      #data-panel { position: fixed; inset: 0; display: grid; place-items: center; padding: 16px;
+        overflow-y: auto; background: radial-gradient(ellipse at top, #1d2028, #000 70%); }
       #data-panel[hidden] { display: none; }
-      .card { max-width: 440px; background: var(--panel); border: 1px solid var(--line);
-        border-radius: 10px; padding: 24px; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
-      .card h1 { margin: 0 0 8px; font-size: 20px; }
-      .card p { margin: 0 0 12px; color: var(--muted); }
-      .card code { color: var(--text); }
-      .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
-      button, label.button { font: inherit; cursor: pointer; border-radius: 6px; padding: 8px 14px;
+      .card { width: 100%; max-width: 460px; box-sizing: border-box; background: var(--panel);
+        border: 1px solid var(--line); border-radius: 10px; padding: 24px; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+      .card h1 { margin: 0 0 4px; font-size: 22px; letter-spacing: .01em; }
+      .card .lede { margin: 0 0 18px; color: var(--muted); }
+      .card ol { margin: 0; padding: 0; list-style: none; counter-reset: step; }
+      .card li { position: relative; padding-left: 36px; margin-bottom: 18px; counter-increment: step; }
+      .card li::before { content: counter(step); position: absolute; left: 0; top: 0; width: 24px; height: 24px;
+        border-radius: 50%; background: var(--line); color: var(--text); font-weight: 600; font-size: 13px;
+        display: grid; place-items: center; }
+      .card li p { margin: 0 0 8px; }
+      .search { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      .search strong { font-size: 17px; color: var(--accent); }
+      .note { margin: 0; color: var(--muted); font-size: 13px; }
+      button { font: inherit; cursor: pointer; border-radius: 6px; padding: 8px 14px;
         border: 1px solid var(--line); background: #22252d; color: var(--text); }
-      label.button.primary { background: var(--accent); color: #111; border-color: var(--accent); font-weight: 600; }
-      button:focus-visible, label.button:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
-      #status { min-height: 1.4em; margin-top: 14px; color: var(--text); }
-      #data-button { position: fixed; right: 12px; bottom: 12px; opacity: .6; }
+      button.small { padding: 3px 10px; font-size: 13px; }
+      button.primary { background: var(--accent); color: #111; border-color: var(--accent);
+        font-weight: 600; padding: 10px 18px; }
+      button:disabled { opacity: .5; cursor: progress; }
+      button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .link { background: none; border: none; padding: 0; color: var(--muted); text-decoration: underline; cursor: pointer; }
+      .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+      #status { min-height: 1.4em; margin-top: 12px; color: var(--text); overflow-wrap: anywhere; }
+      progress { width: 100%; height: 6px; margin-top: 10px; accent-color: var(--accent); }
+      progress[hidden] { display: none; }
+      #data-button { position: fixed; right: 12px; top: 12px; opacity: .6; }
       #data-button:hover { opacity: 1; }
       #data-button[hidden] { display: none; }
+
+      /* Touch screens: the keys as buttons along the bottom. */
+      #touch { position: fixed; left: 0; right: 0; bottom: 0; display: flex; justify-content: space-between;
+        align-items: flex-end; pointer-events: none; box-sizing: border-box;
+        padding: 12px max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+        user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+      #touch[hidden] { display: none; }
+      #touch .pad, #touch .acts { pointer-events: auto; display: grid; gap: 8px; }
+      #touch .pad { grid-template-columns: repeat(3, var(--key)); grid-template-rows: repeat(3, var(--key)); }
+      #touch .acts { grid-template-columns: repeat(2, var(--key)); grid-auto-rows: var(--key); }
+      #touch button { width: var(--key); height: var(--key); padding: 0; border-radius: 50%;
+        background: rgba(20, 22, 28, .45); border: 1px solid rgba(255, 255, 255, .28); color: #fff;
+        font-weight: 600; font-size: 14px; touch-action: none; -webkit-tap-highlight-color: transparent; }
+      #touch .pad button { font-size: 20px; border-radius: 14px; }
+      #touch button.down { background: rgba(242, 193, 78, .65); color: #111; }
+      #touch [data-key="up"] { grid-area: 1 / 2; }
+      #touch [data-key="left"] { grid-area: 2 / 1; }
+      #touch [data-key="right"] { grid-area: 2 / 3; }
+      #touch [data-key="down"] { grid-area: 3 / 2; }
+      #touch .gun { font-size: 12px; }
     </style>
   </head>
   <body>
@@ -41,44 +81,72 @@
     <div id="data-panel">
       <div class="card">
         <h1>Grand Fair Use Auto</h1>
-        <p>Choose the folder from your own copy of the game: the one that contains
-          <code>GTADATA</code>. Your files are read in this browser and kept in its
-          storage; nothing is uploaded.</p>
+        <p class="lede">The 1997 game, played in your browser from your own copy of its data.
+          None of the game comes with this page.</p>
+        <ol>
+          <li>
+            <p>Find the game: search for this in your favourite search engine, and download it.
+              It comes as a <code>.rar</code> or <code>.zip</code> file.</p>
+            <div class="search">
+              <strong id="search-term">GTA1 Director's Cut</strong>
+              <button id="copy" class="small" type="button">Copy</button>
+            </div>
+          </li>
+          <li>
+            <p>Then select the file you downloaded. You don't need to unpack it.</p>
+            <button id="archive-button" class="primary" type="button">Select game archive</button>
+            <input id="archive" type="file" accept=".rar,.zip" hidden />
+          </li>
+        </ol>
+        <p class="note">The archive is read here, in this browser. Nothing is uploaded. The files the game
+          needs are kept in this browser's storage for next time.</p>
         <div class="row">
-          <label class="button primary">Choose game folder
-            <input id="folder" type="file" webkitdirectory multiple hidden />
-          </label>
-          <button id="forget" type="button" hidden>Forget saved files</button>
+          <button id="folder-button" class="link" type="button">Unpacked it already? Select the folder instead</button>
+          <input id="folder" type="file" webkitdirectory multiple hidden />
+          <button id="forget" class="link" type="button" hidden>Forget saved files</button>
         </div>
+        <progress id="progress" hidden></progress>
         <div id="status" role="status"></div>
       </div>
     </div>
     <button id="data-button" type="button" hidden>Game data</button>
 
+    <div id="touch" hidden aria-label="Touch controls">
+      <div class="pad">
+        <button type="button" data-key="up" aria-label="Forward">▲</button>
+        <button type="button" data-key="left" aria-label="Turn left">◀</button>
+        <button type="button" data-key="right" aria-label="Turn right">▶</button>
+        <button type="button" data-key="down" aria-label="Back">▼</button>
+      </div>
+      <div class="acts">
+        <button type="button" class="gun" data-key="prev" aria-label="Previous weapon">◀ Gun</button>
+        <button type="button" class="gun" data-key="next" aria-label="Next weapon">Gun ▶</button>
+        <button type="button" data-key="special" aria-label="Horn">Horn</button>
+        <button type="button" data-key="enter" aria-label="Get in or out of a car">Car</button>
+        <button type="button" data-key="jump" aria-label="Jump or handbrake">Jump</button>
+        <button type="button" data-key="fire" aria-label="Fire">Fire</button>
+      </div>
+    </div>
+
     <script>
       "use strict";
-      // The page's half of loading game data: pick a folder, keep the files
-      // the engine needs in IndexedDB, and hand them to Rust
-      // (gfa_add_file, gfa_files_done in crates/gfa-app/src/web.rs).
+      // The page's half of starting the game (Rust's is crates/gfa-app/src/web.rs):
+      // - the start screen: where to find the game, and the archive picker.
+      //   gfa_unpack reads only the files a level needs out of the chosen
+      //   File; for an unpacked copy, gfa_game_path picks them from a folder;
+      // - an IndexedDB cache of those files, so the next visit starts at once;
+      // - on touch screens, buttons along the bottom for the keys (gfa_touch).
 
-      // What the engine reads so far: maps, styles, mission scripts, texts, fonts.
-      const NEEDED = /\.(cmp|g24|gry|ini|fxt|fon)$/i;
       const DB = "gfa", STORE = "files";
+      const $ = (id) => document.getElementById(id);
+      const panel = $("data-panel"), status = $("status"), bar = $("progress");
+      const forget = $("forget"), dataButton = $("data-button"), touchPad = $("touch");
 
-      const panel = document.getElementById("data-panel");
-      const status = document.getElementById("status");
-      const forget = document.getElementById("forget");
-      const dataButton = document.getElementById("data-button");
-
-      // "Some/Where/GTA/GTADATA/UK/x.cmp" -> "GTADATA/UK/x.cmp"; null if unwanted.
-      function gamePath(rel) {
-        const parts = rel.split("/");
-        const i = parts.findIndex((p) => p.toUpperCase() === "GTADATA");
-        if (i < 0 || !NEEDED.test(rel)) return null;
-        const rest = parts.slice(i);
-        if (rest.some((p) => p.toUpperCase() === "AUDIO")) return null;
-        return rest.join("/");
-      }
+      let wasm = null;
+      const wasmReady = new Promise((resolve) => {
+        if (window.wasmBindings) return resolve(window.wasmBindings);
+        addEventListener("TrunkApplicationStarted", () => resolve(window.wasmBindings), { once: true });
+      }).then((w) => (wasm = w));
 
       function openDb() {
         return new Promise((resolve, reject) => {
@@ -116,36 +184,86 @@
         },
       };
 
-      // Hand files to the engine: [{path, bytes: ArrayBuffer}].
-      async function loadEntries(entries) {
-        const wasm = await wasmReady;
-        for (const e of entries) wasm.gfa_add_file(e.path, new Uint8Array(e.bytes));
-        wasm.gfa_files_done();
-        panel.hidden = true;
-        dataButton.hidden = false;
-        document.getElementById("gfa-canvas").focus();
+      function busy(on) {
+        for (const b of panel.querySelectorAll("button")) b.disabled = on;
+        bar.hidden = !on;
       }
 
-      const wasmReady = new Promise((resolve) => {
-        if (window.wasmBindings) return resolve(window.wasmBindings);
-        addEventListener("TrunkApplicationStarted", () => resolve(window.wasmBindings), { once: true });
-      });
+      $("archive-button").addEventListener("click", () => $("archive").click());
+      $("folder-button").addEventListener("click", () => $("folder").click());
 
-      document.getElementById("folder").addEventListener("change", async (ev) => {
-        const files = [...ev.target.files]
-          .map((f) => ({ f, path: gamePath(f.webkitRelativePath || f.name) }))
-          .filter((x) => x.path);
-        if (!files.some((x) => /^GTADATA\/MISSION\.INI$/i.test(x.path) || /MISSUKE?\.INI$/i.test(x.path))) {
-          status.textContent = "That folder has no GTADATA/MISSION.INI. Choose the folder that contains GTADATA.";
-          return;
-        }
-        status.textContent = `Reading ${files.length} files…`;
-        const entries = await Promise.all(
-          files.map(async (x) => ({ path: x.path, bytes: await x.f.arrayBuffer() })));
+      // A Uint8Array's bytes as an ArrayBuffer of their own, for storing.
+      const own = (u8) =>
+        u8.byteOffset === 0 && u8.byteLength === u8.buffer.byteLength ? u8.buffer : u8.slice().buffer;
+
+      // Hand files to the engine: [{path, bytes: ArrayBuffer}].
+      async function loadEntries(entries) {
+        const w = await wasmReady;
+        for (const e of entries) w.gfa_add_file(e.path, new Uint8Array(e.bytes));
+        w.gfa_files_done();
+        panel.hidden = true;
+        dataButton.hidden = false;
+        showTouch();
+        $("gfa-canvas").focus();
+      }
+
+      async function keepAndLoad(entries) {
         status.textContent = "Saving them in this browser…";
         await cache.replace(entries);
         status.textContent = "";
         await loadEntries(entries);
+      }
+
+      $("archive").addEventListener("change", async (ev) => {
+        const file = ev.target.files[0];
+        ev.target.value = "";
+        if (!file) return;
+        busy(true);
+        bar.removeAttribute("value");
+        status.textContent = `Reading ${file.name}…`;
+        try {
+          const w = await wasmReady;
+          const pairs = await w.gfa_unpack(file, (done, total, path) => {
+            bar.max = total;
+            bar.value = done;
+            status.textContent = `Unpacking ${done + 1} of ${total}: ${path}`;
+          });
+          await keepAndLoad(pairs.map(([path, bytes]) => ({ path, bytes: own(bytes) })));
+        } catch (e) {
+          status.textContent = `That file can't be used: ${(e && e.message) || e}`;
+        } finally {
+          busy(false);
+        }
+      });
+
+      $("folder").addEventListener("change", async (ev) => {
+        const w = await wasmReady;
+        const files = [...ev.target.files]
+          .map((f) => ({ f, path: w.gfa_game_path(f.webkitRelativePath || f.name) }))
+          .filter((x) => x.path);
+        ev.target.value = "";
+        if (!files.some((x) => /^GTADATA\/(UK\/)?MISS(ION|UKE?)\.INI$/i.test(x.path))) {
+          status.textContent = "That folder has no GTADATA/MISSION.INI. Select the folder that contains GTADATA.";
+          return;
+        }
+        busy(true);
+        status.textContent = `Reading ${files.length} files…`;
+        try {
+          const entries = await Promise.all(
+            files.map(async (x) => ({ path: x.path, bytes: await x.f.arrayBuffer() })));
+          await keepAndLoad(entries);
+        } finally {
+          busy(false);
+        }
+      });
+
+      $("copy").addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText($("search-term").textContent);
+          $("copy").textContent = "Copied";
+        } catch (e) {
+          getSelection().selectAllChildren($("search-term"));
+        }
       });
 
       forget.addEventListener("click", async () => {
@@ -156,9 +274,49 @@
 
       dataButton.addEventListener("click", () => {
         panel.hidden = false;
+        touchPad.hidden = true;
         forget.hidden = false;
         status.textContent = "";
       });
+
+      // Touch buttons: shown on touch screens (or with ?touch in the
+      // address), each held for as long as a finger is on it.
+      let touchScreen = matchMedia("(any-pointer: coarse)").matches || navigator.maxTouchPoints > 0
+        || new URLSearchParams(location.search).has("touch");
+      function showTouch() { touchPad.hidden = !(touchScreen && panel.hidden); }
+      addEventListener("touchstart", () => { touchScreen = true; showTouch(); }, { once: true, passive: true });
+
+      const pressed = new Map(); // button -> pointer id
+      function press(b, down) {
+        b.classList.toggle("down", down);
+        if (wasm) wasm.gfa_touch(b.dataset.key, down);
+      }
+      function release(b) {
+        if (!pressed.has(b)) return;
+        pressed.delete(b);
+        press(b, false);
+      }
+      for (const b of touchPad.querySelectorAll("button[data-key]")) {
+        b.addEventListener("pointerdown", (e) => {
+          e.preventDefault();
+          if (pressed.has(b)) return;
+          pressed.set(b, e.pointerId);
+          // Keep the finger's press on this button if it slides off.
+          try { b.setPointerCapture(e.pointerId); } catch (_) {}
+          press(b, true);
+        });
+        const up = (e) => { if (pressed.get(b) === e.pointerId) release(b); };
+        b.addEventListener("pointerup", up);
+        b.addEventListener("pointercancel", up);
+        b.addEventListener("lostpointercapture", up);
+        b.addEventListener("contextmenu", (e) => e.preventDefault());
+      }
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden) for (const b of [...pressed.keys()]) release(b);
+      });
+
+      // Phones may not offer .rar files when the picker filters by name.
+      if (touchScreen) $("archive").removeAttribute("accept");
 
       (async () => {
         const saved = await cache.all();

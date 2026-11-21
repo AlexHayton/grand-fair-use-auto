@@ -1,0 +1,22 @@
+# A rocket fired at a car right in front of him kills him.
+#
+# On the pavement at (64,60), facing south, a car is left standing 16 px
+# ahead. The rocket bursts on it at once, and he is inside the blast's
+# inner ring (17 px from it, plus his body): wasted. His guns and the wanted
+# level go with him; the score stays. Until the card and the hospitals come,
+# he starts again where the script began.
+#
+# oracle: walk
+# section: 1
+# expect: weapons: rocket burst on car
+# expect: player: hit - bullets 0, on the car 0, blast 1; health 0
+# expect: player: wasted
+# reject: no walkable layer
+start 64 60
+
+0 0 0 30
+park 0 0 16 64
+weapon 3 5
+fire 1
+0 0 0 10
+wait 40

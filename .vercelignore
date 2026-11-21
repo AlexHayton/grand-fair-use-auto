@@ -1,0 +1,12 @@
+# `vercel deploy` from a checkout uploads only what the web build needs:
+# never the build output, local config, or anything else lying around.
+/*
+!/Cargo.toml
+!/Cargo.lock
+!/rust-toolchain.toml
+!/.cargo
+!/crates
+!/tools
+/crates/*/dist
+/tools/oracle/build
+/tools/hdtex

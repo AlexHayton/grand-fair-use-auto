@@ -7,6 +7,7 @@
  * after the placement and after every tick, one line a car:
  *
  *     f <tick> <slot> <serial> <x> <y> <layer> <face> <angle> <speed> <model>
+ *       <damage> <wrecked>
  *
  * with x, y and speed in raw 16.16, so gfa-sim's port can be diffed with
  * it line for line.
@@ -51,8 +52,9 @@ static void dump(long tick)
     int i;
     for (i = 0; i < tr.n; i++) {
         const gta_car *c = &tr.cars[i];
-        printf("f %ld %d %lu %ld %ld %d %d %d %ld %d\n", tick, i, c->serial,
-               c->x, c->y, c->layer, c->face, c->angle, c->speed, c->model);
+        printf("f %ld %d %lu %ld %ld %d %d %d %ld %d %d %d\n", tick, i,
+               c->serial, c->x, c->y, c->layer, c->face, c->angle, c->speed,
+               c->model, c->damage, c->wrecked ? 1 : 0);
     }
 }
 

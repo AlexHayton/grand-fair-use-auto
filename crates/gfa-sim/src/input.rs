@@ -31,6 +31,10 @@ impl Buttons {
     pub const SPECIAL: Buttons = Buttons(1 << 8);
     pub const WEAPON_NEXT: Buttons = Buttons(1 << 9);
     pub const WEAPON_PREV: Buttons = Buttons(1 << 10);
+    /// Keypad `*`: every gun with 99 rounds. The original's key for it,
+    /// which it honours only with a name-entry cheat on; ours until the
+    /// cheats come (M8).
+    pub const ALL_WEAPONS: Buttons = Buttons(1 << 11);
 
     pub fn contains(self, other: Buttons) -> bool {
         self.0 & other.0 == other.0

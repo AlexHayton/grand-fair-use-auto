@@ -1,0 +1,25 @@
+# Rockets: a parked car, and the car beside it.
+#
+# On the pavement at (64,60), facing south, two cars are left standing in
+# the road 48 px ahead, 24 px apart. The rocket starts 6 px ahead of him,
+# speeds up from 5 px a tick to 7.5, and bursts on the first car: that car
+# is written off on the spot, and the blast writes off the other, which is
+# within 32 px. Both burn for 120 ticks and blow up, the chain the original
+# shows, and the wrecks stay.
+#
+# oracle: walk
+# section: 1
+# expect: weapons: rocket burst on car
+# expect: (model 0) is a write-off - burning
+# expect: (model 0) blew up at (2050,1984)
+# expect: (model 0) blew up at (2079,1984)
+# reject: no walkable layer
+start 64 60
+
+0 0 0 30
+park 0 -12 48 64
+park 0 12 48 64
+weapon 3 2
+fire 1
+0 0 0 10
+wait 200
