@@ -3,6 +3,11 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!-- Added to a phone's home screen, the page opens without the browser's
+         bars: full screen where the full-screen button is not offered (iPhone). -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <!-- The page may talk only to its own site: the player's game files
          cannot be sent anywhere else. -->
     <meta http-equiv="Content-Security-Policy"
@@ -50,9 +55,11 @@
       #status { min-height: 1.4em; margin-top: 12px; color: var(--text); overflow-wrap: anywhere; }
       progress { width: 100%; height: 6px; margin-top: 10px; accent-color: var(--accent); }
       progress[hidden] { display: none; }
-      #data-button { position: fixed; right: 12px; top: 12px; opacity: .6; }
-      #data-button:hover { opacity: 1; }
-      #data-button[hidden] { display: none; }
+      #corner { position: fixed; top: max(12px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right));
+        display: flex; gap: 8px; }
+      #corner button { opacity: .6; background: rgba(20, 22, 28, .7); }
+      #corner button:hover { opacity: 1; }
+      #corner button[hidden] { display: none; }
 
       /* Touch screens: the keys as buttons along the bottom. */
       #touch { position: fixed; left: 0; right: 0; bottom: 0; display: flex; justify-content: space-between;
@@ -109,7 +116,10 @@
         <div id="status" role="status"></div>
       </div>
     </div>
-    <button id="data-button" type="button" hidden>Game data</button>
+    <div id="corner">
+      <button id="fullscreen-button" type="button" hidden>Full screen</button>
+      <button id="data-button" type="button" hidden>Game data</button>
+    </div>
 
     <div id="touch" hidden aria-label="Touch controls">
       <div class="pad">
@@ -203,6 +213,7 @@
         w.gfa_files_done();
         panel.hidden = true;
         dataButton.hidden = false;
+        fullscreenButton.hidden = !canFullscreen;
         showTouch();
         $("gfa-canvas").focus();
       }
@@ -278,6 +289,35 @@
         forget.hidden = false;
         status.textContent = "";
       });
+
+      // Full screen: the whole page, so the touch buttons come too. Phones
+      // turn to landscape where the browser lets a page ask. iPhones offer
+      // no full screen to pages; there the button stays hidden, and adding
+      // the page to the home screen does the same.
+      const fullscreenButton = $("fullscreen-button");
+      const root = document.documentElement;
+      const canFullscreen = !!(root.requestFullscreen || root.webkitRequestFullscreen);
+      const inFullscreen = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+      fullscreenButton.addEventListener("click", async () => {
+        try {
+          if (inFullscreen()) {
+            await (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+          } else {
+            await (root.requestFullscreen || root.webkitRequestFullscreen).call(root, { navigationUI: "hide" });
+            if (touchScreen && screen.orientation && screen.orientation.lock) {
+              screen.orientation.lock("landscape").catch(() => {});
+            }
+          }
+        } catch (e) {
+          console.warn("full screen refused", e);
+        }
+        $("gfa-canvas").focus();
+      });
+      const showFullscreenState = () => {
+        fullscreenButton.textContent = inFullscreen() ? "Exit full screen" : "Full screen";
+      };
+      document.addEventListener("fullscreenchange", showFullscreenState);
+      document.addEventListener("webkitfullscreenchange", showFullscreenState);
 
       // Touch buttons: shown on touch screens (or with ?touch in the
       // address), each held for as long as a finger is on it.

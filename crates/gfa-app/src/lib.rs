@@ -123,12 +123,16 @@ impl App {
     }
 
     fn create_window(&mut self, event_loop: &ActiveEventLoop) {
-        let attrs = Window::default_attributes()
-            .with_title(TITLE)
-            .with_inner_size(winit::dpi::LogicalSize::new(
-                f64::from(self.config.size.0),
-                f64::from(self.config.size.1),
-            ));
+        let attrs = Window::default_attributes().with_title(TITLE);
+        // A size only for a desktop window. On the web winit would pin the
+        // canvas to it with an inline style, overriding the page's
+        // full-window sizing: a phone then shows only the canvas's top-left
+        // corner, as if zoomed in, with the player off-screen.
+        #[cfg(not(target_arch = "wasm32"))]
+        let attrs = attrs.with_inner_size(winit::dpi::LogicalSize::new(
+            f64::from(self.config.size.0),
+            f64::from(self.config.size.1),
+        ));
         #[cfg(target_arch = "wasm32")]
         let attrs = web::attach_canvas(attrs);
 

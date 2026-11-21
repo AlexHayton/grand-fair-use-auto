@@ -149,6 +149,9 @@ chooses another or forgets the saved files. `?level=102` or
 On a touch screen the keys appear as buttons along the bottom: a pad for
 moving and turning on the left; on the right, Fire, Car (in and out), Jump
 (and handbrake), Horn and the weapon buttons. `?touch` shows them anywhere.
+"Full screen" (top right) fills the screen, and on a phone asks to turn to
+landscape. iPhones give pages no full screen; there the button is hidden, and
+adding the page to the home screen opens it without the browser's bars.
 
 ### Hosting the web app
 

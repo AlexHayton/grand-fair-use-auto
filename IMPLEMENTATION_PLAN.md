@@ -418,7 +418,7 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
 **M12: Polish and release**
 - [ ] Settings: render scale, HD toggle, key rebinding, gamepad (gilrs).
 - [ ] macOS `.app` bundle.
-- [ ] Static web deploy with no data in it. (Configured 2026-11-21: `tools/web/build.sh`, GitHub Pages workflow, `vercel.json`. Not yet deployed.)
+- [x] Static web deploy with no data in it. (2026-11-21: GitHub Pages, from `.github/workflows/pages.yml` and `tools/web/build.sh`; `vercel.json` also builds it on Vercel.)
 - [ ] Performance: 60 fps on M-series and in Safari.
 - [ ] Docs.
 
@@ -690,6 +690,7 @@ Newest first. Each entry: date, decision, why.
 
 Newest first.
 
+- **2026-11-21. The web app fills the screen on phones; full screen.** The site went live on GitHub Pages. On the owner's phone the game looked zoomed in, with the player off-screen. Cause: on the web winit wrote the desktop window size (1280x800) onto the canvas as an inline style, overriding the page's full-window sizing, so a phone showed only the canvas's top-left corner. The size now goes to desktop windows only. Measured in Chrome as an 844x390 phone: the canvas fills the viewport, and the view matches the desktop build at that size (about 20 blocks across, the player centred). The surface's cap at the GPU's largest texture now keeps the picture's shape (`a_capped_surface_keeps_its_shape`). A "Full screen" button fills the screen and asks a phone for landscape. The automated Chrome refuses full screen to scripted clicks, so it awaits a try on a real phone.
 - **2026-11-21. The game from its archive; hosting; touch buttons.**
   - `gfa_assets::archive` reads RAR 5 and ZIP in place. The owner's `GTA1-Directors.rar` (RAR 5, 483 members): the directory reads in 42 ms; the 180 level files (41 MB) unpack in 0.2 s; all 471 files (300 MB) at 210 MB/s with every checksum matching (`gfa-tool archive --all`). The data test `the_archive_serves_the_folders_bytes` finds all 180 level files byte-identical to the unpacked folder's.
   - Desktop: found beside the program, and remembered after a dialog (both run headless with `--screenshot`). Liberty City loads from the archive in 40 ms.

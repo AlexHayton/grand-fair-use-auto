@@ -110,6 +110,18 @@ impl Gpu {
     }
 }
 
+/// `width` by `height` scaled down, keeping its shape, until neither side
+/// exceeds `max`: the browser stretches the surface over the whole canvas,
+/// so capping one side alone would squash the picture.
+pub fn fit(width: u32, height: u32, max: u32) -> (u32, u32) {
+    let longest = width.max(height);
+    if longest <= max {
+        return (width, height);
+    }
+    let scale = |v: u32| ((u64::from(v) * u64::from(max) / u64::from(longest)) as u32).max(1);
+    (scale(width), scale(height))
+}
+
 impl WindowSurface {
     pub fn format(&self) -> wgpu::TextureFormat {
         self.config.format
@@ -123,8 +135,7 @@ impl WindowSurface {
         if width == 0 || height == 0 {
             return;
         }
-        let max = gpu.device.limits().max_texture_dimension_2d;
-        let (w, h) = (width.min(max), height.min(max));
+        let (w, h) = fit(width, height, gpu.device.limits().max_texture_dimension_2d);
         if (w, h) == (self.config.width, self.config.height) {
             return;
         }
@@ -187,4 +198,16 @@ pub fn clear(encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView, color
         })],
         ..Default::default()
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fit;
+
+    #[test]
+    fn a_capped_surface_keeps_its_shape() {
+        assert_eq!(fit(2532, 1170, 4096), (2532, 1170));
+        assert_eq!(fit(4096, 2048, 2048), (2048, 1024));
+        assert_eq!(fit(1170, 2532, 2048), (946, 2048));
+    }
 }
