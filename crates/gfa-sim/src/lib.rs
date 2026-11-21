@@ -13,6 +13,7 @@
 //!   in and out, ramps, jumps and walls.
 //! - [`trains`]: the elevated lines and trams, built from the rail.
 //! - [`traffic`]: the fleet of driven cars; [`route`]: their routes.
+//! - [`peds`]: the people on foot.
 //! - [`clock`]: the tick and the subsystems' slower clocks.
 //! - [`view`]: the fixed area that counts as on screen.
 //! - [`input`]: buttons per tick, and recordings of them.
@@ -25,6 +26,7 @@ pub mod clock;
 pub mod hash;
 pub mod input;
 pub mod map;
+pub mod peds;
 pub mod player;
 pub mod replay;
 pub mod route;

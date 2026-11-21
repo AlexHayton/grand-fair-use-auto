@@ -67,6 +67,9 @@ pub const DELTA_DOOR: u32 = 6;
 const EXIT_DOOR: [u32; 9] = [2, 3, 4, 4, 4, 3, 2, 1, 0];
 /// How long the door takes to open and close on the way in, in ticks.
 pub const DOOR_TICKS: i32 = 40;
+/// The get-in tick at which the door is fully open: a driver is pulled
+/// out then.
+pub const DOOR_OPEN: i32 = 20;
 
 /// The door delta `tick` ticks into the get-in, if it is open: four frames
 /// opening and three closing, five ticks each (AmiGTA1 `door_delta`). It is

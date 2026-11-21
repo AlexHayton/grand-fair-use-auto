@@ -1,13 +1,15 @@
 //! The whole simulation state and its tick.
 
 use crate::cars::{
-    self, BIKE_ENTER_FIRST, BIKE_EXIT_FIRST, BIKE_FRAMES, BIKE_SIT, Driven, ENTER_SEQ, ENTER_TICKS,
+    self, BIKE_ENTER_FIRST, BIKE_EXIT_FIRST, BIKE_FRAMES, BIKE_SIT, DOOR_OPEN, Driven, ENTER_SEQ,
+    ENTER_TICKS,
     EXIT_FIRST, EXIT_FRAMES, EXIT_TICKS, PED_CAR_MARGIN, Parked, REACH, body_hit, door_point,
     door_pos, lerp_angle, lerp_fp, panel_delta,
 };
 use crate::hash::{SimHash, StateHasher};
 use crate::input::{Buttons, TickInput};
 use crate::map::{SimMap, ground};
+use crate::peds::{self, Peds, TickCtx};
 use crate::player::{Anim, Player, RUN_SPEED, Stick};
 use crate::traffic::{self, Traffic};
 use crate::trains::{Carriage, TrainEvent, Trains};
@@ -185,6 +187,8 @@ pub struct World {
     /// Every car but his: the traffic, and the cars standing in the
     /// street (the map's parked ones, the ones he left, wrecks).
     pub traffic: Traffic,
+    /// Everybody on foot but him.
+    pub peds: Peds,
     /// AmiGTA1's `player_health`: 100 full, wasted at 0.
     pub health: i32,
     /// Where the level put him, for the stopgap respawn.
@@ -235,6 +239,7 @@ impl World {
             driven: None,
             trains,
             traffic,
+            peds: Peds::new(peds::SEED, Peds::cap_for(view)),
             health: FULL_HEALTH,
             start,
             prev: Buttons::NONE,
@@ -314,15 +319,18 @@ impl World {
             };
             self.drive(pedals);
         }
-        self.run_traffic();
+        let centre = self.run_traffic();
         self.run_trains();
+        self.peds_view();
         self.burn();
+        self.run_peds(centre);
         let mut lines = Vec::new();
         self.traffic.wreck_sweep(&mut |s| lines.push(s));
         for l in lines {
             self.say(l);
         }
         self.harm();
+        self.run_over();
         self.prev = b;
         self.tick += 1;
     }
@@ -379,25 +387,92 @@ impl World {
         }
     }
 
+    /// His car, while he drives it or gets out of it: what the fleet and
+    /// the peds see instead of him.
+    fn in_car(&self) -> Option<&Driven> {
+        self.driven
+            .as_ref()
+            .filter(|_| self.doing == Doing::Driving || matches!(self.doing, Doing::Exiting(_)))
+    }
+
     /// The fleet's tick, with the view on the player (or his car). The
-    /// player is an obstacle the fleet stops for; it does not hit him yet.
-    fn run_traffic(&mut self) {
+    /// player and the peds are obstacles the fleet stops for. Returns the
+    /// view's centre.
+    fn run_traffic(&mut self) -> (i64, i64) {
         let p = &self.player;
-        let (x, y, speed, hl) = match &self.driven {
-            Some(d) if self.doing == Doing::Driving || matches!(self.doing, Doing::Exiting(_)) => {
+        let (x, y, speed, hl) = match self.in_car() {
+            Some(d) => {
                 let v = &d.veh;
                 (v.ox, v.oy, v.vx.abs().max(v.vy.abs()), v.len / 2)
             }
-            _ => {
+            None => {
                 let moving = matches!(p.anim, Anim::Run | Anim::Walk);
                 let speed = if moving { i64::from(RUN_SPEED) } else { 0 };
                 (i64::from(p.x), i64::from(p.y), speed, 3)
             }
         };
         let layer = p.layer;
+        // The police on foot look for him at his car's body (M6).
+        let car = self.in_car().map(|d| {
+            let v = &d.veh;
+            (v.len / 2, v.wid / 2, v.angle())
+        });
+        self.peds.set_player(x, y, layer, car, (x, y), false);
         self.traffic.set_player(true, x, y, speed, layer, hl);
+        self.traffic.set_walkers(self.peds.walkers());
         self.traffic.set_view_blocks(self.view.half_w);
         self.traffic.step(&self.map, &self.cars, x, y);
+        (x, y)
+    }
+
+    /// The spawner's view: its size, and which way he is heading.
+    fn peds_view(&mut self) {
+        let (angle, moving) = match self.in_car() {
+            Some(d) => (d.veh.angle(), d.veh.vx != 0 || d.veh.vy != 0),
+            None => (
+                self.player.angle,
+                matches!(self.player.anim, Anim::Run | Anim::Walk),
+            ),
+        };
+        self.peds
+            .set_view(self.view.half_w, self.view.half_h, angle, moving);
+    }
+
+    /// The peds' tick, with the view where the fleet's was.
+    fn run_peds(&mut self, centre: (i64, i64)) {
+        let traffic = &self.traffic;
+        let green = |bx, by, along_x| traffic.light_green(bx, by, along_x);
+        let ctx = TickCtx {
+            map: &self.map,
+            cars: &self.cars,
+            cam: centre,
+            green: &green,
+        };
+        let mut lines = Vec::new();
+        self.peds.tick(&ctx, &mut |s| lines.push(s));
+        for l in lines {
+            self.say(l);
+        }
+    }
+
+    /// His car through the crowd: fast, a ped is killed; slow, shoved.
+    fn run_over(&mut self) {
+        if self.doing != Doing::Driving {
+            return;
+        }
+        let Some(d) = &self.driven else {
+            return;
+        };
+        let v = &d.veh;
+        let (avx, avy) = (v.vx.abs(), v.vy.abs());
+        let speed = if avx > avy { avx + avy / 2 } else { avy + avx / 2 };
+        let hits = self
+            .peds
+            .ram(v.ox, v.oy, v.angle(), v.len / 2, v.wid / 2, d.layer, speed);
+        if hits > 0 {
+            let total = self.peds.stats.runover;
+            self.say(format!("car: ran over {hits} - {total} so far"));
+        }
     }
 
     /// The trains' tick, and what it did to the world.
@@ -417,11 +492,28 @@ impl World {
                 (c.x, c.y, c.layer)
             })
             .collect();
-        for event in self.trains.tick(player, &cars) {
+        let ped_slots: Vec<usize> = (0..self.peds.p.len())
+            .filter(|&i| self.peds.p[i].alive && !self.peds.p[i].corpse)
+            .collect();
+        let peds: Vec<_> = ped_slots
+            .iter()
+            .map(|&i| {
+                let q = &self.peds.p[i];
+                (q.x, q.y, q.layer)
+            })
+            .collect();
+        for event in self.trains.tick(player, &cars, &peds) {
             match event {
                 TrainEvent::RanOver => {
                     self.health = 0;
                     self.say("train: ran the player over".into());
+                }
+                TrainEvent::KilledPed(k) => {
+                    let i = ped_slots[k];
+                    if !self.peds.p[i].corpse {
+                        self.peds.kill(i);
+                        self.say(format!("train: ran over ped {i}"));
+                    }
                 }
                 TrainEvent::Stopped(t) => {
                     let c = self
@@ -771,7 +863,6 @@ impl World {
             car.y >> 21
         ));
         if t.had_driver {
-            // Thrown out by the peds' side, which comes later in M5.
             self.say("car: somebody is at the wheel".into());
         }
         if let Some(o) = over {
@@ -781,6 +872,31 @@ impl World {
             ));
         }
         self.doing = Doing::Entering(e);
+    }
+
+    /// The driver of the car he is getting into is dragged out of its
+    /// door, or a bike's rider knocked off beside it (AmiGTA1's main loop).
+    /// The carjack's score and a police car's driver coming after him on
+    /// foot are M6's.
+    fn throw_out(&mut self, e: &Entering) {
+        let c = e.car;
+        let (cx, cy) = (i64::from(c.x), i64::from(c.y));
+        let layer = self.player.layer;
+        let got = if e.bike {
+            // 12 px out to the right, facing away.
+            let (x, y) = (
+                cx + i64::from(cos(c.face)) * 12 * 4,
+                cy + i64::from(sin(c.face)) * 12 * 4,
+            );
+            self.peds.knock_off(x, y, layer, c.face + 64, -1)
+        } else {
+            self.peds
+                .pull(&self.cars, cx, cy, c.face, c.model, layer, -1)
+        };
+        match got {
+            Some(i) => self.say(format!("car: dragged the driver out (ped {i})")),
+            None => self.say("car: driver lost - ped pool full".into()),
+        }
     }
 
     fn entering(&mut self, mut e: Entering) {
@@ -817,8 +933,8 @@ impl World {
             self.doing = Doing::Entering(e);
             return;
         }
-        let p = &mut self.player;
         if e.walk_t < e.walk_len {
+            let p = &mut self.player;
             p.anim = Anim::Walk;
             p.frame = ((e.walk_t / 3) % 8) as u8;
             p.x = lerp_fp(e.from.0, e.door.0, e.walk_t, e.walk_len) as i32;
@@ -843,6 +959,12 @@ impl World {
         };
         let total = steps * ENTER_TICKS;
         let t = e.step * ENTER_TICKS + e.tick;
+        // The door is fully open (a bike has none): out comes the driver.
+        if e.driver && (e.bike || t >= DOOR_OPEN) {
+            e.driver = false;
+            self.throw_out(&e);
+        }
+        let p = &mut self.player;
         // He stands at the door, then slides in over the last two steps.
         let slide = (steps - 2) * ENTER_TICKS;
         let (cx, cy) = (i64::from(e.car.x), i64::from(e.car.y));
@@ -1437,6 +1559,7 @@ impl World {
         }
         self.trains.sim_hash(&mut h);
         self.traffic.sim_hash(&mut h);
+        self.peds.sim_hash(&mut h);
         h.i32(self.health);
         h.finish()
     }

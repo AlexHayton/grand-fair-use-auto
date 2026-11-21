@@ -171,6 +171,8 @@ pub enum TrainEvent {
     Wrecked(usize, Vec<(i64, i64, i32, i32)>),
     /// A bogie went over parked car `i`: 20 points of damage.
     Crushed(usize),
+    /// Ran over ped `i` of the list it was given (it may come twice).
+    KilledPed(usize),
     /// Train `n` has stopped at a station.
     Stopped(usize),
 }
@@ -583,12 +585,13 @@ impl Trains {
         &mut self,
         player: Option<(i64, i64, i32)>,
         cars: &[(i64, i64, i32)],
+        peds: &[(i64, i64, i32)],
     ) -> Vec<TrainEvent> {
         let logic = self.half.step();
         let mut events = Vec::new();
         for i in 0..self.trains.len() {
             let braking = self.trains[i].state == state::BRAKE;
-            self.one(i, logic, player, cars, &mut events);
+            self.one(i, logic, player, cars, peds, &mut events);
             if braking && self.trains[i].state == state::STATION {
                 events.push(TrainEvent::Stopped(i));
             }
@@ -602,6 +605,7 @@ impl Trains {
         logic: bool,
         player: Option<(i64, i64, i32)>,
         cars: &[(i64, i64, i32)],
+        peds: &[(i64, i64, i32)],
         events: &mut Vec<TrainEvent>,
     ) {
         let t = self.trains[ti];
@@ -638,7 +642,7 @@ impl Trains {
             }
         }
         if logic {
-            self.crush(ti, player, cars, events);
+            self.crush(ti, player, cars, peds, events);
         }
     }
 
@@ -741,6 +745,7 @@ impl Trains {
         ti: usize,
         player: Option<(i64, i64, i32)>,
         cars: &[(i64, i64, i32)],
+        peds: &[(i64, i64, i32)],
         events: &mut Vec<TrainEvent>,
     ) {
         let near = |a: (i64, i64), b: (i64, i64), r: i64| {
@@ -772,13 +777,19 @@ impl Trains {
                         self.trains[ti].speed /= 2;
                     }
                 }
-                // The player on foot, above 1 px a frame.
-                if self.trains[ti].speed / 10 > 1
-                    && let Some((px, py, pl)) = player
-                    && pl == l
-                    && near((px, py), p, 10)
-                {
-                    events.push(TrainEvent::RanOver);
+                // People, and the player on foot, above 1 px a frame.
+                if self.trains[ti].speed / 10 > 1 {
+                    for (k, &(qx, qy, ql)) in peds.iter().enumerate() {
+                        if ql == l && near((qx, qy), p, 10) {
+                            events.push(TrainEvent::KilledPed(k));
+                        }
+                    }
+                    if let Some((px, py, pl)) = player
+                        && pl == l
+                        && near((px, py), p, 10)
+                    {
+                        events.push(TrainEvent::RanOver);
+                    }
                 }
             }
         }
