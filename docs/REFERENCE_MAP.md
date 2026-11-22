@@ -53,11 +53,15 @@ relative to sibling checkouts `../carnage3d` and `../AmiGTA1`.
 | `gfa-sim::traffic` (fleet, driving, junction bookings, lights, collisions between cars) | | `native/gta_traffic.c`, `gta_traffic.h` | wip (M5) |
 | `gfa-sim::traffic::roads` lamps (`Light`, `light`, `Lamp`, `lamps`, `Boxes::crossing`) | `GameDefs.h` (the lamp sprites: red, green, yellow, off, shadow) | `gta_traffic.c` `gta_traffic_lights_scan`, `gta_traffic_light_state`, `gta_traffic_light_green`, `gta_traffic_draw` (the lamps) | done; ours: one light per crossing, lamps facing the drivers |
 | `gfa-sim::traffic::contact` (cars put into the fleet, taken out of it, the ram, walkers held off, write-offs) | | `native/gta_traffic.c` (`car_place`, `gta_traffic_abandon`, `_leave_wreck`, `_grab_car`, `_rename_car`, `_box_free`, `_sweep_box`, `_ram`), `gta_main.c` (`fleet_car_at`, `ped_car_block`, `leave_car`), `gta_weapon.c` (`wreck_sweep`) | done |
-| `gfa-sim::route` | | `native/gta_route.c`, `gta_route.h` | done |
+| `gfa-sim::route` | | `native/gta_route.c`, `gta_route.h` (including `gta_route_field_build`, `gta_route_field_follow`) | done |
 | `tools/oracle/traffictrace.c` | | links `native/gta_traffic.c` (patched), `gta_route.c`, `gta_nav.c`, `gta_map.c`, `gta_car.c`, `gta_style.c`, `gta_trig.c`, `gta_vehphys.c` | done |
-| `gfa-sim` police | | `native/gta_traffic.c:9681-10500` | M6 |
-| `gfa-sim::peds` (the crowd: spawning, brain, gaits, crossings, knockdowns, bodies, pull-out, ram) | | `native/gta_peds.c`, `gta_peds.h`; `gta_main.c` (the main loop's ped calls, walkers to traffic, fixture 11) | done (M5); shooting and punching (M6 stage 1); cops, script peds M6/M7 |
-| `gfa-sim::weapons` | | `native/gta_weapon.c` (shots, hits, explosions, fires, `wreck_sweep`, `wreck_car`, `explode_face`), `gta_main.c` (the fire latch, the punch, the armed sprites, the player as a target) | done |
+| `gfa-sim::traffic` police (patrols, dispatch, reinforcement, chases, U-turns, roadblocks, sirens) | | `native/gta_traffic.c:9681-10500`, `gta_main.c:9976` | done |
+| `gfa-sim::peds` (the crowd: spawning, brain, gaits, crossings, knockdowns, bodies, pull-out, ram, police on foot, service/mission peds) | | `native/gta_peds.c`, `gta_peds.h`; `gta_main.c` (the main loop's ped calls, walkers to traffic, fixture 11) | done |
+| `gfa-sim::weapons` | | `native/gta_weapon.c` (shots, hits, explosions, fires, `wreck_sweep`, `wreck_car`, `explode_face`), `gta_main.c` (the fire latch, the punch, the armed sprites, the player as a target, endless weapon timer) | done |
+| `gfa-sim::pickups` | | `native/gta_pickup.c`, `gta_pickup.h`, `gta_main.c:9370-9398, 10151-10296` | done |
+| `gfa-sim::marks` | | `native/gta_marks.c`, `gta_marks.h` (extended to knocked fleet cars) | done |
+| `gfa-sim::service` | | `native/gta_service.c`, `gta_service.h` (ambulances, medics, fire engines, water cannon jets) | done |
+| `gfa-render::sprites::wreck_sprite` | | `native/gta_main.c` (`wreck_sprite_for`) | done |
 | `gfa-sim::score` | | `native/gta_score.c` (awards, streaks, heat, each city's thresholds, crimes) | done |
 | `gfa-sim::peds` (`hit_segment`, `shoot`, `punch`, `panic`, `burn`) | | `native/gta_peds.c` (`gta_peds_hit_segment`, `_shoot`, `_punch`, `_panic`, `_burn`) | done |
 | `gfa-sim::map` (`shot_cross`) | | `native/gta_nav.c` (`gta_nav_shot_cross`, the per-style lists of faces a shot passes) | done |

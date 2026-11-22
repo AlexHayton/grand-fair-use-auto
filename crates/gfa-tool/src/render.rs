@@ -303,6 +303,24 @@ impl Scene {
         )
     }
 
+    /// A burnt-out wreck sprite for car record `car` at a simulation position and angle.
+    pub fn wreck_sprite(
+        &self,
+        car: usize,
+        pos16: [i32; 3],
+        draw_angle: i32,
+    ) -> Option<SpriteInstance> {
+        let vtype = self.style.cars.get(car)?.vtype;
+        let sprite = gfa_render::sprites::wreck_sprite(&self.style, vtype)?;
+        gfa_render::sprites::own_sprite(
+            &self.style,
+            &self.atlas,
+            sprite,
+            gfa_render::sprites::from_sim(pos16),
+            gfa_render::sprites::sim_angle(draw_angle),
+        )
+    }
+
     /// A vehicle from the simulation with its deltas, as
     /// [`gfa_render::sprites::push_car`], at a simulation position and angle.
     pub fn push_car(

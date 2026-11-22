@@ -167,6 +167,17 @@ impl Runner {
                     ("weapon", &[w, rounds]) => world.give_weapon(w, rounds),
                     ("hurt", &[points]) => world.hurt(points),
                     ("shootped", &[range]) => world.shoot_ped(range),
+                    ("crate", &[dx, dy, kind, amount]) => world.drop_crate(dx, dy, kind, amount),
+                    ("copcar", &[dx, dy, face]) => world.drop_copcar(dx, dy, face),
+                    ("lives", &[n]) => {
+                        world.lives = n;
+                        world.say(format!("player: lives {n}"));
+                    }
+                    ("pool", &[dx, dy]) => world.drop_pool(dx, dy),
+                    ("killped", &[line]) => world.kill_ped_decl(line),
+                    ("wreck", &[line]) => world.wreck_car_decl(line),
+                    ("score", &[delta]) => world.add_score(i64::from(delta)),
+                    ("script", &[line]) => world.start_script_line(line),
                     _ => world.say(format!(
                         "script: line {}: `{name}` is not supported yet",
                         line.number
@@ -376,13 +387,13 @@ pub fn level_world(
             .ok_or_else(|| format!("section [{}] has no PLAYER", section.id))?,
     };
     let walls = WallTiles::for_map(map.style_number, gta);
-    Ok(World::with_map_cars(
-        SimMap::new(map, walls),
-        cars,
-        view,
-        start,
-        map_cars,
-    ))
+    let mut world = World::with_map_cars(SimMap::new(map, walls), cars, view, start, map_cars);
+    if map_cars {
+        world.load_section(section);
+    } else {
+        world.section = Some(section.clone());
+    }
+    Ok(world)
 }
 
 impl Report {

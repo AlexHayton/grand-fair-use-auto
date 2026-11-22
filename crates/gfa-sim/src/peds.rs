@@ -93,6 +93,8 @@ pub mod sub {
 const COP_ARREST_PX: i64 = 10;
 const COP_PULL_TICKS: i32 = 20 + 6 * 4;
 const COP_DOOR_PX: i64 = 6;
+pub const COP_ARREST_WAIT: i32 = 90;
+pub const COP_EXIT_TICKS: i32 = 16;
 
 const FIRE_FRAMES: i32 = 8;
 const FIRE_FRAME_TICKS: i32 = 6;
@@ -222,16 +224,20 @@ pub struct Ped {
     pub weapon: u8,
     arrest: bool,
     cop_cool: i32,
-    arrest_wait: i32,
+    pub arrest_wait: i32,
     shoot_req: bool,
     shoot_angle: i32,
     execute: bool,
     post: bool,
-    exit_wait: i32,
-    pulling: i32,
+    pub exit_wait: i32,
+    pub pulling: i32,
     cross_axis_x: bool,
     /// Ticks under water, 0 when dry (ours).
     pub drown: i32,
+    /// Blood footprints left after walking through a blood pool.
+    pub blood_steps: i32,
+    pub blood_x: i64,
+    pub blood_y: i64,
 }
 
 impl Ped {
@@ -333,7 +339,7 @@ pub struct Peds {
     /// The slot the last pull, knock-off or spawn used.
     pub last: Option<usize>,
     cross_rr: i32,
-    cop_shoot: i32,
+    pub cop_shoot: i32,
     gang_aim: i32,
     gang_side: bool,
     pub stats: PedStats,
@@ -570,6 +576,9 @@ impl Peds {
         p.post = false;
         p.cross_axis_x = false;
         p.drown = 0;
+        p.blood_steps = 0;
+        p.blood_x = 0;
+        p.blood_y = 0;
     }
 
     /// An empty slot, or failing that the body out of sight longest that
@@ -800,6 +809,12 @@ impl Peds {
                 continue;
             }
             if skip == Some(i) {
+                continue;
+            }
+            if let Some(owner) = skip
+                && let Some(sh) = self.p.get(owner)
+                && ((sh.cop && p.cop) || (sh.gang != 0 && sh.gang == p.gang))
+            {
                 continue;
             }
             let (dx, dy) = ((p.x - x) >> FP, (p.y - y) >> FP);
@@ -1973,6 +1988,296 @@ impl Peds {
                 )
             })
             .collect()
+    }
+
+    /// Spawn a policeman on foot at `(x, y)` on `layer` facing `angle`.
+    pub fn spawn_cop(&mut self, x: i64, y: i64, layer: i32, angle: i32) -> bool {
+        let Some(i) = self.free_slot_forced() else {
+            return false;
+        };
+        self.last = Some(i);
+        self.reset(i, x, y, layer, angle, 0);
+        let p = &mut self.p[i];
+        p.cop = true;
+        p.mode = mode::COP;
+        p.speed = 3;
+        p.arrest_wait = COP_ARREST_WAIT;
+        p.exit_wait = COP_EXIT_TICKS;
+        p.pulling = 0;
+        self.stats.spawned += 1;
+        true
+    }
+
+    /// Keep the last spawned cop posted at a roadblock until the player comes near.
+    pub fn post_last_cop(&mut self) {
+        if let Some(i) = self.last
+            && let Some(p) = self.p.get_mut(i)
+            && p.alive
+            && p.cop
+        {
+            p.post = true;
+            p.speed = 0;
+        }
+    }
+
+    /// Turn ped `i` (such as a driver dragged out of a police car) into a policeman.
+    pub fn make_cop(&mut self, i: usize) {
+        if let Some(p) = self.p.get_mut(i)
+            && p.alive
+            && !p.corpse
+        {
+            p.cop = true;
+            p.remap = 0;
+            p.mode = mode::COP;
+            p.arrest_wait = COP_ARREST_WAIT;
+            p.exit_wait = 0;
+            p.pulling = 0;
+        }
+    }
+
+    /// Set the police shooting rule: 0 arrest, 1 shoot, 2 shoot & execute at close range.
+    pub fn set_cop_shoot(&mut self, mode: i32) {
+        self.cop_shoot = mode;
+    }
+
+    /// Take the next shot requested by a policeman or gunman on foot.
+    pub fn cop_shot(&mut self) -> Option<(usize, i64, i64, i32, i32)> {
+        for (i, p) in self.p.iter_mut().enumerate() {
+            if p.alive && !p.corpse && (p.cop || p.gang != 0) && p.shoot_req {
+                p.shoot_req = false;
+                return Some((i, p.x, p.y, p.layer, p.shoot_angle));
+            }
+        }
+        None
+    }
+
+    /// Did a policeman execute the player at point-blank range this tick?
+    pub fn cop_execute(&mut self) -> bool {
+        let mut hit = false;
+        for p in &mut self.p {
+            if p.alive && p.cop && p.execute {
+                p.execute = false;
+                hit = true;
+            }
+        }
+        hit
+    }
+
+    /// Highest pull progress among policemen currently opening the player's car door.
+    pub fn cop_pulling(&self) -> i32 {
+        self.p
+            .iter()
+            .filter(|p| p.alive && !p.corpse && p.cop && p.pulling > 0)
+            .map(|p| p.pulling)
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Did a policeman complete an arrest this tick?
+    pub fn cop_event(&mut self) -> bool {
+        let mut hit = false;
+        for p in &mut self.p {
+            if p.alive && p.cop && p.arrest {
+                p.arrest = false;
+                p.pulling = 0;
+                hit = true;
+            }
+        }
+        hit
+    }
+
+    /// Dismiss all policemen on foot back into idle pedestrians.
+    pub fn clear_cops(&mut self) {
+        for p in &mut self.p {
+            if !p.alive || !p.cop {
+                continue;
+            }
+            p.cop = false;
+            p.arrest = false;
+            p.shoot_req = false;
+            p.execute = false;
+            p.post = false;
+            p.pulling = 0;
+            if !p.corpse {
+                p.mode = mode::IDLE;
+                p.sub = sub::WANDER;
+                p.speed = 1;
+                p.timer = 0;
+            }
+        }
+    }
+
+    /// Number of living policemen on foot.
+    pub fn cops_out(&self) -> usize {
+        self.p
+            .iter()
+            .filter(|p| p.alive && !p.corpse && p.cop)
+            .count()
+    }
+
+    /// Revive a dead pedestrian (when an ambulance medic finishes treatment).
+    pub fn revive(&mut self, i: usize) {
+        let Some(p) = self.p.get_mut(i) else {
+            return;
+        };
+        if !p.alive || !p.corpse {
+            return;
+        }
+        p.corpse = false;
+        p.bled = false;
+        p.cop = false;
+        p.svc_q = 0;
+        p.mode = mode::IDLE;
+        p.sub = sub::WANDER;
+        p.speed = 1;
+        p.timer = 0;
+        p.burn = 0;
+        p.shot = 0;
+        p.fall = 0;
+        p.down = 0;
+        p.tx = 0;
+        p.ty = 0;
+    }
+
+    /// Spawn a mission/service pedestrian that will not despawn offscreen.
+    pub fn spawn_mission(&mut self, x: i64, y: i64, layer: i32, angle: i32) -> Option<u64> {
+        let i = self.free_slot_forced()?;
+        self.last = Some(i);
+        self.reset(i, x, y, layer, angle, -1);
+        self.next_serial += 1;
+        let serial = self.next_serial;
+        let p = &mut self.p[i];
+        p.serial = serial;
+        p.mission = true;
+        p.mode = mode::MISSION;
+        p.speed = 0;
+        self.stats.spawned += 1;
+        Some(serial)
+    }
+
+    fn by_serial(&self, serial: u64) -> Option<usize> {
+        if serial == 0 {
+            return None;
+        }
+        self.p.iter().position(|p| p.alive && p.serial == serial)
+    }
+
+    pub fn find(&self, serial: u64) -> Option<(i64, i64, i32, bool)> {
+        let i = self.by_serial(serial)?;
+        let p = &self.p[i];
+        Some((p.x, p.y, p.layer, p.corpse || p.shot != 0))
+    }
+
+    pub fn take_mission(&mut self, serial: u64) -> bool {
+        let Some(i) = self.by_serial(serial) else {
+            return false;
+        };
+        self.p[i] = Ped::default();
+        true
+    }
+
+    pub fn mission_ai(
+        &mut self,
+        serial: u64,
+        ai_mode: i32,
+        tx: i64,
+        ty: i64,
+        on_player: bool,
+    ) -> bool {
+        let Some(i) = self.by_serial(serial) else {
+            return false;
+        };
+        let p = &mut self.p[i];
+        if p.corpse || p.shot != 0 {
+            return false;
+        }
+        p.hunt_pl = on_player;
+        p.tx = tx;
+        p.ty = ty;
+        match ai_mode {
+            1 => {
+                p.mode = mode::HUNT;
+                p.speed = 3;
+            }
+            2 => {
+                p.mode = mode::SENDTO;
+                p.speed = if p.send_speed != 0 { p.send_speed } else { 2 };
+            }
+            _ => {
+                p.mode = mode::MISSION;
+                p.speed = 0;
+            }
+        }
+        true
+    }
+
+    pub fn set_gang(&mut self, serial: u64, kind: i32) -> bool {
+        let Some(i) = self.by_serial(serial) else {
+            return false;
+        };
+        let p = &mut self.p[i];
+        p.gang = kind as u8;
+        p.gang_miss = match kind {
+            1 => 8,
+            2 => 6,
+            _ => 0,
+        };
+        p.gang_burst = false;
+        p.gang_cool = 0;
+        true
+    }
+
+    pub fn set_weapon(&mut self, serial: u64, weapon: u8) -> bool {
+        let Some(i) = self.by_serial(serial) else {
+            return false;
+        };
+        self.p[i].weapon = weapon;
+        true
+    }
+
+    pub fn set_uniform(&mut self, serial: u64) -> bool {
+        let Some(i) = self.by_serial(serial) else {
+            return false;
+        };
+        self.p[i].uniform = true;
+        self.p[i].remap = 0;
+        true
+    }
+
+    pub fn set_remap(&mut self, serial: u64, remap: i32) -> bool {
+        let Some(i) = self.by_serial(serial) else {
+            return false;
+        };
+        self.p[i].remap = remap;
+        true
+    }
+
+    pub fn set_speed(&mut self, serial: u64, speed: i32) -> bool {
+        let Some(i) = self.by_serial(serial) else {
+            return false;
+        };
+        self.p[i].send_speed = speed.clamp(1, 4);
+        true
+    }
+
+    pub fn at(&self, serial: u64, x: i64, y: i64, tol_px: i32) -> bool {
+        let Some(i) = self.by_serial(serial) else {
+            return false;
+        };
+        let p = &self.p[i];
+        if p.corpse || p.shot != 0 {
+            return false;
+        }
+        let r = i64::from(tol_px) << FP;
+        (p.x - x).abs() <= r && (p.y - y).abs() <= r
+    }
+
+    pub fn stunned(&self, serial: u64) -> bool {
+        let Some(i) = self.by_serial(serial) else {
+            return false;
+        };
+        let p = &self.p[i];
+        !p.corpse && p.shot == 0 && (p.down > 0 || p.fall > 0)
     }
 }
 

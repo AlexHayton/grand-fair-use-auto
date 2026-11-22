@@ -218,6 +218,11 @@ impl Script {
                     handbrake: hb != 0,
                 },
                 ("goto", Some(&[bx, by]), _) => Order::Goto { bx, by, face: None },
+                ("goto", Some(&[bx, by, face]), _) => Order::Goto {
+                    bx,
+                    by,
+                    face: Some(face),
+                },
                 ("goto", None, &[bx, by, "face", face]) => {
                     let n = |s: &str| s.parse::<i32>().map_err(|_| err("goto x y face a"));
                     Order::Goto {

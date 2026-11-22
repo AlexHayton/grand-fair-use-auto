@@ -154,6 +154,24 @@ const RECOVER_RINGS: i32 = 6;
 pub const COP_MODEL: u8 = 4;
 const HELICOPTER: u8 = 88;
 
+pub const COP_PATROL_MAX: i32 = 3;
+pub const COP_REROUTE: i32 = 25;
+pub const COP_ROUTE_REACH: i32 = 20;
+pub const COP_ARROWS_NEAR: i32 = 14;
+pub const ROADBLOCK_LEVEL: i32 = 3;
+pub const ROADBLOCK_TICKS: i32 = 400;
+pub const ROADBLOCK_CHECK: i32 = 100;
+pub const COP_NEAR_FOOT: i32 = 4;
+pub const COP_COUNTDOWN: i32 = 150;
+pub const COP_COUNTDOWN_FOOT: i32 = 300;
+pub const COP_SPAWN_COOL: i32 = 100;
+pub const COP_STATION_NEAR: i32 = 40;
+pub const COP_OUT_TICKS: i32 = 20;
+pub const PL_STILL_PX: i64 = 1 << 14;
+pub const PL_STILL_TICKS: i32 = 25;
+pub const COP_STOP_BLOCKS: i32 = 5;
+const MFIELD_CACHE: usize = 3;
+
 /// Why a car is not moving.
 pub mod hold {
     pub const NONE: u8 = 0;
@@ -431,6 +449,20 @@ pub struct Car {
     /// Ticks left pulled over to the kerb for the player's horn or siren;
     /// 0 driving ([`PULL_TICKS`]).
     pub pull: i32,
+    pub cop_wait: i32,
+    pub cop_re: i32,
+    pub cop_dest_x: i32,
+    pub cop_dest_y: i32,
+    pub uturn_cool: i32,
+    pub mdest_on: bool,
+    pub mdest_x: i16,
+    pub mdest_y: i16,
+    pub mf_x: i16,
+    pub mf_y: i16,
+    pub arrived: bool,
+    pub svc: u8,
+    pub hunt_fuse: i32,
+    pub fire_ticks: i32,
 }
 
 impl Car {
@@ -468,6 +500,15 @@ struct Occ {
     next: u16,
 }
 
+#[derive(Debug, Clone)]
+struct MField {
+    x: i32,
+    y: i32,
+    z: i32,
+    used: u64,
+    field: Box<[u8; 65536]>,
+}
+
 /// The fleet.
 #[derive(Debug, Clone)]
 pub struct Traffic {
@@ -499,11 +540,33 @@ pub struct Traffic {
     pl_speed: i64,
     pl_layer: i32,
     pl_hl: i32,
+    pub pl_prev_x: i64,
+    pub pl_prev_y: i64,
+    pub pl_moved: i64,
+    pub pl_still: i32,
     // Pedestrians, as obstacles.
     walk: Vec<(i64, i64, i32)>,
     pub wanted: i32,
-    n_cop_patrol: i32,
-    n_cop_chasing: i32,
+    pub wanted_in_car: bool,
+    pub n_cop_patrol: i32,
+    pub n_cop_chasing: i32,
+    pub cop_countdown: i32,
+    pub cop_spawn_cool: i32,
+    pub goal_on: bool,
+    pub goal_x: i32,
+    pub goal_y: i32,
+    pub cop_out_req: Option<(i64, i64, i32, i32)>,
+    pub rb_zone: i32,
+    pub rb_timer: i32,
+    pub rb_check: i32,
+    pub rb_cops: Vec<(i64, i64, i32, i32)>,
+    pub stat_cops_sent: u64,
+    pub stat_cops_made: u64,
+    pub stat_cops_released: u64,
+    pub stat_cop_uturns: u64,
+    pub stat_cop_box_pushed: u64,
+    pub stat_roadblocks: u64,
+    mfields: Vec<MField>,
     honk_rng: u64,
     /// A driver yelled at someone this tick (for the peds).
     pub yell: Option<(i64, i64, i32)>,
@@ -539,10 +602,32 @@ impl Traffic {
             pl_speed: 0,
             pl_layer: 0,
             pl_hl: 0,
+            pl_prev_x: 0,
+            pl_prev_y: 0,
+            pl_moved: 0,
+            pl_still: 0,
             walk: Vec::new(),
             wanted: 0,
+            wanted_in_car: false,
             n_cop_patrol: 0,
             n_cop_chasing: 0,
+            cop_countdown: 0,
+            cop_spawn_cool: 0,
+            goal_on: false,
+            goal_x: 0,
+            goal_y: 0,
+            cop_out_req: None,
+            rb_zone: -1,
+            rb_timer: 0,
+            rb_check: 0,
+            rb_cops: Vec::new(),
+            stat_cops_sent: 0,
+            stat_cops_made: 0,
+            stat_cops_released: 0,
+            stat_cop_uturns: 0,
+            stat_cop_box_pushed: 0,
+            stat_roadblocks: 0,
+            mfields: Vec::new(),
             honk_rng: 0,
             yell: None,
             rammed_cops: 0,
@@ -558,6 +643,14 @@ impl Traffic {
     /// length.
     #[allow(clippy::too_many_arguments)]
     pub fn set_player(&mut self, active: bool, x: i64, y: i64, speed: i64, layer: i32, hl: i32) {
+        self.pl_moved = (x - self.pl_prev_x).abs() + (y - self.pl_prev_y).abs();
+        self.pl_prev_x = x;
+        self.pl_prev_y = y;
+        if !active || self.pl_moved > PL_STILL_PX {
+            self.pl_still = 0;
+        } else if self.pl_still < 30000 {
+            self.pl_still += 1;
+        }
         self.pl_active = active;
         self.pl_x = x;
         self.pl_y = y;
@@ -890,8 +983,22 @@ impl Traffic {
         car.honk = 0;
         car.honk_pat = 0;
         car.hunt = 0;
+        car.hunt_fuse = 0;
         car.mission = false;
+        car.mdest_on = false;
+        car.mdest_x = 0;
+        car.mdest_y = 0;
+        car.mf_x = -1;
+        car.mf_y = -1;
+        car.arrived = false;
+        car.svc = 0;
         car.cop = 0;
+        car.cop_wait = 0;
+        car.cop_re = 0;
+        car.cop_dest_x = 0;
+        car.cop_dest_y = 0;
+        car.uturn_cool = 0;
+        car.fire_ticks = 0;
         car.driver = false;
         car.serial = serial;
         car.convoy = serial;
@@ -1852,6 +1959,47 @@ impl Traffic {
         }
     }
 
+    fn mfield_for(&mut self, map: &SimMap, z: i32, tx: i32, ty: i32) -> &[u8; 65536] {
+        if let Some(pos) = self.mfields.iter().position(|m| m.x == tx && m.y == ty) {
+            self.mfields[pos].used = self.tick + 1;
+            return &self.mfields[pos].field;
+        }
+        let slot = if self.mfields.len() < MFIELD_CACHE {
+            self.mfields.push(MField {
+                x: tx,
+                y: ty,
+                z,
+                used: self.tick + 1,
+                field: Box::new([0xff; 65536]),
+            });
+            self.mfields.len() - 1
+        } else {
+            let mut best = 0;
+            for i in 1..self.mfields.len() {
+                if self.mfields[i].used < self.mfields[best].used {
+                    best = i;
+                }
+            }
+            self.mfields[best].x = tx;
+            self.mfields[best].y = ty;
+            self.mfields[best].z = z;
+            self.mfields[best].used = self.tick + 1;
+            best
+        };
+        route::field_build(map, z, tx, ty, &mut self.mfields[slot].field);
+        &self.mfields[slot].field
+    }
+
+    pub(crate) fn mission_arrive(c: &mut Car) {
+        c.mdest_on = false;
+        c.arrived = true;
+        c.speed = 0;
+        c.clear_path();
+        c.want_route = false;
+        c.abandoned = true;
+        c.driver = true;
+    }
+
     /// Find routes: one car a tick, round robin, that wants one.
     fn route_tick(&mut self, map: &SimMap) {
         let n = self.n;
@@ -1861,6 +2009,15 @@ impl Traffic {
         for _ in 0..n {
             let idx = self.route_turn % n;
             self.route_turn = (self.route_turn + 1) % n;
+            if self.cars[idx].mdest_on && !self.cars[idx].done {
+                let (bx, by) = self.cars[idx].block();
+                let ax = (bx - i32::from(self.cars[idx].mdest_x)).abs();
+                let ay = (by - i32::from(self.cars[idx].mdest_y)).abs();
+                if ax <= 1 && ay <= 1 {
+                    Self::mission_arrive(&mut self.cars[idx]);
+                    continue;
+                }
+            }
             let c = &mut self.cars[idx];
             if c.route_cool > 0 {
                 c.route_cool -= 1;
@@ -1871,28 +2028,79 @@ impl Traffic {
             }
             let (bx, by) = c.block();
             let (layer, back) = (c.layer, (c.angle + 128) & 255);
+            let mdest_on = c.mdest_on;
+            let (mdest_x, mdest_y) = (i32::from(c.mdest_x), i32::from(c.mdest_y));
+            let chasing = (c.cop == 2 || c.hunt != 0) && self.pl_active;
             let mut buf = [Node::default(); route::MAX];
-            let len = self.router.wander(
-                map,
-                bx,
-                by,
-                layer,
-                back,
-                ROUTE_TARGET_LO,
-                ROUTE_TARGET_HI,
-                &mut self.seed,
-                &mut buf,
-            );
+            let mut tx = bx;
+            let mut ty = by;
+            let len = if mdest_on {
+                tx = mdest_x;
+                ty = mdest_y;
+                let field = self.mfield_for(map, layer, tx, ty);
+                let mut flen = route::field_follow(field, bx, by, &mut buf);
+                if flen > 0 {
+                    self.cars[idx].mf_x = tx as i16;
+                    self.cars[idx].mf_y = ty as i16;
+                } else {
+                    self.cars[idx].mf_x = -1;
+                    self.cars[idx].mf_y = -1;
+                    flen = self
+                        .router
+                        .find_chase(map, bx, by, layer, tx, ty, -1, &mut buf);
+                }
+                flen
+            } else if chasing {
+                let pvx = self.pl_x - self.pl_prev_x;
+                let pvy = self.pl_y - self.pl_prev_y;
+                tx = ((self.pl_x + pvx * 2) >> BS) as i32;
+                ty = ((self.pl_y + pvy * 2) >> BS) as i32;
+                if !roads::drivable(map, tx, ty, self.pl_layer) {
+                    tx = (self.pl_x >> BS) as i32;
+                    ty = (self.pl_y >> BS) as i32;
+                }
+                if !roads::drivable(map, tx, ty, layer) {
+                    'snap: for r in 1..=2 {
+                        for dy in -r..=r {
+                            for dx in -r..=r {
+                                if roads::drivable(map, tx + dx, ty + dy, layer) {
+                                    tx += dx;
+                                    ty += dy;
+                                    break 'snap;
+                                }
+                            }
+                        }
+                    }
+                }
+                self.cars[idx].cop_dest_x = (self.pl_x >> BS) as i32;
+                self.cars[idx].cop_dest_y = (self.pl_y >> BS) as i32;
+                self.router
+                    .find_chase(map, bx, by, layer, tx, ty, -1, &mut buf)
+            } else {
+                self.router.wander(
+                    map,
+                    bx,
+                    by,
+                    layer,
+                    back,
+                    ROUTE_TARGET_LO,
+                    ROUTE_TARGET_HI,
+                    &mut self.seed,
+                    &mut buf,
+                )
+            };
             let c = &mut self.cars[idx];
             c.path.clear();
             c.path.extend_from_slice(&buf[..len]);
             c.path_i = 0;
-            let (tx, ty) = c
-                .path
-                .last()
-                .map_or((bx, by), |p| (i32::from(p.x), i32::from(p.y)));
+            if !mdest_on && !chasing {
+                (tx, ty) = c
+                    .path
+                    .last()
+                    .map_or((bx, by), |p| (i32::from(p.x), i32::from(p.y)));
+            }
             if len == 0 {
-                c.route_cool = 50;
+                c.route_cool = if chasing || mdest_on { COP_REROUTE } else { 50 };
             }
             c.dest_x = tx;
             c.dest_y = ty;
@@ -1927,6 +2135,23 @@ impl Traffic {
                 let c = &mut self.cars[i];
                 c.ram_cool = c.ram_cool.saturating_sub(1);
                 c.hit_latch = c.hit_latch.saturating_sub(1);
+                if c.fire_ticks > 0 {
+                    c.fire_ticks -= 1;
+                }
+                if !c.done && !c.wrecked && c.hunt == 3 && self.pl_active {
+                    if c.hunt_fuse > 0 {
+                        c.hunt_fuse -= 1;
+                        if c.hunt_fuse == 0 {
+                            c.damage = crate::cars::WRECKED;
+                            c.fuse = 1;
+                        }
+                    } else {
+                        let d = ((c.x - self.pl_x).abs() + (c.y - self.pl_y).abs()) >> BS;
+                        if d <= 3 {
+                            c.hunt_fuse = 40;
+                        }
+                    }
+                }
             }
             let c = &self.cars[i];
             let odd = (self.tick ^ c.serial) & 1 != 0;
@@ -1987,6 +2212,10 @@ impl Traffic {
 
         self.boxlock_count();
         self.route_tick(map);
+        if self.wanted > 0 || self.n_cop_chasing > 0 || self.rb_zone >= 0 {
+            self.cop_dispatch(map, cars);
+            self.roadblock_tick(map, cars);
+        }
         self.fleet_collisions(cars);
 
         // Drop cars far from the camera; wrecks stay a while longer.
@@ -2198,6 +2427,760 @@ impl Traffic {
     /// The cars still in the fleet.
     pub fn live(&self) -> impl Iterator<Item = &Car> {
         self.cars[..self.n].iter().filter(|c| !c.done)
+    }
+
+    pub fn block_in_view(&self, bx: i32, by: i32) -> bool {
+        self.in_view(bx, by)
+    }
+
+    pub fn cop_top(cars: &[CarInfo], c: &Car, level: i32) -> i64 {
+        let max_s = (i64::from(cars[c.model].max_speed) * STYLE_SPEED_UNIT)
+            .max((SPEED_CRUISE + 4) * SPEED_UNIT);
+        let pct = match level {
+            1 => 85,
+            2 => 95,
+            3 => 105,
+            4.. => 115,
+            _ => 75,
+        };
+        (max_s * pct) / 100
+    }
+
+    /// Place a police car of `kind` (`1` patrol, `2` chasing, `4` roadblock) on `(bx, by, z)`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn cop_place(
+        &mut self,
+        map: &SimMap,
+        cars: &[CarInfo],
+        bx: i32,
+        by: i32,
+        z: i32,
+        ang: i32,
+        kind: u8,
+    ) -> Option<usize> {
+        if self.n >= MAX_CARS {
+            return None;
+        }
+        let cm = cars.iter().position(|c| c.model == COP_MODEL)?;
+        let info = &cars[cm];
+        let len = world_len(info);
+        let axis = if ang & 127 == 64 { 64 } else { 0 };
+        if !roads::fits(map, bx, by, z, axis, len) {
+            return None;
+        }
+        let px = i64::from(bx * 32 + 16) << FP;
+        let py = i64::from(by * 32 + 16) << FP;
+        if !self.room_for(cars, None, px, py, z, ang, len, MIN_GAP)
+            || self.claim_any(bx, by, z)
+            || self.body_in_way(cars, px, py, z, ang, info)
+        {
+            return None;
+        }
+        let (lo, hi) = if axis == 64 {
+            (
+                roads::ground_at(map, bx, by - 1, z) == crate::map::ground::ROAD,
+                roads::ground_at(map, bx, by + 1, z) == crate::map::ground::ROAD,
+            )
+        } else {
+            (
+                roads::ground_at(map, bx - 1, by, z) == crate::map::ground::ROAD,
+                roads::ground_at(map, bx + 1, by, z) == crate::map::ground::ROAD,
+            )
+        };
+        let mut tgt = LANE_TARGET;
+        if !lo && hi {
+            tgt += LANE_KERB;
+        } else if lo && !hi {
+            tgt -= LANE_KERB;
+        }
+        let (ox, oy) = if axis == 64 {
+            (0, i64::from(tgt - LANE_TARGET) << FP)
+        } else {
+            (i64::from(tgt - LANE_TARGET) << FP, 0)
+        };
+
+        self.next_serial += 1;
+        let serial = self.next_serial;
+        let slot = self.n;
+        self.n += 1;
+        let lane_axis = i32::from(ang & 127 == 64);
+        let top = if kind >= 2 {
+            Self::cop_top(cars, &self.cars[slot], self.wanted.max(1))
+        } else {
+            (i64::from(info.max_speed) * STYLE_SPEED_UNIT).min(SPEED_CRUISE * SPEED_UNIT)
+        };
+        self.cars[slot] = Car {
+            serial,
+            convoy: serial,
+            model: cm,
+            x: px + ox,
+            y: py + oy,
+            layer: z,
+            angle: ang & 255,
+            face: ang & 255,
+            face16: i64::from(ang & 255) << FP,
+            top,
+            speed: if kind == 4 { 0 } else { top },
+            accel: if info.accel != 0 {
+                i64::from(info.accel) * ACCEL_UNIT
+            } else {
+                ACCEL
+            },
+            brake: if info.braking != 0 {
+                i64::from(info.braking) * BRAKE_UNIT
+            } else {
+                BRAKE
+            },
+            cop: kind,
+            remap: -1,
+            book_lx: -1,
+            book_ly: -1,
+            turn_radius: TURN_RADIUS,
+            since_turn: AFTER_TURN,
+            turn_from: ang & 255,
+            allow_turn: true,
+            lane_bx: bx,
+            lane_by: by,
+            appr_bx: bx,
+            appr_by: by,
+            lane_target: tgt,
+            lane_axis,
+            lane_off: i64::from((if lane_axis != 0 { by } else { bx }) * 32 + tgt) << FP,
+            lane_dir: ang & 255,
+            lane_set: true,
+            want_route: kind != 4,
+            hint_bx: -1,
+            hint_by: -1,
+            last_bx: bx,
+            last_by: by,
+            dest_x: bx,
+            dest_y: by,
+            mf_x: -1,
+            mf_y: -1,
+            ..Car::default()
+        };
+        let top = if kind >= 2 {
+            Self::cop_top(cars, &self.cars[slot], self.wanted.max(1))
+        } else {
+            self.cars[slot].top
+        };
+        self.cars[slot].top = top;
+        if kind != 4 {
+            self.cars[slot].speed = top;
+        }
+        Some(slot)
+    }
+
+    /// Place initial patrol cars from the map's `0xff` police patrol routes.
+    pub fn police_start(&mut self, map: &SimMap, cars: &[CarInfo]) -> usize {
+        let mut placed = 0;
+        for rt in &map.cmp().routes {
+            if placed >= COP_PATROL_MAX as usize {
+                break;
+            }
+            if rt.kind != 0xff || rt.nodes.is_empty() {
+                continue;
+            }
+            let bx = i32::from(rt.nodes[0].x);
+            let by = i32::from(rt.nodes[0].y);
+            let Some(z) = roads::road_layer(map, bx, by) else {
+                continue;
+            };
+            let ang = if rt.nodes.len() >= 2 {
+                roads::step_angle(i32::from(rt.nodes[1].x) - bx, i32::from(rt.nodes[1].y) - by)
+            } else {
+                self.road_heading(map, bx, by, z).unwrap_or(0)
+            };
+            if self.cop_place(map, cars, bx, by, z, ang, 1).is_some() {
+                placed += 1;
+            }
+        }
+        self.count_cops();
+        placed
+    }
+
+    pub fn set_wanted(&mut self, level: i32, in_car: bool) {
+        self.wanted = level.clamp(0, 4);
+        self.wanted_in_car = in_car;
+    }
+
+    fn cop_reinforce(&mut self, map: &SimMap, cars: &[CarInfo]) -> Option<usize> {
+        let pbx = (self.pl_x >> BS) as i32;
+        let pby = (self.pl_y >> BS) as i32;
+
+        let mut best_st = None;
+        let mut best_d = i32::MAX;
+        for st in &map.cmp().locations[0] {
+            if st.x == 0 && st.y == 0 {
+                continue;
+            }
+            let d = (i32::from(st.x) - pbx).abs() + (i32::from(st.y) - pby).abs();
+            if d < best_d {
+                best_d = d;
+                best_st = Some((i32::from(st.x), i32::from(st.y)));
+            }
+        }
+
+        if let Some((sx, sy)) = best_st
+            && best_d <= COP_STATION_NEAR
+        {
+            for r in 1..=6i32 {
+                for dy in -r..=r {
+                    for dx in -r..=r {
+                        if dx.abs() != r && dy.abs() != r {
+                            continue;
+                        }
+                        let (cx, cy) = (sx + dx, sy + dy);
+                        if self.in_view(cx, cy) {
+                            continue;
+                        }
+                        let Some(z) = roads::road_layer(map, cx, cy) else {
+                            continue;
+                        };
+                        let Some(ang) = self.road_heading(map, cx, cy, z) else {
+                            continue;
+                        };
+                        if let Some(idx) = self.cop_place(map, cars, cx, cy, z, ang, 2) {
+                            self.stat_cops_made += 1;
+                            self.stat_cops_sent += 1;
+                            return Some(idx);
+                        }
+                    }
+                }
+            }
+        }
+
+        let r0 = self.view_blocks + 3;
+        let r1 = self.view_blocks + 7;
+        for ring in r0..=r1 {
+            for side in 0..4 {
+                for step in -ring..=ring {
+                    let (cx, cy) = match side {
+                        0 => (pbx + step, pby - ring),
+                        1 => (pbx + step, pby + ring),
+                        2 => (pbx - ring, pby + step),
+                        _ => (pbx + ring, pby + step),
+                    };
+                    if self.in_view(cx, cy) {
+                        continue;
+                    }
+                    let Some(z) = roads::road_layer(map, cx, cy) else {
+                        continue;
+                    };
+                    let Some(ang) = self.road_heading(map, cx, cy, z) else {
+                        continue;
+                    };
+                    if let Some(idx) = self.cop_place(map, cars, cx, cy, z, ang, 2) {
+                        self.stat_cops_made += 1;
+                        self.stat_cops_sent += 1;
+                        return Some(idx);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn cop_dispatch(&mut self, map: &SimMap, cars: &[CarInfo]) {
+        self.count_cops();
+        let target = self.wanted.clamp(0, 4);
+
+        if target == 0 {
+            self.cop_countdown = 0;
+            for i in 0..self.n {
+                if self.cars[i].done || self.cars[i].cop < 2 || self.cars[i].cop == 4 {
+                    continue;
+                }
+                let info = &cars[self.cars[i].model];
+                let top =
+                    (i64::from(info.max_speed) * STYLE_SPEED_UNIT).min(SPEED_CRUISE * SPEED_UNIT);
+                let c = &mut self.cars[i];
+                c.cop = 1;
+                c.cop_wait = 0;
+                c.top = top;
+                c.clear_path();
+                c.want_route = true;
+                self.stat_cops_released += 1;
+            }
+            self.count_cops();
+            return;
+        }
+
+        for i in 0..self.n {
+            if !self.cars[i].done && self.cars[i].cop == 2 {
+                let top = Self::cop_top(cars, &self.cars[i], target);
+                self.cars[i].top = top;
+            }
+        }
+
+        let pbx = (self.pl_x >> BS) as i32;
+        let pby = (self.pl_y >> BS) as i32;
+        while self.n_cop_chasing < target {
+            let mut best = None;
+            let mut best_d = i32::MAX;
+            for (i, c) in self.cars[..self.n].iter().enumerate() {
+                if c.done || c.cop != 1 {
+                    continue;
+                }
+                let (bx, by) = c.block();
+                let d = (bx - pbx).abs() + (by - pby).abs();
+                if d < best_d {
+                    best_d = d;
+                    best = Some(i);
+                }
+            }
+            let Some(i) = best else {
+                break;
+            };
+            let top = Self::cop_top(cars, &self.cars[i], target);
+            let c = &mut self.cars[i];
+            c.cop = 2;
+            c.cop_wait = 0;
+            c.cop_re = 0;
+            c.top = top;
+            c.clear_path();
+            c.want_route = true;
+            c.route_cool = 0;
+            self.n_cop_chasing += 1;
+            self.n_cop_patrol -= 1;
+            self.stat_cops_sent += 1;
+        }
+
+        if self.cop_spawn_cool > 0 {
+            self.cop_spawn_cool -= 1;
+        }
+        if self.n_cop_chasing < target && self.cop_spawn_cool == 0 {
+            if self.cop_countdown <= 0 {
+                self.cop_countdown = if self.wanted_in_car {
+                    COP_COUNTDOWN
+                } else {
+                    COP_COUNTDOWN_FOOT
+                };
+            }
+            self.cop_countdown -= 1;
+            if self.cop_countdown <= 0 {
+                if self.cop_reinforce(map, cars).is_some() {
+                    self.n_cop_chasing += 1;
+                    self.cop_spawn_cool = COP_SPAWN_COOL;
+                }
+                self.cop_countdown = if self.wanted_in_car {
+                    COP_COUNTDOWN
+                } else {
+                    COP_COUNTDOWN_FOOT
+                };
+            }
+        } else if self.n_cop_chasing >= target {
+            self.cop_countdown = 0;
+        }
+    }
+
+    pub fn roadblock_clear(&mut self, offscreen_only: bool) {
+        for i in 0..self.n {
+            if self.cars[i].done || self.cars[i].cop != 4 {
+                continue;
+            }
+            let (bx, by) = self.cars[i].block();
+            if self.in_view(bx, by) {
+                if !offscreen_only {
+                    self.cars[i].cop = 0;
+                    self.cars[i].abandoned = true;
+                    self.cars[i].speed = 0;
+                }
+                continue;
+            }
+            self.cars[i].done = true;
+        }
+        self.rb_cops.clear();
+        self.rb_zone = -1;
+    }
+
+    fn roadblock_tick(&mut self, map: &SimMap, cars: &[CarInfo]) {
+        if self.wanted < ROADBLOCK_LEVEL || !self.pl_active {
+            if self.rb_zone >= 0 {
+                self.roadblock_clear(false);
+            }
+            self.rb_timer = 0;
+            return;
+        }
+        if self.rb_timer > 0 {
+            self.rb_timer -= 1;
+            if self.rb_check > 0 {
+                self.rb_check -= 1;
+            } else {
+                self.rb_check = ROADBLOCK_CHECK;
+                let pbx = (self.pl_x >> BS) as i32;
+                let pby = (self.pl_y >> BS) as i32;
+                let mut zone = -1;
+                for (zi, d) in map.cmp().districts.iter().enumerate() {
+                    if !d.is_empty()
+                        && pbx >= i32::from(d.x)
+                        && pbx < i32::from(d.x) + i32::from(d.w)
+                        && pby >= i32::from(d.y)
+                        && pby < i32::from(d.y) + i32::from(d.h)
+                    {
+                        zone = zi as i32;
+                        break;
+                    }
+                }
+                if zone >= 0 && zone != self.rb_zone {
+                    self.rb_timer = 0;
+                }
+            }
+            return;
+        }
+
+        self.roadblock_clear(true);
+        self.rb_timer = ROADBLOCK_TICKS;
+        self.rb_check = ROADBLOCK_CHECK;
+
+        let pbx = (self.pl_x >> BS) as i32;
+        let pby = (self.pl_y >> BS) as i32;
+        let mut zone = None;
+        for (zi, d) in map.cmp().districts.iter().enumerate() {
+            if !d.is_empty()
+                && pbx >= i32::from(d.x)
+                && pbx < i32::from(d.x) + i32::from(d.w)
+                && pby >= i32::from(d.y)
+                && pby < i32::from(d.y) + i32::from(d.h)
+            {
+                zone = Some(zi as u8);
+                break;
+            }
+        }
+        let Some(zone_id) = zone else {
+            return;
+        };
+        let Some(rt) = map
+            .cmp()
+            .routes
+            .iter()
+            .find(|r| r.kind == zone_id && !r.nodes.is_empty())
+        else {
+            return;
+        };
+
+        let mut placed = 0;
+        let nodes = rt.nodes.clone();
+        for nd in &nodes {
+            let (bx, by) = (i32::from(nd.x), i32::from(nd.y));
+            if self.in_view(bx, by) {
+                continue;
+            }
+            let Some(z) = roads::road_layer(map, bx, by) else {
+                continue;
+            };
+            let axis = roads::road_axis(map, bx, by, z);
+            let ang = (axis + 64) & 255;
+            let Some(ci) = self.cop_place(map, cars, bx, by, z, ang, 4) else {
+                continue;
+            };
+            self.cars[ci].abandoned = true;
+            self.cars[ci].speed = 0;
+            self.cars[ci].want_route = false;
+            let face = self.cars[ci].face;
+            let cx = self.cars[ci].x - i64::from(cos(face)) * 18 * 4;
+            let cy = self.cars[ci].y - i64::from(sin(face)) * 18 * 4;
+            let ca = (face - 64) & 255;
+            if self.rb_cops.len() < 16 {
+                self.rb_cops.push((cx, cy, z, ca));
+            }
+            placed += 1;
+        }
+        if placed > 0 {
+            self.rb_zone = i32::from(zone_id);
+            self.stat_roadblocks += 1;
+        }
+    }
+
+    pub fn take_cop_out(&mut self) -> Option<(i64, i64, i32, i32)> {
+        self.cop_out_req.take()
+    }
+
+    pub fn take_roadblock_cop(&mut self) -> Option<(i64, i64, i32, i32)> {
+        self.rb_cops.pop()
+    }
+
+    pub fn cops_give_up(&mut self) {
+        self.cop_out_req = None;
+        for c in &mut self.cars[..self.n] {
+            if !c.done && c.cop == 3 {
+                c.cop = 0;
+                c.abandoned = true;
+                c.speed = 0;
+            }
+        }
+        self.count_cops();
+    }
+
+    pub fn police_reset(&mut self) {
+        self.roadblock_clear(false);
+        self.cop_out_req = None;
+        self.cop_countdown = 0;
+        self.cop_spawn_cool = 0;
+        self.wanted = 0;
+        for i in 0..self.n {
+            if self.cars[i].done {
+                continue;
+            }
+            if self.cars[i].cop == 2 {
+                let (bx, by) = self.cars[i].block();
+                if self.in_view(bx, by) {
+                    self.cars[i].cop = 1;
+                    self.cars[i].cop_wait = 0;
+                    self.cars[i].clear_path();
+                    self.cars[i].want_route = true;
+                } else {
+                    self.cars[i].done = true;
+                }
+            } else if self.cars[i].cop == 3 {
+                let (bx, by) = self.cars[i].block();
+                if self.in_view(bx, by) {
+                    self.cars[i].cop = 0;
+                    self.cars[i].abandoned = true;
+                    self.cars[i].speed = 0;
+                } else {
+                    self.cars[i].done = true;
+                }
+            }
+        }
+        self.count_cops();
+    }
+
+    /// Nearest chasing police car within 512 px of `(px, py)` (for its siren).
+    pub fn police_siren(&self, px: i64, py: i64) -> Option<(crate::cars::Siren, i64, i64, i32)> {
+        let mut best: Option<(i64, &Car)> = None;
+        for c in &self.cars[..self.n] {
+            if c.done || c.wrecked || c.cop < 2 {
+                continue;
+            }
+            let d = ((c.x - px).abs() + (c.y - py).abs()) >> FP;
+            if d > 512 {
+                continue;
+            }
+            if best.is_none_or(|(bd, _)| d < bd) {
+                best = Some((d, c));
+            }
+        }
+        let (_, c) = best?;
+        let siren = if c.lead_kind != 0 {
+            crate::cars::Siren::Sounding
+        } else {
+            crate::cars::Siren::On
+        };
+        Some((siren, c.x, c.y, c.layer))
+    }
+
+    /// Spawn a driven service vehicle (ambulance `svc = 1` or fire engine `svc = 2`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn spawn_service_car(
+        &mut self,
+        cars: &[CarInfo],
+        model: usize,
+        bx: i32,
+        by: i32,
+        z: i32,
+        ang: i32,
+        svc: u8,
+    ) -> Option<u64> {
+        let px = i64::from(bx * 32 + 16) << FP;
+        let py = i64::from(by * 32 + 16) << FP;
+        if !self.room_for(cars, None, px, py, z, ang, world_len(&cars[model]), MIN_GAP) {
+            return None;
+        }
+        let ser = self.abandon(cars, model, px, py, ang, z, -1, 0)?;
+        self.wake(ser);
+        self.set_service(ser, svc);
+        Some(ser)
+    }
+
+    pub fn wake(&mut self, serial: u64) -> bool {
+        let Some(c) = self.car_mut(serial) else {
+            return false;
+        };
+        let (bx, by) = c.block();
+        let ang = ((c.face + 32) & 255) & 0xC0;
+        let lane_axis = i32::from(ang & 127 == 64);
+        c.abandoned = false;
+        c.driver = true;
+        c.mission = true;
+        c.angle = ang;
+        c.face = ang;
+        c.face16 = i64::from(ang) << FP;
+        c.lane_axis = lane_axis;
+        c.lane_off = i64::from((if lane_axis != 0 { by } else { bx }) * 32 + LANE_TARGET) << FP;
+        c.lane_dir = ang;
+        c.lane_set = true;
+        c.lane_target = LANE_TARGET;
+        c.clear_path();
+        c.want_route = true;
+        c.route_cool = 0;
+        true
+    }
+
+    pub fn send_to(&mut self, map: &SimMap, serial: u64, tx: i32, ty: i32) -> bool {
+        self.wake(serial);
+        let Some(idx) = self.cars[..self.n]
+            .iter()
+            .position(|c| !c.done && c.serial == serial)
+        else {
+            return false;
+        };
+        let (mut tx, mut ty) = (tx, ty);
+        let layer = self.cars[idx].layer;
+        if !roads::drivable(map, tx, ty, layer) {
+            'snap: for r in 1..=3 {
+                for dy in -r..=r {
+                    for dx in -r..=r {
+                        if roads::drivable(map, tx + dx, ty + dy, layer) {
+                            tx += dx;
+                            ty += dy;
+                            break 'snap;
+                        }
+                    }
+                }
+            }
+        }
+        let c = &mut self.cars[idx];
+        c.mdest_on = true;
+        c.mdest_x = tx as i16;
+        c.mdest_y = ty as i16;
+        c.arrived = false;
+        c.clear_path();
+        c.want_route = true;
+        c.route_cool = 0;
+        true
+    }
+
+    pub fn set_service(&mut self, serial: u64, svc: u8) {
+        if let Some(c) = self.car_mut(serial) {
+            c.svc = svc;
+        }
+    }
+
+    pub fn set_mission(&mut self, serial: u64, mission: bool) {
+        if let Some(c) = self.car_mut(serial) {
+            c.mission = mission;
+            if !mission {
+                c.mdest_on = false;
+                c.hunt = 0;
+            }
+        }
+    }
+
+    pub fn stop_car(&mut self, serial: u64) {
+        if let Some(c) = self.car_mut(serial) {
+            Self::mission_arrive(c);
+        }
+    }
+
+    pub fn arrived(&self, serial: u64) -> bool {
+        self.cars[..self.n]
+            .iter()
+            .find(|c| !c.done && c.serial == serial)
+            .is_some_and(|c| c.arrived)
+    }
+
+    pub fn car_in_view(&self, serial: u64) -> bool {
+        let Some(c) = self.cars[..self.n]
+            .iter()
+            .find(|c| !c.done && c.serial == serial)
+        else {
+            return false;
+        };
+        let (bx, by) = c.block();
+        self.in_view(bx, by)
+    }
+
+    pub fn remove_car(&mut self, serial: u64) -> bool {
+        let Some(c) = self.car_mut(serial) else {
+            return false;
+        };
+        c.done = true;
+        true
+    }
+
+    pub fn find_car(&self, serial: u64) -> Option<(i64, i64, i32, i32, bool)> {
+        let c = self.cars[..self.n]
+            .iter()
+            .find(|c| serial != 0 && !c.done && c.serial == serial)?;
+        Some((c.x, c.y, c.layer, c.face, c.wrecked))
+    }
+
+    pub fn write_off(&mut self, serial: u64) -> bool {
+        let Some(c) = self.car_mut(serial) else {
+            return false;
+        };
+        c.damage = crate::cars::WRECKED;
+        c.fuse = 1;
+        true
+    }
+
+    pub fn set_locked(&mut self, serial: u64, locked: bool) -> bool {
+        let Some(c) = self.car_mut(serial) else {
+            return false;
+        };
+        c.locked = locked;
+        true
+    }
+
+    pub fn set_invuln(&mut self, serial: u64, invuln: bool) -> bool {
+        let Some(c) = self.car_mut(serial) else {
+            return false;
+        };
+        c.invuln = invuln;
+        true
+    }
+
+    pub fn set_driver(&mut self, serial: u64, has_driver: bool) -> bool {
+        let Some(c) = self.car_mut(serial) else {
+            return false;
+        };
+        c.driver = has_driver;
+        true
+    }
+
+    pub fn has_driver(&self, serial: u64) -> bool {
+        self.cars[..self.n]
+            .iter()
+            .find(|c| serial != 0 && !c.done && c.serial == serial)
+            .is_some_and(|c| !c.abandoned || c.driver)
+    }
+
+    pub fn driver_out(&mut self, serial: u64) -> Option<(i64, i64, i32, i32, usize)> {
+        let c = self.car_mut(serial)?;
+        if c.abandoned && !c.driver {
+            return None;
+        }
+        c.driver = false;
+        c.abandoned = true;
+        c.speed = 0;
+        c.mdest_on = false;
+        c.hunt = 0;
+        let out = (
+            c.x - i64::from(cos(c.face)) * 18 * 4,
+            c.y - i64::from(sin(c.face)) * 18 * 4,
+            c.layer,
+            c.face,
+            c.model,
+        );
+        Some(out)
+    }
+
+    pub fn hunt(&mut self, serial: u64, mode: u8) -> bool {
+        if !self.wake(serial) {
+            return false;
+        }
+        let Some(c) = self.car_mut(serial) else {
+            return false;
+        };
+        c.hunt = mode;
+        c.hunt_fuse = 0;
+        c.mdest_on = false;
+        c.top = (SPEED_CRUISE + 2) * SPEED_UNIT;
+        c.clear_path();
+        c.want_route = true;
+        c.route_cool = 0;
+        true
     }
 }
 

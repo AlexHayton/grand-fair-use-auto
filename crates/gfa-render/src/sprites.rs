@@ -372,6 +372,22 @@ pub fn object_sprite(
     own_sprite(style, atlas, sprite, pos, angle)
 }
 
+/// Burnt-out wreck sprite index for a vehicle class (`vtype`), from the
+/// style's `WBus` or `WreckedCar` category (AmiGTA1 `wreck_sprite_for`).
+pub fn wreck_sprite(style: &Style, vtype: u8) -> Option<usize> {
+    let cat = [SpriteCategory::WBus, SpriteCategory::WreckedCar]
+        .into_iter()
+        .find(|&c| style.sprite_count(c) >= 7)?;
+    let off = match vtype {
+        3 => 2,
+        0 | 1 | 2 | 8 | 9 => 3,
+        14 => 4,
+        13 => 6,
+        _ => 0,
+    };
+    style.sprite_index(cat, off)
+}
+
 /// The map's startup objects that `keep` accepts, as sprites: street
 /// furniture, and the vehicles the simulation does not own (trains and
 /// trams, until it does). Returns how many were skipped for want of a

@@ -915,3 +915,321 @@ fn the_top_up_gives_every_gun_99_rounds_once_a_press() {
         1
     );
 }
+
+#[test]
+fn crates_open_by_shot_car_or_blast_and_powerups_obey_caps() {
+    use gfa_sim::pickups::{PickupState, kind};
+    let mut b = CmpBuilder::new(1);
+    street(&mut b, 5..30, 5..30);
+    let mut w = world(&b, south(15, 15));
+
+    // Place a pistol crate 1 block south and shoot it open.
+    w.drop_crate(0, 1, kind::PISTOL, 0);
+    assert_eq!(w.pickups.p[0].state, PickupState::Crate);
+    w.give_weapon(1, 5);
+    run(&mut w, Buttons::FIRE, 5);
+    assert_eq!(w.pickups.p[0].state, PickupState::Open);
+
+    // Refused when ammo is already 99; taken when below 99.
+    w.arms.ammo[1] = 99;
+    run(&mut w, Buttons::UP, 24);
+    assert_eq!(w.pickups.p[0].state, PickupState::Open);
+    w.arms.ammo[1] = 50;
+    run(&mut w, Buttons::NONE, 2);
+    assert_eq!(w.pickups.p[0].state, PickupState::Gone);
+    assert_eq!(w.arms.ammo[1], 70);
+
+    // Armour, multiplier, life, jail-free, bribe, speed, and frenzy.
+    let (bx, by) = w.player.block();
+    for (k, amt) in [
+        (kind::ARMOUR, 5),
+        (kind::MULTIPLIER, 1),
+        (kind::LIFE, 2),
+        (kind::JAILFREE, 1),
+        (kind::SPEED, 1),
+        (kind::BRIBE, 1),
+    ] {
+        w.pickups.p.clear();
+        w.drop_crate(0, 0, k, amt);
+        w.pickups.p[0].state = PickupState::Open;
+        if k == kind::BRIBE {
+            w.score.force_level(2);
+        }
+        run(&mut w, Buttons::NONE, 1);
+        assert_eq!(
+            w.pickups.p[0].state,
+            PickupState::Gone,
+            "failed to take kind {k} at ({bx},{by})"
+        );
+    }
+    assert_eq!(w.armour, 5);
+    assert_eq!(w.score.multiplier, 2);
+    assert_eq!(w.lives, 6);
+    assert!(w.jail_free);
+    assert!(w.player_speed > 0);
+    assert_eq!(w.score.level, 0);
+
+    // Endless weapon from kill frenzy restores previous ammo on expiry.
+    w.arms.give(1, 12);
+    w.arms.give_endless(2, 5);
+    assert_eq!(w.arms.weapon, 2);
+    assert_eq!(w.arms.ammo[2], 99);
+    run(&mut w, Buttons::FIRE, 3);
+    assert_eq!(w.arms.ammo[2], 99);
+    run(&mut w, Buttons::NONE, 5);
+    assert_eq!(w.arms.inf_ticks, 0);
+    assert_eq!(w.arms.weapon, 1);
+    assert_eq!(w.arms.ammo[1], 12);
+}
+
+#[test]
+fn police_arrest_on_foot_and_jail_free_key_saves_weapons_and_multiplier() {
+    use gfa_sim::world::Card;
+    let mut b = CmpBuilder::new(1);
+    street(&mut b, 5..30, 5..30);
+    let mut w = world(&b, south(15, 15));
+    w.peds.clear();
+    w.score.force_level(1);
+    w.score.multiplier = 4;
+    w.armour = 5;
+    w.give_weapon(1, 20);
+    w.jail_free = true;
+
+    // Spawn a cop on foot right next to the player with no arrest wait.
+    let (px, py, pl) = (i64::from(w.player.x), i64::from(w.player.y), w.player.layer);
+    assert!(w.peds.spawn_cop(px + (4 << 16), py, pl, 192));
+    let ci = w.peds.last.unwrap();
+    w.peds.p[ci].arrest_wait = 0;
+    w.peds.p[ci].exit_wait = 0;
+
+    // Without fire held, the cop arrests him on foot -> FOOT_ARREST_TICKS -> BUSTED.
+    run(&mut w, Buttons::NONE, 5);
+    assert!(w.foot_arrest > 0 || w.card == Card::Busted);
+    run(&mut w, Buttons::NONE, 20);
+    assert_eq!(w.card, Card::Busted);
+    // Jail free key preserved his multiplier, armour, and pistol!
+    assert_eq!(w.score.multiplier, 4);
+    assert_eq!(w.armour, 5);
+    assert_eq!(w.arms.ammo[1], 20);
+    run(&mut w, Buttons::NONE, gfa_sim::world::BUST_TICKS as u32 + 2);
+    assert_eq!(w.card, Card::None);
+    assert!(!w.jail_free, "key is consumed after the bust");
+
+    // Second bust without the key halves multiplier and strips weapons & armour.
+    w.score.force_level(1);
+    assert!(w.peds.spawn_cop(
+        i64::from(w.player.x) + (4 << 16),
+        i64::from(w.player.y),
+        w.player.layer,
+        192
+    ));
+    let ci = w.peds.last.unwrap();
+    w.peds.p[ci].arrest_wait = 0;
+    w.peds.p[ci].exit_wait = 0;
+    run(&mut w, Buttons::NONE, 25);
+    assert_eq!(w.card, Card::Busted);
+    assert_eq!(w.score.multiplier, 2);
+    assert_eq!(w.armour, 0);
+    assert_eq!(w.arms.ammo[1], 0);
+}
+
+#[test]
+fn wasted_card_respawns_at_hospital_and_last_life_is_game_over() {
+    use gfa_formats::cmp::BlockPos;
+    use gfa_sim::world::{BUST_TICKS, Card};
+    let mut b = CmpBuilder::new(1);
+    street(&mut b, 5..35, 5..35);
+    let mut cmp = Cmp::parse(&b.build()).unwrap();
+    cmp.locations[1][0] = BlockPos { x: 25, y: 25, z: 2 };
+    let mut w = World::new(
+        SimMap::new(cmp, WallTiles::gta(1)),
+        vec![saloon()],
+        SimView::GAME,
+        south(10, 10),
+    );
+    w.lives = 2;
+    w.hurt(100);
+    w.step(press(Buttons::NONE));
+    assert_eq!(w.card, Card::Wasted);
+    assert_eq!(w.bust_timer, BUST_TICKS);
+    run(&mut w, Buttons::NONE, BUST_TICKS as u32);
+    assert_eq!(w.card, Card::None);
+    assert_eq!(w.lives, 1);
+    assert_eq!(w.player.block(), (25, 25), "respawned at the hospital");
+
+    // Losing the last life triggers GAME OVER.
+    w.hurt(100);
+    w.step(press(Buttons::NONE));
+    assert_eq!(w.card, Card::Wasted);
+    run(&mut w, Buttons::NONE, BUST_TICKS as u32);
+    assert_eq!(w.lives, 0);
+    assert!(w.game_over);
+    assert_eq!(w.card, Card::GameOver);
+}
+
+#[test]
+fn ambulance_dispatches_and_medic_revives_dead_ped() {
+    let mut b = CmpBuilder::new(1);
+    let floor = Block {
+        faces: [0, 0, 0, 0, 1],
+        ..Block::default()
+    };
+    let mut road_s = block(ROAD);
+    road_s.type_map |= 0x03; // N | S arrows
+    for x in 10..25 {
+        for y in 5..40 {
+            b.set(x, y, 1, floor).set(x, y, 2, road_s);
+        }
+    }
+    let cmp = Cmp::parse(&b.build()).unwrap();
+    let amb_info = CarInfo {
+        model: 5,
+        ..saloon()
+    };
+    let mut w = World::new(
+        SimMap::new(cmp, WallTiles::gta(1)),
+        vec![saloon(), amb_info],
+        SimView::GAME,
+        south(15, 20),
+    );
+    w.peds.clear();
+    w.kill_ped_decl(999);
+    let dead_slot = w.peds.p.iter().position(|p| p.alive && p.corpse).unwrap();
+
+    // Step so service scans the body and dispatches an ambulance.
+    run(&mut w, Buttons::NONE, 5);
+    assert_eq!(w.service.stat_amb_sent, 1);
+    // Bring the ambulance within 2 blocks of the body so medics deploy.
+    let ser = w.service.amb[0].car_serial;
+    if let Some(c) = w.traffic.car_mut(ser) {
+        c.x = w.peds.p[dead_slot].x;
+        c.y = w.peds.p[dead_slot].y - (2 << 21);
+        c.arrived = true;
+    }
+    run(&mut w, Buttons::NONE, 200);
+    assert_eq!(w.service.stat_revived, 1);
+    assert!(!w.peds.p[dead_slot].corpse, "ped was revived by the medic");
+}
+
+#[test]
+fn fire_engine_dispatches_and_extinguishes_burning_wreck() {
+    let mut b = CmpBuilder::new(1);
+    let floor = Block {
+        faces: [0, 0, 0, 0, 1],
+        ..Block::default()
+    };
+    let mut road_s = block(ROAD);
+    road_s.type_map |= 0x03;
+    for x in 10..25 {
+        for y in 5..40 {
+            b.set(x, y, 1, floor).set(x, y, 2, road_s);
+        }
+    }
+    let cmp = Cmp::parse(&b.build()).unwrap();
+    let fire_info = CarInfo {
+        model: 42,
+        ..saloon()
+    };
+    let mut w = World::new(
+        SimMap::new(cmp, WallTiles::gta(1)),
+        vec![saloon(), fire_info],
+        SimView::GAME,
+        south(15, 20),
+    );
+    w.traffic.clear();
+    w.wreck_car_decl(999);
+    run(&mut w, Buttons::NONE, 10);
+    assert_eq!(w.service.stat_fire_sent, 1);
+    let ser = w.service.eng[0].car_serial;
+    let (fx, fy) = (w.service.eng[0].fire_x, w.service.eng[0].fire_y);
+    if let Some(c) = w.traffic.car_mut(ser) {
+        c.x = fx;
+        c.y = fy - (2 << 21);
+        c.arrived = true;
+    }
+    run(&mut w, Buttons::NONE, 120);
+    assert!(
+        w.service.stat_fires_out >= 1,
+        "fire engine extinguished the fire"
+    );
+}
+
+#[test]
+fn spray_shop_and_bomb_shop_respray_and_rig_car_bomb() {
+    use gfa_sim::world::{BombShop, SprayShop};
+    let mut b = CmpBuilder::new(1);
+    street(&mut b, 5..25, 5..25);
+    let mut w = world(&b, south(15, 15));
+    w.sprays.push(SprayShop {
+        line: 1,
+        bx: 15,
+        by: 15,
+        color: 3,
+        used: false,
+    });
+    w.bombshops.push(BombShop {
+        line: 2,
+        bx: 15,
+        by: 15,
+        used: false,
+    });
+    w.score.score = 10_000;
+    w.score.force_level(2);
+    w.put_in_car(0, 15, 15, 128);
+    w.damage_car(45);
+
+    run(&mut w, Buttons::NONE, 4);
+    assert_eq!(w.driven.as_ref().unwrap().veh.damage, 0);
+    assert_eq!(w.driven.as_ref().unwrap().veh.remap, Some(3));
+    assert_eq!(w.score.level, 0);
+    assert_eq!(w.score.score, 5_000);
+    assert_eq!(w.bombs[0].kind, 1);
+
+    // Arm the bomb with FIRE while driving, get out, and let the 250-tick fuse blow it up.
+    run(&mut w, Buttons::FIRE, 2);
+    assert_eq!(w.bombs[0].kind, 2);
+    assert!(w.bombs[0].fuse > 0);
+    run(&mut w, Buttons::NONE, 260);
+    assert_eq!(w.bombs[0].kind, 0);
+    assert!(log_has(&mut w, "car: bomb detonated"));
+}
+
+#[test]
+fn friendly_fire_groups_and_gouranga_bonus() {
+    let mut b = CmpBuilder::new(1);
+    street(&mut b, 5..25, 5..30);
+    let mut w = world(&b, south(15, 10));
+    w.peds.clear();
+
+    // Two cops in a line: a shot owned by cop 0 cannot hit cop 1.
+    let (px, py, pl) = (i64::from(w.player.x), i64::from(w.player.y), w.player.layer);
+    assert!(w.peds.spawn_cop(px, py + (10 << 16), pl, 128));
+    let c0 = w.peds.last.unwrap();
+    assert!(w.peds.spawn_cop(px, py + (16 << 16), pl, 128));
+    let c1 = w.peds.last.unwrap();
+    assert_eq!(
+        w.peds
+            .hit_segment(px, py + (10 << 16), 128, 20, 2, pl, Some(c0)),
+        None,
+        "cops do not hit other cops"
+    );
+    assert_eq!(
+        w.peds
+            .hit_segment(px, py + (10 << 16), 128, 20, 2, pl, None),
+        Some(c0),
+        "player shots still hit cops"
+    );
+    let _ = c1;
+
+    // Running over 4 pedestrians in a streak awards the GOURANGA! bonus.
+    w.peds.clear();
+    w.put_in_car(0, 15, 8, 128);
+    run(&mut w, Buttons::UP, 60);
+    let v = w.driven.as_ref().unwrap().veh.clone();
+    for k in 0..4 {
+        w.peds
+            .drop_ped(v.ox, v.oy + ((36 + k * 4) << 16), 2, 0, -1, 0);
+    }
+    run(&mut w, Buttons::UP, 25);
+    assert!(log_has(&mut w, "score: GOURANGA!"));
+}

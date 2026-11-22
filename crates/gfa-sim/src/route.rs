@@ -388,3 +388,79 @@ pub fn pick_target(
     }
     None
 }
+
+pub const FIELD_Q: usize = 16384;
+
+pub fn field_build(map: &SimMap, z: i32, tx: i32, ty: i32, field: &mut [u8; 65536]) -> usize {
+    field.fill(0xff);
+    let _ = z;
+    if !(0..256).contains(&tx) || !(0..256).contains(&ty) {
+        return 0;
+    }
+    let mut qx = vec![0u8; FIELD_Q];
+    let mut qy = vec![0u8; FIELD_Q];
+    let mut qh = 0usize;
+    let mut qt = 0usize;
+    let mut reached = 0usize;
+    let ti = ((ty << 8) | tx) as usize;
+    field[ti] = 4;
+    qx[qt] = tx as u8;
+    qy[qt] = ty as u8;
+    qt += 1;
+
+    while qh != qt {
+        let x = i32::from(qx[qh]);
+        let y = i32::from(qy[qh]);
+        qh = (qh + 1) & (FIELD_Q - 1);
+        reached += 1;
+        for d in 0..4 {
+            let nx = x - STEP_X[d];
+            let ny = y - STEP_Y[d];
+            if !(0..256).contains(&nx) || !(0..256).contains(&ny) {
+                continue;
+            }
+            let ni = ((ny << 8) | nx) as usize;
+            if field[ni] != 0xff {
+                continue;
+            }
+            let mut m = 0u8;
+            for lz in 0..6 {
+                m |= nav::dirs(map.nav(nx, ny, lz));
+            }
+            if (m & DIR_BIT[d]) == 0 {
+                continue;
+            }
+            field[ni] = d as u8;
+            let next_qt = (qt + 1) & (FIELD_Q - 1);
+            if next_qt != qh {
+                qx[qt] = nx as u8;
+                qy[qt] = ny as u8;
+                qt = next_qt;
+            }
+        }
+    }
+    reached
+}
+
+pub fn field_follow(field: &[u8; 65536], sx: i32, sy: i32, out: &mut [Node]) -> usize {
+    let mut x = sx;
+    let mut y = sy;
+    let mut n = 0;
+    while n < out.len() {
+        if !(0..256).contains(&x) || !(0..256).contains(&y) {
+            break;
+        }
+        let d = field[((y << 8) | x) as usize];
+        if d >= 4 {
+            break;
+        }
+        x += STEP_X[d as usize];
+        y += STEP_Y[d as usize];
+        out[n] = Node {
+            x: x as u8,
+            y: y as u8,
+        };
+        n += 1;
+    }
+    n
+}

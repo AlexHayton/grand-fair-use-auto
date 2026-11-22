@@ -1,0 +1,13 @@
+# Liberty City [1] building explosion sequence (command 1071)
+# expect: script: started proc at line 1071
+# expect: script: exploded building decl 306
+# expect: script: exploded building decl 307
+# expect: script: exploded building decl 308
+# expect: script: exploded building decl 309
+goto 25 18 128
+wait 1
+script 1071
+wait 10
+dump
+wait 30
+dump

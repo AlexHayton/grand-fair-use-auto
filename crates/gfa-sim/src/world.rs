@@ -8,9 +8,12 @@ use crate::cars::{
 use crate::hash::{SimHash, StateHasher};
 use crate::input::{Buttons, TickInput};
 use crate::map::{SimMap, ground};
+use crate::marks::Marks;
 use crate::peds::{self, Peds, TickCtx};
+use crate::pickups::{self, Pickups};
 use crate::player::{Anim, Player, RUN_SPEED, Stick};
 use crate::score::{self, Score, crime};
+use crate::service::Service;
 use crate::traffic::{self, Traffic};
 use crate::trains::{Carriage, TrainEvent, Trains};
 use crate::vehicle::{CLASS_BIKE, Pedals, Veh};
@@ -18,12 +21,55 @@ use crate::view::{SimCamera, SimView};
 use crate::weapons::{self, Arms, Street, Target, Trigger, Weapons};
 use gfa_fixed::fx::{BLOCK_SHIFT, FP, block_centre};
 use gfa_fixed::trig::{cos, sin};
+use gfa_formats::mission::Section;
 use gfa_formats::style::CarInfo;
 
 /// Health at the start and after a respawn.
 pub const FULL_HEALTH: i32 = 100;
 /// Ticks he burns once set alight, a point of health each.
 pub const BURN_TICKS: i32 = 100;
+/// Default starting lives.
+pub const DEFAULT_LIVES: i32 = 4;
+/// Ticks of double walking/running speed from a speed power-up.
+pub const SPEED_TICKS: i32 = 375;
+/// Ticks lying on the ground when arrested on foot before the BUSTED card.
+pub const FOOT_ARREST_TICKS: i32 = 14;
+/// Ticks the BUSTED or WASTED card is shown before respawn.
+pub const BUST_TICKS: i32 = 150;
+
+/// Full-screen card state after arrest or death.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Card {
+    #[default]
+    None,
+    Busted,
+    Wasted,
+    GameOver,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SprayShop {
+    pub line: i32,
+    pub bx: i32,
+    pub by: i32,
+    pub color: i32,
+    pub used: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct BombShop {
+    pub line: i32,
+    pub bx: i32,
+    pub by: i32,
+    pub used: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct CarBomb {
+    pub serial: u64,
+    pub kind: i32,
+    pub fuse: i32,
+}
 
 /// Where the player starts: a block, and optionally a heading.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,6 +128,7 @@ pub struct Entering {
     pub serial: u64,
     pub mission: bool,
     pub driver: bool,
+    pub cop: bool,
 }
 
 /// Going over a car's roof at running pace along a fixed heading. Every
@@ -205,7 +252,26 @@ pub struct World {
     pub arms: Arms,
     /// Everything in flight, every explosion and fire.
     pub weapons: Weapons,
+    pub pickups: Pickups,
+    pub marks: Marks,
+    pub service: Service,
     pub score: Score,
+    pub lives: i32,
+    pub jail_free: bool,
+    pub player_speed: i32,
+    pub bust_timer: i32,
+    pub card: Card,
+    pub foot_arrest: i32,
+    pub game_over: bool,
+    pub live_city: bool,
+    pub sprays: Vec<SprayShop>,
+    pub bombshops: Vec<BombShop>,
+    pub bomb_cost: i32,
+    pub bombs: [CarBomb; 4],
+    pub shop_half: bool,
+    pub cops_killed_seen: u64,
+    pub section: Option<Section>,
+    pub explode_proc: Option<(usize, i32)>,
     /// Where the level put him, for the stopgap respawn.
     start: Start,
     /// Last tick's buttons, to find presses.
@@ -244,6 +310,9 @@ impl World {
         // The traffic starts parked around the level start, as in AmiGTA1.
         let cap = traffic.fleet_cap;
         traffic.park(&map, &cars, start.bx, start.by, 8, cap);
+        if map_cars {
+            traffic.police_start(&map, &cars);
+        }
         let score = Score::new(map.cmp().style_number);
         let mut world = World {
             tick: 0,
@@ -262,7 +331,26 @@ impl World {
             burning: 0,
             arms: Arms::default(),
             weapons: Weapons::default(),
+            pickups: Pickups::new(),
+            marks: Marks::new(),
+            service: Service::new(),
             score,
+            lives: DEFAULT_LIVES,
+            jail_free: false,
+            player_speed: 0,
+            bust_timer: 0,
+            card: Card::None,
+            foot_arrest: 0,
+            game_over: false,
+            live_city: map_cars,
+            sprays: Vec::new(),
+            bombshops: Vec::new(),
+            bomb_cost: 5000,
+            bombs: [CarBomb::default(); 4],
+            shop_half: false,
+            cops_killed_seen: 0,
+            section: None,
+            explode_proc: None,
             start,
             prev: Buttons::NONE,
             log: Vec::new(),
@@ -297,11 +385,53 @@ impl World {
         world
     }
 
+    /// Load crates, spray shops and bomb shops from a mission section.
+    pub fn load_section(&mut self, section: &Section) {
+        self.pickups = Pickups::from_section(section, &self.map);
+        self.sprays.clear();
+        self.bombshops.clear();
+        self.bomb_cost = 5000;
+        for d in &section.decls {
+            match d.kind.as_str() {
+                "SPRAY" => {
+                    self.sprays.push(SprayShop {
+                        line: d.id,
+                        bx: d.pos[0],
+                        by: d.pos[1],
+                        color: d.nums.first().copied().unwrap_or(0),
+                        used: false,
+                    });
+                }
+                "BOMBSHOP" => {
+                    self.bombshops.push(BombShop {
+                        line: d.id,
+                        bx: d.pos[0],
+                        by: d.pos[1],
+                        used: false,
+                    });
+                }
+                "BOMBSHOP_COST" => {
+                    self.bomb_cost = d.nums.first().copied().unwrap_or(5000);
+                }
+                _ => {}
+            }
+        }
+        self.section = Some(section.clone());
+    }
+
     /// Advance one tick.
     pub fn step(&mut self, input: TickInput) {
-        let b = input.buttons;
+        let b = if self.bust_timer > 0 || self.foot_arrest > 0 || self.game_over {
+            Buttons::NONE
+        } else {
+            input.buttons
+        };
         let pressed = b.pressed_since(self.prev);
         let was = (self.player.x, self.player.y);
+        if self.foot_arrest > 0 {
+            self.player.anim = Anim::SlideUnder;
+            self.player.frame = 0;
+        }
         // The cycle keys work anywhere, skipping guns with no rounds.
         for (key, forward) in [(Buttons::WEAPON_NEXT, true), (Buttons::WEAPON_PREV, false)] {
             if pressed.contains(key) {
@@ -311,6 +441,24 @@ impl World {
             }
         }
         self.arms.fire_held = b.contains(Buttons::FIRE);
+        if self.doing == Doing::Driving
+            && b.contains(Buttons::FIRE)
+            && let Some(d) = &self.driven
+            && d.serial != 0
+        {
+            let ser = d.serial;
+            let mut armed = false;
+            for bm in &mut self.bombs {
+                if bm.serial == ser && bm.kind == 1 {
+                    bm.kind = 2;
+                    bm.fuse = 250;
+                    armed = true;
+                }
+            }
+            if armed {
+                self.say("car: bomb armed - five seconds".into());
+            }
+        }
         if pressed.contains(Buttons::ALL_WEAPONS) {
             self.arms.ammo[weapons::weapon::PISTOL..].fill(99);
             self.say("cheat: keypad-* - every weapon, 99 rounds".into());
@@ -355,11 +503,28 @@ impl World {
             Doing::Driving | Doing::Drowning(_) => {}
         }
         if self.doing == Doing::Driving {
-            let pedals = Pedals {
-                throttle: b.contains(Buttons::UP),
-                brake: b.contains(Buttons::DOWN),
-                steer: i32::from(b.contains(Buttons::RIGHT)) - i32::from(b.contains(Buttons::LEFT)),
-                handbrake: b.contains(Buttons::HANDBRAKE),
+            let pull = self.peds.cop_pulling();
+            let pedals = if pull > 0 {
+                if pull == 1
+                    && let Some(d) = self.driven.as_mut()
+                    && self.cars[d.veh.model].vtype != CLASS_BIKE
+                {
+                    d.door_tick = 0;
+                }
+                Pedals {
+                    throttle: false,
+                    brake: false,
+                    steer: 0,
+                    handbrake: true,
+                }
+            } else {
+                Pedals {
+                    throttle: b.contains(Buttons::UP),
+                    brake: b.contains(Buttons::DOWN),
+                    steer: i32::from(b.contains(Buttons::RIGHT))
+                        - i32::from(b.contains(Buttons::LEFT)),
+                    handbrake: b.contains(Buttons::HANDBRAKE),
+                }
             };
             self.drive(pedals);
         }
@@ -367,12 +532,31 @@ impl World {
         self.follow(was);
         let centre = self.run_traffic();
         self.run_trains();
+        if self.live_city {
+            let mut lines = Vec::new();
+            self.service.step(
+                &self.map,
+                &self.cars,
+                &mut self.traffic,
+                &mut self.peds,
+                &mut self.weapons,
+                &mut |s| lines.push(s),
+            );
+            for l in lines {
+                self.say(l);
+            }
+        }
+        self.shops_tick();
+        self.bombs_tick();
+        self.explode_proc_tick();
         self.peds_view();
         self.burn();
         self.score.tick();
         self.run_peds(centre);
         // The shots fly after the people have moved.
         self.street(|w, st| w.tick(st));
+        self.marks.tick(&self.map, &mut self.peds, &self.weapons);
+        self.pickups_tick();
         self.aim_at_player();
         self.harm();
         self.run_over();
@@ -543,6 +727,7 @@ impl World {
                 cars: &self.cars,
                 peds: &mut self.peds,
                 traffic: &mut self.traffic,
+                pickups: &mut self.pickups,
                 score: &mut self.score,
                 say: &mut say,
             };
@@ -555,7 +740,7 @@ impl World {
     }
 
     /// Where the weapons will find him next tick: his car's box while he
-    /// is in it, else his body.
+    /// is in it, else his body; and any shots the police or gunmen fired.
     fn aim_at_player(&mut self) {
         let layer = self.player.layer;
         let target = match self.in_car() {
@@ -573,6 +758,23 @@ impl World {
             },
         };
         self.weapons.set_target(target);
+        let shoot_mode = if self.score.level >= 4 {
+            2
+        } else if self.arms.armed() || self.score.level >= 3 {
+            1
+        } else {
+            0
+        };
+        self.peds.set_cop_shoot(shoot_mode);
+        while let Some((si, sx, sy, sl, sa)) = self.peds.cop_shot() {
+            let w = match self.peds.p[si].weapon {
+                1 => weapons::weapon::MACHINE_GUN,
+                2 => weapons::weapon::ROCKET,
+                3 => weapons::weapon::FLAME,
+                _ => weapons::weapon::PISTOL,
+            };
+            self.weapons.fire(w, sx, sy, sl, sa, false, Some(si));
+        }
     }
 
     /// Report a crime, logging a change of wanted level.
@@ -641,17 +843,90 @@ impl World {
             }
         };
         let layer = p.layer;
-        // The police on foot look for him at his car's body (M6).
+        if self.live_city {
+            self.traffic
+                .set_wanted(self.score.level, self.in_car().is_some());
+        }
         let car = self.in_car().map(|d| {
             let v = &d.veh;
             (v.len / 2, v.wid / 2, v.angle())
         });
-        self.peds.set_player(x, y, layer, car, (x, y), false);
+        let (door, slow) = match self.in_car() {
+            Some(d) => {
+                let ci = &self.cars[d.veh.model];
+                let dp = door_point(ci, d.veh.ox, d.veh.oy, d.veh.angle());
+                let slow = self.bust_timer == 0
+                    && (speed < (2 << FP) || self.traffic.pl_still >= traffic::PL_STILL_TICKS);
+                (dp, slow)
+            }
+            None => ((x, y), false),
+        };
+        self.peds.set_player(x, y, layer, car, door, slow);
         self.traffic.set_player(true, x, y, speed, layer, hl);
         self.traffic.set_walkers(self.peds.walkers());
         self.traffic.set_view_blocks(self.view_now().half_w);
         let centre = self.view_centre();
         self.traffic.step(&self.map, &self.cars, centre.0, centre.1);
+        for i in 0..self.traffic.n {
+            let c = &self.traffic.cars[i];
+            if !c.done && !c.wrecked && c.knock > 0 {
+                let ci = &self.cars[c.model];
+                self.marks.slide(
+                    &self.map,
+                    c.x,
+                    c.y,
+                    c.layer,
+                    i32::from(ci.width) >> 1,
+                    c.face,
+                    c.kvx,
+                    c.kvy,
+                    ci.vtype == CLASS_BIKE,
+                );
+            }
+        }
+        if self.peds.stats.cops_killed != self.cops_killed_seen {
+            self.cops_killed_seen = self.peds.stats.cops_killed;
+            self.traffic.cops_give_up();
+        }
+        if let Some((cx, cy, cl, ca)) = self.traffic.take_cop_out() {
+            let max_out = (self.score.level as usize).max(1);
+            if self.peds.cops_out() < max_out && self.peds.spawn_cop(cx, cy, cl, ca) {
+                self.say(format!(
+                    "police: cop out on foot at ({},{}) layer {cl}",
+                    cx >> 21,
+                    cy >> 21
+                ));
+            }
+        }
+        while let Some((cx, cy, cl, ca)) = self.traffic.take_roadblock_cop() {
+            if self.peds.spawn_cop(cx, cy, cl, ca) {
+                self.peds.post_last_cop();
+            }
+        }
+        if self.peds.cop_event()
+            && self.bust_timer == 0
+            && self.foot_arrest == 0
+            && self.score.level > 0
+            && self.peds.cop_shoot == 0
+        {
+            if self.in_car().is_some() {
+                self.busted();
+            } else {
+                self.foot_arrest = FOOT_ARREST_TICKS;
+            }
+        }
+        if self.foot_arrest > 0 {
+            self.foot_arrest -= 1;
+            if self.foot_arrest == 0 {
+                self.busted();
+            }
+        }
+        if self.bust_timer > 0 {
+            self.bust_timer -= 1;
+            if self.bust_timer == 0 {
+                self.finish_card();
+            }
+        }
         centre
     }
 
@@ -721,6 +996,10 @@ impl World {
                 "car: ran over {hits} - {total} so far, {award} points (score {}, heat {})",
                 self.score.score, self.score.heat
             ));
+            if self.score.streak_count() >= 4 {
+                let bonus = self.score.add(500);
+                self.say(format!("score: GOURANGA! +{bonus} points"));
+            }
         }
     }
 
@@ -825,6 +1104,9 @@ impl World {
     }
 
     fn walk(&mut self, b: Buttons) {
+        if let Some(w) = self.arms.step_endless() {
+            self.say(format!("player: endless weapon ended -> weapon {w}"));
+        }
         let axis = |plus: Buttons, minus: Buttons| {
             i32::from(b.contains(plus)) - i32::from(b.contains(minus))
         };
@@ -846,6 +1128,19 @@ impl World {
         }
         self.player.update(&self.map, stick);
         self.car_block(ox, oy);
+        if self.player_speed > 0 {
+            self.player_speed -= 1;
+            let (ox2, oy2) = (self.player.x, self.player.y);
+            self.player.update(
+                &self.map,
+                Stick {
+                    turn: 0,
+                    forward: stick.forward,
+                    walk: stick.walk,
+                },
+            );
+            self.car_block(ox2, oy2);
+        }
         if self.player.layer != before {
             let (bx, by) = self.player.block();
             self.say(format!(
@@ -876,6 +1171,7 @@ impl World {
         self.player.y = ay;
         self.player.layer = z;
         self.doing = Doing::Drowning(1);
+        self.marks.splash(i64::from(ax), i64::from(ay), z);
         self.say(format!("player: in the water at ({bx},{by})"));
     }
 
@@ -894,6 +1190,14 @@ impl World {
     /// is wasted.
     fn harm(&mut self) {
         let hurt = self.weapons.take_hurt();
+        let exec = self.peds.cop_execute();
+        if self.bust_timer > 0 {
+            return;
+        }
+        if exec {
+            self.health = 0;
+            self.say("police: executed at close range".into());
+        }
         for _ in 0..hurt.bullets {
             if self.armour > 0 {
                 self.armour -= 1;
@@ -935,9 +1239,14 @@ impl World {
     }
 
     /// Wasted: his guns and the wanted level go; the score and the
-    /// multiplier stay. Until the card, lives and hospitals come, he starts
-    /// again where the level put him, with full health.
+    /// multiplier stay. In live city play the WASTED card runs for
+    /// [`BUST_TICKS`] before respawning at the nearest hospital (or
+    /// ending in GAME OVER when out of lives); in oracle harness mode
+    /// (`!live_city`) he respawns immediately at `start`.
     fn wasted(&mut self) {
+        if self.bust_timer > 0 {
+            return;
+        }
         let how = match self.doing {
             Doing::Drowning(_) => " - drowned",
             _ if self.burning > 0 => " - burnt",
@@ -945,19 +1254,171 @@ impl World {
         };
         self.say(format!("player: wasted{how}"));
         self.burning = 0;
+        self.player_speed = 0;
+        self.foot_arrest = 0;
         self.arms.disarm();
         if let Some(l) = self.score.clear_heat() {
             self.say(l);
         }
-        self.driven = None;
-        let start = self.start;
-        let (mut player, _) = Player::place(&self.map, start.bx, start.by);
-        if let Some(a) = start.angle {
-            player.angle = a & 255;
+        let has_hospitals = self.map.cmp().locations[1]
+            .iter()
+            .any(|l| l.x != 0 || l.y != 0);
+        if !self.live_city || !has_hospitals {
+            self.driven = None;
+            let start = self.start;
+            let (mut player, _) = Player::place(&self.map, start.bx, start.by);
+            if let Some(a) = start.angle {
+                player.angle = a & 255;
+            }
+            self.player = player;
+            self.health = FULL_HEALTH;
+            self.doing = Doing::OnFoot;
+            return;
         }
-        self.player = player;
-        self.health = FULL_HEALTH;
+        self.traffic.police_reset();
+        self.peds.clear_cops();
+        self.bust_timer = BUST_TICKS;
+        self.card = Card::Wasted;
+    }
+
+    /// Busted: his wanted level clears, the BUSTED card runs for
+    /// [`BUST_TICKS`], and unless he holds a Get Out of Jail Free key
+    /// he loses his weapons and armour and his multiplier is halved.
+    pub fn busted(&mut self) {
+        if self.bust_timer > 0 {
+            return;
+        }
+        self.foot_arrest = 0;
+        self.bust_timer = BUST_TICKS;
+        self.card = Card::Busted;
+        if self.doing == Doing::Driving {
+            let face = self.driven.as_ref().map_or(0, |d| d.veh.angle());
+            self.park_driven(face);
+            self.doing = Doing::OnFoot;
+        }
+        self.burning = 0;
+        self.player_speed = 0;
+        if !self.jail_free {
+            self.arms.disarm();
+            self.armour = 0;
+            self.score.multiplier = (self.score.multiplier / 2).max(1);
+        }
+        if let Some(l) = self.score.clear_heat() {
+            self.say(l);
+        }
+        self.traffic.police_reset();
+        self.peds.clear_cops();
+        self.say(format!(
+            "police: BUSTED (multiplier {}, jail_free {})",
+            self.score.multiplier, self.jail_free
+        ));
+    }
+
+    fn finish_card(&mut self) {
+        let was = self.card;
+        self.card = Card::None;
+        if self.doing == Doing::Driving {
+            let face = self.driven.as_ref().map_or(0, |d| d.veh.angle());
+            self.park_driven(face);
+        }
+        self.driven = None;
         self.doing = Doing::OnFoot;
+        self.burning = 0;
+        self.health = FULL_HEALTH;
+        if was == Card::Wasted {
+            self.armour = 0;
+            if self.lives > 0 {
+                self.lives -= 1;
+            }
+            if self.lives == 0 {
+                self.game_over = true;
+                self.card = Card::GameOver;
+                self.say("player: GAME OVER".into());
+                return;
+            }
+        }
+        if was == Card::Busted {
+            self.jail_free = false;
+        }
+        self.score.new_life();
+
+        let (pbx, pby) = self.player.block();
+        let locs = if was == Card::Busted {
+            &self.map.cmp().locations[0]
+        } else {
+            &self.map.cmp().locations[1]
+        };
+        let mut best_base = None;
+        let mut best_d = i32::MAX;
+        for loc in locs {
+            if loc.x == 0 && loc.y == 0 {
+                continue;
+            }
+            let d = (i32::from(loc.x) - pbx).abs() + (i32::from(loc.y) - pby).abs();
+            if d < best_d {
+                best_d = d;
+                best_base = Some((i32::from(loc.x), i32::from(loc.y)));
+            }
+        }
+        let (rx, ry) = if let Some((hx, hy)) = best_base {
+            let mut pick = (hx, hy);
+            let mut best_score = -1;
+            for r in 0..=6i32 {
+                for dy in -r..=r {
+                    for dx in -r..=r {
+                        if dx.abs() != r && dy.abs() != r {
+                            continue;
+                        }
+                        let (bx, by) = (hx + dx, hy + dy);
+                        if !(1..255).contains(&bx) || !(1..255).contains(&by) {
+                            continue;
+                        }
+                        for z in 0..6 {
+                            let g = self.map.nav_ground(bx, by, z);
+                            let sc = if g == ground::PAVEMENT {
+                                2
+                            } else if g == ground::ROAD || g == ground::FIELD {
+                                1
+                            } else {
+                                -1
+                            };
+                            if sc > best_score {
+                                best_score = sc;
+                                pick = (bx, by);
+                                if sc == 2 {
+                                    break;
+                                }
+                            }
+                        }
+                        if best_score == 2 {
+                            break;
+                        }
+                    }
+                    if best_score == 2 {
+                        break;
+                    }
+                }
+                if best_score == 2 {
+                    break;
+                }
+            }
+            pick
+        } else {
+            (self.start.bx, self.start.by)
+        };
+        let (mut player, _) = Player::place(&self.map, rx, ry);
+        player.angle = self.start.angle.unwrap_or(128) & 255;
+        self.player = player;
+        self.camera = SimCamera::REST;
+        let where_str = if was == Card::Busted {
+            "police station"
+        } else {
+            "hospital"
+        };
+        self.say(format!(
+            "player: respawned at {where_str} ({rx},{ry}) layer {} (lives {})",
+            self.player.layer, self.lives
+        ));
     }
 
     /// Is a car's body at `(px, py)` on `layer`, grown by `margin`?
@@ -1154,6 +1615,7 @@ impl World {
             serial: t.serial,
             mission: t.mission,
             driver: t.had_driver,
+            cop: t.cop,
         };
         self.say(format!(
             "car: going for model {model} at ({},{})",
@@ -1193,6 +1655,9 @@ impl World {
         };
         match got {
             Some(i) => {
+                if e.cop {
+                    self.peds.make_cop(i);
+                }
                 // Taking a car off somebody scores; a parked one is worth
                 // nothing.
                 self.score.event(score::kind::CAR, 0);
@@ -1464,9 +1929,33 @@ impl World {
         }
         let mut lines = Vec::new();
         let (ox0, oy0, ang0) = (d.veh.ox, d.veh.oy, d.veh.ang16);
+        let was_air = d.air.is_some();
         let ci = &self.cars[d.veh.model];
         let water = d.tick(&self.map, ci, pedals, &mut |s| lines.push(s));
         if water.is_none() {
+            if was_air && d.air.is_none() {
+                self.marks.sparks(
+                    d.veh.ox,
+                    d.veh.oy,
+                    d.layer,
+                    d.veh.len,
+                    d.veh.wid,
+                    d.veh.angle(),
+                );
+            }
+            if d.veh.sliding && d.air.is_none() && ci.model != 0x25 {
+                self.marks.slide(
+                    &self.map,
+                    d.veh.ox,
+                    d.veh.oy,
+                    d.layer,
+                    d.veh.wid,
+                    d.veh.angle(),
+                    d.veh.vx,
+                    d.veh.vy,
+                    ci.vtype == CLASS_BIKE,
+                );
+            }
             // The fleet: stopped at the contact rather than inside a car,
             // then the ram (AmiGTA1's main loop).
             let v = &mut d.veh;
@@ -1556,6 +2045,7 @@ impl World {
         let Some(d) = self.driven.take() else {
             return;
         };
+        self.marks.splash(d.veh.ox, d.veh.oy, z);
         self.player.x = d.veh.ox as i32;
         self.player.y = d.veh.oy as i32;
         self.player.layer = z;
@@ -1681,6 +2171,9 @@ impl World {
     }
 
     pub fn player_frame(&self) -> Option<u16> {
+        if self.foot_arrest > 0 {
+            return Some(peds::frame::LIES);
+        }
         match self.doing {
             // Aboard a train he is out of sight, and in the water he has
             // gone under.
@@ -1908,6 +2401,453 @@ impl World {
         ));
     }
 
+    fn pickups_tick(&mut self) {
+        if self.bust_timer > 0 || matches!(self.doing, Doing::Drowning(_)) {
+            return;
+        }
+        let (px, py, pl, r) = match self.in_car() {
+            Some(d) => (d.veh.ox, d.veh.oy, d.layer, 12),
+            None => (
+                i64::from(self.player.x),
+                i64::from(self.player.y),
+                self.player.layer,
+                8,
+            ),
+        };
+        if self.in_car().is_some() {
+            let mut lines = Vec::new();
+            self.pickups.open_at(px, py, pl, r, &mut |s| lines.push(s));
+            for l in lines {
+                self.say(l);
+            }
+        }
+        let mut scan = 0usize;
+        while let Some((idx, kind, amount)) = self.pickups.peek_from(px, py, pl, r, scan) {
+            scan = idx + 1;
+            let want = match kind {
+                1..=4 => {
+                    let w = kind as usize;
+                    self.arms.ammo[w] < 99 && (self.arms.inf_ticks <= 0 || self.arms.inf_w != w)
+                }
+                6..=8 => self.player_speed <= 0,
+                pickups::kind::BRIBE => self.score.level > 0,
+                pickups::kind::ARMOUR => self.armour < 10,
+                pickups::kind::MULTIPLIER => self.score.multiplier < 99,
+                pickups::kind::JAILFREE => !self.jail_free,
+                pickups::kind::LIFE | 15 => self.lives < 99,
+                pickups::kind::FRENZY => true,
+                _ => true,
+            };
+            if !want {
+                continue;
+            }
+            self.pickups.take_index(idx);
+            match kind {
+                1..=4 => {
+                    let w = kind as usize;
+                    let add = if amount > 0 {
+                        amount
+                    } else {
+                        weapons::CRATE_AMMO[w]
+                    };
+                    self.arms.ammo[w] = (self.arms.ammo[w] + add).min(99);
+                    if self.arms.weapon == weapons::weapon::FIST
+                        || self.arms.ammo[self.arms.weapon] <= 0
+                    {
+                        self.arms.weapon = w;
+                    }
+                    self.say(format!(
+                        "pickups: took {} (+{add}, ammo {})",
+                        pickups::kind_name(kind),
+                        self.arms.ammo[w]
+                    ));
+                }
+                6..=8 => {
+                    self.player_speed = SPEED_TICKS;
+                    self.say(format!("pickups: took speed ({SPEED_TICKS} ticks)"));
+                }
+                pickups::kind::BRIBE => {
+                    if let Some(l) = self.score.clear_heat() {
+                        self.say(l);
+                    }
+                    self.traffic.police_reset();
+                    self.peds.clear_cops();
+                    self.say("pickups: took police bribe - wanted level cleared".into());
+                }
+                pickups::kind::ARMOUR => {
+                    let add = if amount > 0 { amount } else { 3 };
+                    self.armour = (self.armour + add).min(10);
+                    self.say(format!("pickups: took armour (+{add} -> {})", self.armour));
+                }
+                pickups::kind::MULTIPLIER => {
+                    self.score.multiplier = (self.score.multiplier + 1).min(99);
+                    self.say(format!(
+                        "pickups: took multiplier (+1 -> x{})",
+                        self.score.multiplier
+                    ));
+                }
+                pickups::kind::JAILFREE => {
+                    self.jail_free = true;
+                    self.say("pickups: took get out of jail free key".into());
+                }
+                pickups::kind::LIFE | 15 => {
+                    let add = if amount > 0 { amount } else { 1 };
+                    self.lives = (self.lives + add).min(99);
+                    self.say(format!(
+                        "pickups: took extra life (+{add} -> {})",
+                        self.lives
+                    ));
+                }
+                pickups::kind::FRENZY => {
+                    self.arms.give_endless(weapons::weapon::MACHINE_GUN, 1500);
+                    self.say("pickups: took kill frenzy".into());
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn shops_tick(&mut self) {
+        self.shop_half = !self.shop_half;
+        if self.shop_half {
+            return;
+        }
+        if self.doing != Doing::Driving {
+            for sp in &mut self.sprays {
+                sp.used = false;
+            }
+            for bs in &mut self.bombshops {
+                bs.used = false;
+            }
+            return;
+        }
+        let Some(d) = self.driven.as_mut() else {
+            return;
+        };
+        let cbx = (d.veh.ox >> 21) as i32;
+        let cby = (d.veh.oy >> 21) as i32;
+        let mut sprayed = None;
+        for sp in &mut self.sprays {
+            let inside = (sp.bx - cbx).abs() <= 1 && (sp.by - cby).abs() <= 1;
+            if !inside {
+                sp.used = false;
+                continue;
+            }
+            if sp.used {
+                continue;
+            }
+            sp.used = true;
+            d.veh.damage = 0;
+            d.veh.dmg_bits = 0;
+            d.veh.fuse = 0;
+            let ci = &self.cars[d.veh.model];
+            let ok: Vec<u8> = (0..ci.remap8.len() as u8)
+                .filter(|&r| ci.remap8[r as usize] != 0)
+                .collect();
+            if sp.color > 0 {
+                d.veh.remap = Some(sp.color as u8);
+            } else if !ok.is_empty() {
+                let idx = ((self.tick as usize) + (cbx as usize)) % ok.len();
+                d.veh.remap = Some(ok[idx] + 1);
+            }
+            sprayed = Some((sp.bx, sp.by, d.veh.remap));
+            break;
+        }
+        if let Some((bx, by, remap)) = sprayed {
+            if let Some(l) = self.score.clear_heat() {
+                self.say(l);
+            }
+            self.traffic.police_reset();
+            self.peds.clear_cops();
+            self.say(format!(
+                "shop: resprayed car at ({bx},{by}) remap {remap:?} - damage & wanted cleared"
+            ));
+        }
+
+        let Some(d) = self.driven.as_mut() else {
+            return;
+        };
+        let mut rigged = None;
+        for bs in &mut self.bombshops {
+            let inside = (bs.bx - cbx).abs() <= 1 && (bs.by - cby).abs() <= 1;
+            if !inside {
+                bs.used = false;
+                continue;
+            }
+            if bs.used {
+                continue;
+            }
+            bs.used = true;
+            if d.serial == 0 {
+                d.serial = 0x7000_0000 + u64::from(self.tick) + 1;
+            }
+            let cost = i64::from(self.bomb_cost);
+            if cost > 0 && self.score.score >= cost {
+                self.score.score -= cost;
+            }
+            rigged = Some((bs.bx, bs.by, d.serial, cost));
+            break;
+        }
+        if let Some((bx, by, ser, cost)) = rigged {
+            let mut slot = 0;
+            for (i, bm) in self.bombs.iter().enumerate() {
+                if bm.kind == 0 || bm.serial == ser {
+                    slot = i;
+                    break;
+                }
+            }
+            self.bombs[slot] = CarBomb {
+                serial: ser,
+                kind: 1,
+                fuse: 0,
+            };
+            self.say(format!(
+                "shop: bomb fitted to car #{ser} at ({bx},{by}) for {cost} points"
+            ));
+        }
+    }
+
+    fn bombs_tick(&mut self) {
+        let mut blow = Vec::new();
+        for i in 0..self.bombs.len() {
+            let mut b = self.bombs[i];
+            if b.kind == 0 || b.serial == 0 {
+                continue;
+            }
+            let in_this = self.doing == Doing::Driving
+                && self.driven.as_ref().is_some_and(|d| d.serial == b.serial);
+            if b.kind == 2 {
+                if b.fuse > 0 {
+                    b.fuse -= 1;
+                }
+                if b.fuse <= 0 {
+                    b.kind = 0;
+                    blow.push((b.serial, in_this));
+                }
+            } else if b.kind == 3 && in_this {
+                b.kind = 0;
+                blow.push((b.serial, true));
+            } else if b.kind == 4 {
+                let damaged = if in_this {
+                    self.driven.as_ref().is_some_and(|d| d.veh.damage > 0)
+                } else {
+                    self.traffic
+                        .cars
+                        .iter()
+                        .take(self.traffic.n)
+                        .any(|c| !c.done && c.serial == b.serial && c.damage > 0)
+                };
+                if damaged {
+                    b.kind = 0;
+                    blow.push((b.serial, in_this));
+                }
+            } else if (b.kind == 5 || b.kind == 6) && in_this {
+                let spd = self
+                    .driven
+                    .as_ref()
+                    .map_or(0, |d| d.veh.vx.abs() + d.veh.vy.abs());
+                if b.kind == 5 {
+                    if spd > (7 << FP) {
+                        b.kind = 6;
+                    }
+                } else if spd < (3 << FP) {
+                    b.kind = 0;
+                    blow.push((b.serial, true));
+                }
+            }
+            self.bombs[i] = b;
+        }
+        for (ser, in_this) in blow {
+            if in_this {
+                if let Some(d) = self.driven.as_mut() {
+                    d.veh.damage = cars::WRECKED;
+                    d.veh.fuse = 1;
+                }
+                self.say(format!("car: bomb detonated in driven car #{ser}"));
+            } else if self.traffic.write_off(ser) {
+                self.say(format!("car: bomb detonated in fleet car #{ser}"));
+            }
+        }
+    }
+
+    fn explode_proc_tick(&mut self) {
+        let Some((idx, wait)) = self.explode_proc else {
+            return;
+        };
+        if wait > 0 {
+            self.explode_proc = Some((idx, wait - 1));
+            return;
+        }
+        let Some(sec) = &self.section else {
+            self.explode_proc = None;
+            return;
+        };
+        let Some(cmd) = sec.cmds.get(idx).cloned() else {
+            self.explode_proc = None;
+            return;
+        };
+        let (target_id, face) = match cmd.name.as_str() {
+            "PLAIN_EXPL_BUILDING" => (cmd.p(1), cmd.p(4)),
+            "EXPLODE" => (cmd.p(1), 0),
+            _ => {
+                self.explode_proc = None;
+                return;
+            }
+        };
+        let decl = sec.decls.iter().find(|d| d.id == target_id).map(|d| d.pos);
+        if let Some([bx, by, bz]) = decl {
+            let z = if bz > 0 {
+                bz
+            } else {
+                self.map.stand_layer(bx, by).unwrap_or(self.player.layer)
+            };
+            self.street(|w, st| {
+                w.explode_face(st, bx, by, z, face, false);
+            });
+            self.marks.debris(bx, by, z, face);
+            self.say(format!(
+                "script: exploded building decl {target_id} at ({bx},{by},{z}) face {face}"
+            ));
+        }
+        self.explode_proc = Some((idx + 1, 1));
+    }
+
+    /// A test fixture: place a crate `(dx, dy)` blocks from the player.
+    pub fn drop_crate(&mut self, dx: i32, dy: i32, kind: i32, amount: i32) {
+        let (pbx, pby) = self.player.block();
+        let (bx, by) = (pbx + dx, pby + dy);
+        if self.pickups.add_block(&self.map, bx, by, kind, amount) {
+            self.say(format!(
+                "pickups: placed crate at ({bx},{by}) kind {kind} ({}) amount {amount}",
+                pickups::kind_name(kind)
+            ));
+        } else {
+            self.say(format!("pickups: failed to place crate at ({bx},{by})"));
+        }
+    }
+
+    /// A test fixture: place a patrol police car `(dx, dy)` blocks from the player.
+    pub fn drop_copcar(&mut self, dx: i32, dy: i32, face: i32) {
+        self.live_city = true;
+        let (pbx, pby) = self.player.block();
+        let (bx, by) = (pbx + dx, pby + dy);
+        let z = self.map.stand_layer(bx, by).unwrap_or(self.player.layer);
+        if let Some(slot) = self
+            .traffic
+            .cop_place(&self.map, &self.cars, bx, by, z, face & 255, 1)
+        {
+            self.say(format!(
+                "police: placed patrol car at ({bx},{by}) layer {z} slot {slot}"
+            ));
+        } else {
+            self.say(format!("police: could not place patrol car at ({bx},{by})"));
+        }
+    }
+
+    /// A test fixture: place a mature blood pool `(dx, dy)` px from the player.
+    pub fn drop_pool(&mut self, dx: i32, dy: i32) {
+        let x = i64::from(self.player.x) + (i64::from(dx) << FP);
+        let y = i64::from(self.player.y) + (i64::from(dy) << FP);
+        let z = self.player.layer;
+        self.marks.pool(x, y, z);
+        for s in &mut self.marks.stains {
+            if s.left > crate::marks::POOL_SPLAT_AT {
+                s.left = crate::marks::POOL_SPLAT_AT;
+            }
+        }
+        self.say(format!(
+            "marks: placed blood pool at ({},{}) layer {z}",
+            x >> FP,
+            y >> FP
+        ));
+    }
+
+    /// A test fixture: spawn and kill a ped at mission declaration `line` (or near the player).
+    pub fn kill_ped_decl(&mut self, line: i32) {
+        self.live_city = true;
+        let (bx, by) = self
+            .section
+            .as_ref()
+            .and_then(|s| s.decls.iter().find(|d| d.id == line))
+            .map(|d| (d.pos[0], d.pos[1]))
+            .unwrap_or_else(|| self.player.block());
+        let z = self.map.stand_layer(bx, by).unwrap_or(self.player.layer);
+        let x = i64::from(block_centre(bx));
+        let y = i64::from(block_centre(by));
+        if let Some(ser) = self.peds.spawn_mission(x, y, z, 0)
+            && let Some(i) = self.peds.p.iter().position(|p| p.alive && p.serial == ser)
+        {
+            self.peds.p[i].mission = false;
+            self.peds.kill(i);
+            self.say(format!(
+                "script: killped decl {line} -> ped {i} dead at ({bx},{by})"
+            ));
+        }
+    }
+
+    /// A test fixture: wreck the car at mission declaration `line` (or spawn a burning wreck).
+    pub fn wreck_car_decl(&mut self, line: i32) {
+        self.live_city = true;
+        let (bx, by, model_id) = self
+            .section
+            .as_ref()
+            .and_then(|s| s.decls.iter().find(|d| d.id == line))
+            .map(|d| {
+                (
+                    d.pos[0],
+                    d.pos[1],
+                    d.nums.first().copied().unwrap_or(0) as u8,
+                )
+            })
+            .unwrap_or_else(|| {
+                let (px, py) = self.player.block();
+                (px + 1, py, 0)
+            });
+        let z = self.map.stand_layer(bx, by).unwrap_or(self.player.layer);
+        let x = i64::from(block_centre(bx));
+        let y = i64::from(block_centre(by));
+        let model = self
+            .cars
+            .iter()
+            .position(|c| c.model == model_id)
+            .unwrap_or(0);
+        if let Some(ci) = self.traffic.car_at(&self.cars, x, y, z, 24) {
+            self.traffic.cars[ci].damage = cars::WRECKED;
+            self.traffic.cars[ci].fuse = 1;
+            self.say(format!(
+                "script: wreck decl {line} -> fleet car {ci} at ({bx},{by})"
+            ));
+        } else if let Some(ser) =
+            self.traffic
+                .abandon(&self.cars, model, x, y, 0, z, -1, cars::WRECKED)
+        {
+            self.traffic.write_off(ser);
+            self.say(format!(
+                "script: wreck decl {line} -> car #{ser} at ({bx},{by})"
+            ));
+        }
+    }
+
+    /// A test fixture: add `delta` directly to the player's score.
+    pub fn add_score(&mut self, delta: i64) {
+        self.score.score = (self.score.score + delta).clamp(0, score::SCORE_CAP);
+        self.say(format!("score: {:+} -> {}", delta, self.score.score));
+    }
+
+    /// A test fixture: run a sequence of building-explosion commands starting at `line`.
+    pub fn start_script_line(&mut self, line: i32) {
+        let Some(sec) = &self.section else {
+            self.say(format!("script: no section loaded for line {line}"));
+            return;
+        };
+        if let Some(pos) = sec.cmds.iter().position(|c| c.id == line) {
+            self.explode_proc = Some((pos, 0));
+            self.say(format!("script: started proc at line {line}"));
+        } else {
+            self.say(format!("script: line {line} not found"));
+        }
+    }
+
     pub fn say(&mut self, text: String) {
         self.log.push(LogLine {
             tick: self.tick,
@@ -1941,6 +2881,7 @@ impl World {
                 h.bytes(&e.serial.to_le_bytes());
                 h.bool(e.mission);
                 h.bool(e.driver);
+                h.bool(e.cop);
                 match e.over {
                     None => h.u8(0),
                     Some(o) => {
@@ -1996,7 +2937,17 @@ impl World {
         h.i32(self.burning);
         self.arms.sim_hash(&mut h);
         self.weapons.sim_hash(&mut h);
+        self.pickups.sim_hash(&mut h);
+        self.marks.sim_hash(&mut h);
+        self.service.sim_hash(&mut h);
         self.score.sim_hash(&mut h);
+        h.i32(self.lives);
+        h.bool(self.jail_free);
+        h.i32(self.player_speed);
+        h.i32(self.bust_timer);
+        h.u8(self.card as u8);
+        h.i32(self.foot_arrest);
+        h.bool(self.game_over);
         h.bytes(&self.camera.lead.0.to_le_bytes());
         h.bytes(&self.camera.lead.1.to_le_bytes());
         h.i32(self.camera.zoom);
@@ -2015,8 +2966,16 @@ impl World {
     pub fn status_summary(&self) -> String {
         let a = &self.arms;
         let s = &self.score;
+        let card = match self.card {
+            Card::None => "",
+            Card::Busted => "  [BUSTED]",
+            Card::Wasted => "  [WASTED]",
+            Card::GameOver => "  [GAME OVER]",
+        };
+        let key = if self.jail_free { " key" } else { "" };
         format!(
-            "health {} armour {}  weapon {} ({})  score {} x{}  heat {} level {}",
+            "lives {}{key}  health {} armour {}  weapon {} ({})  score {} x{}  heat {} level {}{card}",
+            self.lives,
             self.health,
             self.armour,
             a.weapon,

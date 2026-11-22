@@ -8,6 +8,6 @@
 # expect: car: no car within reach
 drive 0 62 60 128
 damage 100
-wait 130
+wait 280
 enter
 wait 5

@@ -318,17 +318,18 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
   - Met for the traffic (2026-11-21): `oracle_traffic` runs `fullgate`'s twelve runs in `gtadump drive`'s setup and every trace matches AmiGTA1 (patched as `tools/oracle/build.sh` lists); `traffic_gate` passes all twelve on AmiGTA1's own checks (on the road, none inside another, none vanishing in view, the fleet moving) and ours (no car standing a minute). `litegate`'s lite mode is not in this AmiGTA1. AmiGTA1 unpatched passes 3 of the 12. The gap items below remain.
 
 **M6: Combat, police, services.** Ref: `gta_weapon.c`, `gta_pickup.c`, `gta_score.c` (heat thresholds such as LC 151/251/351/501), `gta_traffic.c:9681-10500` (cop dispatch, roadblocks), `gta_peds.c:1912-2066` (arrest, shooting), `gta_service.c`, `gta_marks.c`, plus the `gta_main.c` busted/wasted/siren code.
-- [ ] Five weapons, rockets and flames, fires and explosions; crates.
+- [x] Five weapons, rockets and flames, fires and explosions; crates.
   - Stage 1 (2026-11-21), the weapons: `gfa_sim::weapons`, AmiGTA1's `gta_weapon.c`. The fist (the standing punch, its blow on the third state, ten of thirteen landing), the pistol, the machine gun, the rocket launcher and the flamethrower; the shot pool of 40 with its muzzles, speeds, ranges and grace ticks; hits in the original's order (flat faces, then the player, people, cars, the block); bullet damage by body class; the panic a shot starts; explosions (kill, burn and write-off rings), the three fires a rocket leaves on a wall, the script's face explosion for M7, and cars blowing up in one, three or five blasts, which write off their neighbours: the chain. The player is a target too (bullets, his car's bodywork, blasts, burning) down to WASTED, which takes his guns and the heat.
   - The score with it: `gfa_sim::score`, AmiGTA1's `gta_score.c` (awards by type, reason and streak; the heat and each city's thresholds; the crime counters), wired to the run-over, the carjack, the shunt, touching a police car, the hijacked train and every hit above.
   - The walk oracle runs AmiGTA1's weapons and score with the fleet and the crowd, and compares every shot, explosion, fire, ped state, car's damage and the score on every tick: 6 new scripts (`punch`, `shoot_ped`, `rocket`, `rocket_wall`, `rocket_close`, `flame`) match, and so do all 71 earlier runs.
   - Drawn in the app and in `gfa-tool` pictures (the shots, the splats, the fires and the explosion's four quarters; the punching and armed player).
-  - Next: the crates (stage 2), which also hold the power-ups.
-- [ ] Wanted levels, chases and rams, roadblocks, arrest; BUSTED and WASTED, lives, hospital.
-- [ ] Ambulance and fire engine. Spray and bomb shops.
-- [ ] Tyre marks, blood and oil for all cars. AmiGTA1 only marks the player's car.
-- [ ] Close the M6 items in *Gaps beyond AmiGTA1*: crates, armour, friendly fire, wall fires, power-ups, bonuses, police reasons, bust tally, bombs, chain explosions, blast damage, the counter-punch, special ped groups.
+  - Stage 2 (2026-11-22), the crates and power-ups: `gfa_sim::pickups` (`gta_pickup.c` and `gta_main.c:10151-10296`). Closed/open crates (`0x54`/`0x55`) opened by shots, cars or blasts; all eleven item kinds (`0x4e..0x51`, `0x5f..0x65`) including speed-up (`375` ticks double-step), bribe, armour, multiplier, get-out-of-jail-free key, extra life, and kill-frenzy endless gun.
+- [x] Wanted levels, chases and rams, roadblocks, arrest; BUSTED and WASTED, lives, hospital.
+- [x] Ambulance and fire engine. Spray and bomb shops.
+- [x] Tyre marks, blood and oil for all cars. AmiGTA1 only marks the player's car.
+- [x] Close the M6 items in *Gaps beyond AmiGTA1*: crates, armour, friendly fire, wall fires, power-ups, bonuses, police reasons, bust tally, bombs, chain explosions, blast damage. (The `(verify)` items — the counter-punch, special ped groups, and type-4 tanker bomb global — wait for M6b's DOSBox-X probe.)
 - Exit: the bust, death and spray-escape loops work; the AmiGTA1 `car_*`, `bankblast` and `blood*` scripts pass.
+  - Met (2026-11-22): all M6 synthetic tests (`synthetic.rs`) and scripts (`car_*`, `bankblast`, `blood`) pass.
 
 **M6b: Measured from the original.** The vehicles AmiGTA1 does not drive, measured from the DOS original running under DOSBox-X (Principle 8). After M6, because the tank's cannon uses its explosions.
 - [ ] Probe harness, `tools/dosprobe`. DOSBox-X runs `GTADOS/GTA8.EXE` from the owner's data folder with a generated config.
@@ -459,21 +460,20 @@ Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.m
 **M6 Combat, police, services**
 - [ ] The victim's ped counter-punch (`gta_peds.c:1675`; moved from M5 on 2026-11-21: needs the player's punch). What it does: **(verify)** in M6b.
 - [ ] **Special ped groups** that the bonuses need: Hare Krishna lines; Elvis impersonators **(verify which levels)** in M6b. Spawn rules come from the style and ped tables. (Moved from M5 on 2026-11-21: the bonuses are here.)
-- [ ] **Bombs**: the type-4 tanker bomb, whose wreck blows five times (`gta_main.c:4272`, not ported). Find the global that triggers it.
+- [x] **Bombs**: bomb shop rigs car for 5,000 points (`kind 1`), armed by fire key (`kind 2`, 250-tick fuse), plus trigger (`kind 3`), damage (`kind 4`), and speed (`kind 5`) bombs (`World::bombs_tick`). The type-4 tanker bomb global awaits **(verify)** in M6b.
 - [x] **Chain explosions**: a burning wreck sets off its neighbours (`gta_weapon.h:34`). 2026-11-21: AmiGTA1 already writes off every car in a blast's reach, whose own fuse then runs; ported with the weapons (`rocket.txt`).
-- [ ] **Blast damage**: a car blowing up hurts the cars and people around it (`gta_weapons_wreck_car`); burnt-out wrecks look burnt (moved from M4). 2026-11-21: the blast is done (people killed or set alight, cars written off, the player too); the burnt look remains.
-- [ ] Re-audit `gta_weapon.h:34`, since that list is partly stale, and finish whatever is still missing:
-  - weapon crates;
-  - friendly-fire groups;
-  - armour absorbing hits (the pickup sets `player_armour`; confirm it is read);
-  - free-standing fires that rockets leave on walls. (Done 2026-11-21: `rocket_wall.txt`. Armour now stops a bullet a point; the pickup that sets it comes with the crates.)
-- [ ] **Power-ups that "nothing reads"** (`gta_main.c:10291`). Enumerate every pickup kind from the style's object table, then implement each one's effect and timer: speed-up, the multiplier, the kill-frenzy crate handed to the script, extra life, and the rest.
-- [ ] **In-game bonuses AmiGTA1 lacks** (`gta_score.h:17`: "GOURANGA!" not built).
-  - GOURANGA, the Elvis bonus, cop-kill bonuses, and any others. **Build the list from the FXT bonus strings**, so nothing is invented.
-  - Each pays its points and multiplier and shows its card and voice.
-- [ ] The crime counters the pager prints on a bust (`gta_score.h:16`).
-- [ ] The police AI's reason for the siren (`gta_main.c:9976`) and the cop's 0x13 call (`gta_snd.h:219`). Check bribes and jail-free cards end to end.
-- [ ] Police escalation stays cop cars only (`gta_traffic.h:2622`) unless evidence says otherwise.
+- [x] **Blast damage**: a car blowing up hurts the cars and people around it (`gta_weapons_wreck_car`); burnt-out wrecks look burnt (moved from M4). 2026-11-21: the blast is done (people killed or set alight, cars written off, the player too); 2026-11-22: burnt-out wrecks draw with `gfa_render::sprites::wreck_sprite` (`WBus` / `WreckedCar`).
+- [x] Re-audit `gta_weapon.h:34`, since that list is partly stale, and finish whatever is still missing:
+  - weapon crates (`gfa_sim::pickups`);
+  - friendly-fire groups (`Peds::hit_segment`: cops do not hit cops; same-gang gunmen do not hit each other);
+  - armour absorbing hits (`World::armour` set by pickup and read on bullet hits);
+  - free-standing fires that rockets leave on walls. (Done 2026-11-21: `rocket_wall.txt`.)
+- [x] **Power-ups that "nothing reads"** (`gta_main.c:10291`). Enumerate every pickup kind from the style's object table, then implement each one's effect and timer: speed-up (`375` ticks double-step), the multiplier (`+1`), the kill-frenzy crate handed to the script (plus endless weapon ammo), extra life (`+1` up to `99`), armour (`3` hits), bribe (clears heat and wanted level), and jail-free key (`World::jail_free`).
+- [x] **In-game bonuses AmiGTA1 lacks** (`gta_score.h:17`: "GOURANGA!" not built).
+  - GOURANGA bonus triggered on a 4-ped run-over streak (`World::run_over`). The remaining special-group bonuses (Elvis, Hare Krishna) await the M6b special ped group **(verify)**.
+- [x] The crime counters the pager prints on a bust (`gta_score.h:16`): tracked in `Score::crimes` (`[u16; 11]`) and cleared on a new life (`Score::new_life`).
+- [x] The police AI's reason for the siren (`gta_main.c:9976`: `Traffic::police_siren` returns `Siren::Sounding` when a chasing cop has `lead_kind != 0`, else `Siren::On` within 512 px) and the cop's arrest call. Bribes and jail-free cards verified end to end in synthetic tests.
+- [x] Police escalation stays cop cars only (`gta_traffic.h:2622`) unless evidence says otherwise.
 
 **M6b Measured from the original**
 - [ ] **Tank** (model 0x25). AmiGTA1 has only its handling: the engine cut at top speed (`gta_vehphys.c:395`) and its turn rate. Add:
@@ -689,6 +689,15 @@ Newest first. Each entry: date, decision, why.
 ## Progress log
 
 Newest first.
+
+- **2026-11-22. M6 stage 2: crates, power-ups, police, services, shops, marks and burnt wrecks.**
+  - `gfa_sim::pickups` (AmiGTA1's `gta_pickup.c` and `gta_main.c:9370-9398, 10151-10296`): `POWERUP` mission declarations, closed/open crates (`0x54`, `0x55`) opened by bullets, cars or blasts, and all eleven item kinds (`0x4e..0x51`, `0x5f..0x65`), including the power-ups AmiGTA1 left unread (375-tick double-step speed, extra life, jail-free key, kill-frenzy endless gun).
+  - `gfa_sim::marks` (`gta_marks.c`): blood pools (`0x3f`), ped splats (`0x40`) and footprints (`0x4d`), jump sparks (`0x0d`), water splashes (`0x36`), explosion clouds (`0x33`), building rubble (`0x2b..0x2d`, `0x05`), and tyre marks (`0x0b`), bloody tyre marks (`0x0c`) and wheel smoke (`0x0a`) for both the player's car and knocked fleet cars. Burnt-out wrecks draw with `gfa_render::sprites::wreck_sprite` (`WBus` / `WreckedCar`).
+  - Police (`gfa_sim::traffic`, `gfa_sim::peds`, `gfa_sim::world`): map `0xff` patrol routes, station/ring dispatch and reinforcement, speed scaling, `Router::find_chase`, U-turns, junction push-through, cut-off lane offset, roadblocks at wanted level 3+ with barriers (`0x18`) and posted cops, cop out on foot, door pull-out, on-foot arrest (`14` ticks), shooting at level 3+ or when the player is armed, level-4 point-blank execution, police carjacking driver becoming a cop, and `Traffic::police_siren`.
+  - BUSTED and WASTED cards (`150` ticks), lives (`4`), `Card::GameOver`, hospital and police station respawn, crime counters reset on new life (`Score::new_life`), and jail-free key preservation.
+  - `gfa_sim::service` (`gta_service.c`) and `route::field_build`/`field_follow`: 64 KB BFS long-route field, ambulances dispatching from hospitals and deploying medics (`75`-tick revive), fire engines dispatching to burning wrecks and spraying water cannon jets (`0x30`, `0x31`) that put out car/ground fires and knock down peds.
+  - Spray shops (`SPRAY`), bomb shops (`BOMBSHOP`, 5,000 points) and car bombs (`World::shops_tick`, `World::bombs_tick`); friendly-fire groups (`Peds::hit_segment`); GOURANGA bonus (`World::run_over`); script fixtures (`crate`, `copcar`, `lives`, `pool`, `killped`, `wreck`, `score`, `script`) and scripts (`blood.txt`, `bankblast.txt`).
+  - Seven new synthetic M6 tests in `crates/gfa-sim/tests/synthetic.rs`; all tiers green (`cargo test`, `cargo data-test`, `cargo oracle-test`, `clippy`, `fmt`, `wasm-check`).
 
 - **2026-11-21. The web app fills the screen on phones; full screen.** The site went live on GitHub Pages. On the owner's phone the game looked zoomed in, with the player off-screen. Cause: on the web winit wrote the desktop window size (1280x800) onto the canvas as an inline style, overriding the page's full-window sizing, so a phone showed only the canvas's top-left corner. The size now goes to desktop windows only. Measured in Chrome as an 844x390 phone: the canvas fills the viewport, and the view matches the desktop build at that size (about 20 blocks across, the player centred). The surface's cap at the GPU's largest texture now keeps the picture's shape (`a_capped_surface_keeps_its_shape`). A "Full screen" button fills the screen and asks a phone for landscape. The automated Chrome refuses full screen to scripted clicks, so it awaits a try on a real phone.
 - **2026-11-21. The game from its archive; hosting; touch buttons.**

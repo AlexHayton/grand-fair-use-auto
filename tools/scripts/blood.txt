@@ -1,0 +1,15 @@
+# Blood pools, ped splats and trails, and bloody tyre marks
+# expect: weapons: bullet 0 hit ped
+# expect: marks: placed blood pool
+goto 43 3 0
+ped 0 -16 128
+weapon 1 10
+fire 2
+wait 30
+pool 0 -8
+ped 0 -8 0
+wait 40
+drive 0 43 3 0
+run 10 1 0 -1 1
+wait 10
+dump

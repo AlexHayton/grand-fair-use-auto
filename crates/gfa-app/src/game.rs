@@ -244,8 +244,14 @@ pub struct TrafficCar {
     pub model: usize,
     pub remap: u8,
     pub deltas: u32,
-    /// Ticks left before a burning write-off burns out; 0 when not alight.
+    /// Ticks left before a burning write-off or wreck burns out; 0 when not alight.
     pub fuse: i32,
+    pub wrecked: bool,
+    pub cop: u8,
+    pub face: i32,
+    pub layer: i32,
+    pub x: i64,
+    pub y: i64,
 }
 
 /// A running level.
@@ -287,6 +293,7 @@ impl Game {
             SimView::GAME,
             start,
         );
+        world.load_section(&level.files.mission);
         for line in world.drain_log() {
             log::info!("{}", line.text);
         }
@@ -367,12 +374,24 @@ impl Game {
                     .iter()
                     .find(|p| p.0 == serial)
                     .map_or(pose, |p| p.1);
+                let lights = if c.cop >= 2 || c.svc == 2 {
+                    1 << (gfa_sim::cars::DELTA_LIGHT0
+                        + (self.world.tick / gfa_sim::cars::LIGHT_FLASH_TICKS) % 2)
+                } else {
+                    0
+                };
                 TrafficCar {
                     pose: between(before, pose, alpha),
                     model: c.model,
                     remap: (c.remap + 1).clamp(0, 255) as u8,
-                    deltas: c.dmg_bits,
-                    fuse: c.fuse,
+                    deltas: c.dmg_bits | lights,
+                    fuse: if c.fuse > 0 { c.fuse } else { c.fire_ticks },
+                    wrecked: c.wrecked,
+                    cop: c.cop,
+                    face: c.face,
+                    layer: c.layer,
+                    x: c.x,
+                    y: c.y,
                 }
             })
             .collect()

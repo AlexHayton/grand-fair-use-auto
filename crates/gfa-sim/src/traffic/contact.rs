@@ -121,13 +121,19 @@ impl Traffic {
             self.n += 1;
             self.n - 1
         } else {
+            let cam_x = i64::from(self.cam_bx * 32 + 16) << FP;
+            let cam_y = i64::from(self.cam_by * 32 + 16) << FP;
             let mut worst = -1;
             let mut slot = None;
             for (i, c) in self.cars[..self.n].iter().enumerate() {
                 if c.abandoned || c.mission {
                     continue;
                 }
-                let d = (c.x - x).abs().max((c.y - y).abs());
+                let (cbx, cby) = c.block();
+                if self.in_view(cbx, cby) {
+                    continue;
+                }
+                let d = (c.x - cam_x).abs().max((c.y - cam_y).abs());
                 if d > worst {
                     worst = d;
                     slot = Some(i);
@@ -246,6 +252,7 @@ impl Traffic {
             c.wrecked = true;
             c.dmg_bits = cars::DAMAGE_MASK;
             c.fuse = 0;
+            c.fire_ticks = 400;
             return true;
         }
         false
@@ -642,6 +649,9 @@ impl Traffic {
         c.speed = 0;
         c.knock = 0;
         c.fuse = 0;
+        c.fire_ticks = 400;
+        c.cop = 0;
+        c.svc = 0;
         c.hold = hold::NONE;
         Some((c.model, c.x, c.y, c.face, c.layer))
     }

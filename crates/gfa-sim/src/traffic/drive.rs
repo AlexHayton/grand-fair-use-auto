@@ -185,6 +185,19 @@ impl Traffic {
             }
             return -1;
         }
+        if self.goal_on {
+            let mut best = cand[0];
+            let mut best_d = i32::MAX;
+            for &a in &cand {
+                let (dx, dy) = heading_step(a);
+                let d = (bx + dx - self.goal_x).abs() + (by + dy - self.goal_y).abs();
+                if d < best_d || (d == best_d && a == cur) {
+                    best_d = d;
+                    best = a;
+                }
+            }
+            return best;
+        }
         for &a in &cand {
             if a == cur && self.next_rand() & 3 != 0 {
                 return cur;
@@ -1052,11 +1065,83 @@ impl Traffic {
             };
             c.wait = 0;
         }
-        if self.cars[idx].cop == 3 {
+        if self.cars[idx].cop == 3 || self.cars[idx].cop == 4 {
             let c = &mut self.cars[idx];
             c.speed = 0;
             c.hold = hold::QUEUE;
             return;
+        }
+        if (self.cars[idx].cop == 2 || self.cars[idx].hunt != 0) && self.pl_active {
+            let pbx = (self.pl_x >> BS) as i32;
+            let pby = (self.pl_y >> BS) as i32;
+            let md = (bx - pbx).abs() + (by - pby).abs();
+            let c = &mut self.cars[idx];
+            if c.cop_re > 0 {
+                c.cop_re -= 1;
+            }
+            if c.uturn_cool > 0 {
+                c.uturn_cool -= 1;
+            }
+            let drift = (pbx - c.cop_dest_x).abs() + (pby - c.cop_dest_y).abs();
+            if c.cop_re == 0 && (drift >= 2 || c.path_i >= c.path_n() || md <= COP_ROUTE_REACH) {
+                c.want_route = true;
+                c.cop_re = if md <= 8 {
+                    8
+                } else if md <= COP_ROUTE_REACH {
+                    15
+                } else {
+                    COP_REROUTE
+                };
+            }
+            let (angle, layer, turn, swap, uturn_cool) =
+                (c.angle, c.layer, c.turn, c.swap, c.uturn_cool);
+            if turn == 0 && swap == 0 && uturn_cool == 0 && layer == self.pl_layer {
+                let (fdx, fdy) = heading_step(angle);
+                let behind = (bx - pbx) * fdx + (by - pby) * fdy;
+                let side = ((pbx - bx) * fdy - (pby - by) * fdx).abs();
+                if (1..=10).contains(&behind) && side <= 2 && self.uturn_try(map, idx, bx, by) {
+                    self.cars[idx].uturn_cool = 75;
+                    self.cars[idx].cop_re = 0;
+                    self.stat_cop_uturns += 1;
+                }
+            }
+            let stop_foot = !self.wanted_in_car && md <= COP_NEAR_FOOT;
+            let stop_car = self.wanted_in_car
+                && md <= COP_STOP_BLOCKS
+                && (self.pl_speed < 2 * SPEED_UNIT || self.pl_still >= PL_STILL_TICKS);
+            let c = &mut self.cars[idx];
+            if c.cop == 2 && c.hunt == 0 && c.layer == self.pl_layer && (stop_foot || stop_car) {
+                if c.speed > c.brake {
+                    c.speed -= c.brake;
+                } else {
+                    c.speed = 0;
+                }
+                c.hold = hold::QUEUE;
+                c.cop_wait += 1;
+                if c.cop_wait >= COP_OUT_TICKS && self.cop_out_req.is_none() {
+                    let ox = c.x - i64::from(cos(c.face)) * 18 * 4;
+                    let oy = c.y - i64::from(sin(c.face)) * 18 * 4;
+                    self.cop_out_req = Some((ox, oy, c.layer, c.face));
+                    self.cars[idx].cop = 3;
+                    self.cars[idx].abandoned = true;
+                }
+                return;
+            }
+            if c.hunt == 1 && c.layer == self.pl_layer && md <= 3 {
+                c.speed = 0;
+                c.hold = hold::QUEUE;
+                c.arrived = true;
+                return;
+            }
+            c.cop_wait = 0;
+        }
+        if self.cars[idx].mdest_on {
+            let ax = (bx - i32::from(self.cars[idx].mdest_x)).abs();
+            let ay = (by - i32::from(self.cars[idx].mdest_y)).abs();
+            if ax <= 1 && ay <= 1 {
+                Self::mission_arrive(&mut self.cars[idx]);
+                return;
+            }
         }
         if self.cars[idx].reverse > 0 {
             self.cars[idx].reverse -= 1;
@@ -1099,6 +1184,41 @@ impl Traffic {
             c.wait = 0;
             c.turn = 0;
             c.hold = hold::STUCK;
+            return;
+        } else if wait > ESCAPE
+            && self.cars[idx].mdest_on
+            && !self.in_view(bx, by)
+            && self.cars[idx].path_i < self.cars[idx].path_n()
+        {
+            let mut jump = self.cars[idx].path_i;
+            while jump + 1 < self.cars[idx].path_n() && jump < self.cars[idx].path_i + 6 {
+                let p = self.cars[idx].path[jump + 1];
+                if self.in_view(i32::from(p.x), i32::from(p.y)) {
+                    break;
+                }
+                jump += 1;
+            }
+            let (nx, ny) = (
+                i32::from(self.cars[idx].path[jump].x),
+                i32::from(self.cars[idx].path[jump].y),
+            );
+            let ang = if jump + 1 < self.cars[idx].path_n() {
+                let np = self.cars[idx].path[jump + 1];
+                step_angle(i32::from(np.x) - nx, i32::from(np.y) - ny)
+            } else {
+                self.cars[idx].angle
+            };
+            let c = &mut self.cars[idx];
+            c.x = i64::from(nx * 32 + LANE_TARGET) << FP;
+            c.y = i64::from(ny * 32 + LANE_TARGET) << FP;
+            c.angle = ang;
+            c.face = ang;
+            c.turn = 0;
+            c.turn_lock = 0;
+            c.path_i = jump;
+            c.wait = 0;
+            c.last_bx = nx;
+            c.last_by = ny;
             return;
         } else if wait > ESCAPE
             && cop != 2
@@ -1264,6 +1384,22 @@ impl Traffic {
         }
 
         let mut want_dir = Self::route_dir(&mut self.cars[idx], bx, by);
+        if (self.cars[idx].cop == 2 || self.cars[idx].hunt != 0) && self.pl_active {
+            let pbx = (self.pl_x >> BS) as i32;
+            let pby = (self.pl_y >> BS) as i32;
+            let md = (bx - pbx).abs() + (by - pby).abs();
+            if md <= COP_ARROWS_NEAR && !self.cars[idx].crossing {
+                self.goal_on = true;
+                self.goal_x = pbx;
+                self.goal_y = pby;
+                let (layer, angle) = (self.cars[idx].layer, self.cars[idx].angle);
+                let gd = self.choose_heading(map, bx, by, layer, angle, len);
+                self.goal_on = false;
+                if gd >= 0 {
+                    want_dir = gd;
+                }
+            }
+        }
         {
             let c = &self.cars[idx];
             if c.crossing {
@@ -1295,7 +1431,14 @@ impl Traffic {
         if want_dir < 0 {
             self.cars[idx].want_route = true;
             let a = self.cars[idx].angle;
+            let chasing = (self.cars[idx].cop == 2 || self.cars[idx].hunt != 0) && self.pl_active;
+            if chasing {
+                self.goal_on = true;
+                self.goal_x = (self.pl_x >> BS) as i32;
+                self.goal_y = (self.pl_y >> BS) as i32;
+            }
             want_dir = self.choose_heading(map, bx, by, layer, a, len);
+            self.goal_on = false;
         }
         if want_dir < 0 {
             // Nowhere to go: a long vehicle in a street it cannot leave.
@@ -1785,6 +1928,10 @@ impl Traffic {
                         }
                     }
                 }
+                if self.cars[idx].cop == 2 && blocked && self.cars[idx].wait > 40 {
+                    blocked = false;
+                    self.stat_cop_box_pushed += 1;
+                }
                 if blocked {
                     want = 0;
                     self.cars[idx].hold = hold::BOX;
@@ -1816,6 +1963,20 @@ impl Traffic {
                 && want < SPEED_TURN_TIGHT * SPEED_UNIT
             {
                 want = SPEED_TURN_TIGHT * SPEED_UNIT;
+            }
+            if (c.cop == 2 || c.hunt != 0) && self.pl_active && c.layer == self.pl_layer {
+                let pbx = (self.pl_x >> BS) as i32;
+                let pby = (self.pl_y >> BS) as i32;
+                let md = (bx - pbx).abs() + (by - pby).abs();
+                if md <= 5 && want < 4 * SPEED_UNIT {
+                    want = 4 * SPEED_UNIT;
+                    if c.hold == hold::BOX || c.hold == hold::QUEUE || c.hold == hold::GAP {
+                        c.hold = hold::NONE;
+                    }
+                } else if c.hold == hold::BOX && c.wait > 100 && want < 3 * SPEED_UNIT {
+                    want = 3 * SPEED_UNIT;
+                    c.hold = hold::NONE;
+                }
             }
             // Mid lane change, keep rolling.
             if c.swap != 0 {
@@ -1849,6 +2010,25 @@ impl Traffic {
         // Move: along the arc (done above), or steering along the lane.
         if move_face != -2 {
             if move_face < 0 {
+                let c = &mut self.cars[idx];
+                if (c.cop == 2 || c.hunt != 0)
+                    && self.pl_active
+                    && c.layer == self.pl_layer
+                    && c.lane_set
+                {
+                    let (fdx, fdy) = heading_step(c.lane_dir);
+                    let along = ((self.pl_x - c.x) >> FP) * i64::from(fdx)
+                        + ((self.pl_y - c.y) >> FP) * i64::from(fdy);
+                    let pl_cross = if c.lane_axis != 0 {
+                        self.pl_y
+                    } else {
+                        self.pl_x
+                    };
+                    let my_cross = if c.lane_axis != 0 { c.y } else { c.x };
+                    if (0..=5 * 32).contains(&along) && ((pl_cross - my_cross) >> FP).abs() <= 32 {
+                        c.lane_off = pl_cross;
+                    }
+                }
                 move_face = if !self.is_junction(bx, by, layer) {
                     Self::steer_along_line(&mut self.cars[idx]).0
                 } else {

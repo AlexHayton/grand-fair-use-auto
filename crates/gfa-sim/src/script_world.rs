@@ -58,7 +58,7 @@ impl ScriptWorld for World {
     }
 
     fn player_on_foot(&self) -> bool {
-        true
+        self.doing == crate::world::Doing::OnFoot
     }
 
     fn onscreen(&self, bx: i32, by: i32) -> bool {

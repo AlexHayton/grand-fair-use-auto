@@ -186,12 +186,43 @@ pub fn world_sprites(
         let pos = [x, y, world.map.ground_z(x, y, l.z)];
         out.extend(scene.lamp_sprite(l.light(tick).sprite(), pos, l.toward));
     }
+    let at = |x: i64, y: i64, layer: i32, lift: i32| {
+        let (x, y) = (x as i32, y as i32);
+        [x, y, world.map.ground_z(x, y, layer) + (lift << 16)]
+    };
+    for m in world.marks.ground_sprites() {
+        out.extend(scene.object_sprite(m.object, m.frame, at(m.x, m.y, m.layer, 0), m.angle + 128));
+    }
+    for p in &world.pickups.p {
+        use gfa_sim::pickups::{OBJ_CRATE, OBJ_CRATE_OPEN, PickupState, item_object};
+        match p.state {
+            PickupState::Gone => {}
+            PickupState::Crate => {
+                out.extend(scene.object_sprite(OBJ_CRATE, 0, at(p.x, p.y, p.layer, 0), 0));
+            }
+            PickupState::Open => {
+                let pos = at(p.x, p.y, p.layer, 0);
+                out.extend(scene.object_sprite(OBJ_CRATE_OPEN, 0, pos, 0));
+                if let Some(obj) = item_object(p.kind) {
+                    out.extend(scene.object_sprite(obj, 0, pos, 0));
+                }
+            }
+        }
+    }
     // The crowd first, so a car at the same height is drawn over a body.
     for p in world.peds.p.iter().filter(|p| p.shown()) {
         let (x, y) = (p.x as i32, p.y as i32);
         let pos = [x, y, world.map.ground_z(x, y, p.layer)];
         let table = p.remap.clamp(0, 255) as u8;
         out.extend(scene.ped_sprite(p.sprite_frame(), table, pos, p.angle + 128));
+        if p.burn > 0 {
+            out.extend(scene.object_sprite(
+                0x2e,
+                p.burn_frame.max(0) as usize,
+                [x, y, pos[2] + (1 << 16)],
+                0,
+            ));
+        }
     }
     for c in world.standing_cars() {
         scene.push_car(&mut out, c.model, c.remap, c.pos, c.face + 128, c.deltas);
@@ -200,7 +231,42 @@ pub fn world_sprites(
         let (x, y) = (c.x as i32, c.y as i32);
         let pos = [x, y, world.map.ground_z(x, y, c.layer)];
         let remap = (c.remap + 1).clamp(0, 255) as u8;
-        scene.push_car(&mut out, c.model, remap, pos, c.face + 128, c.dmg_bits);
+        if c.wrecked
+            && let Some(ws) = scene.wreck_sprite(c.model, pos, c.face + 128)
+        {
+            out.push(ws);
+        } else {
+            let lights = if c.cop >= 2 || c.svc == 2 {
+                1 << (gfa_sim::cars::DELTA_LIGHT0
+                    + (world.tick / gfa_sim::cars::LIGHT_FLASH_TICKS) % 2)
+            } else {
+                0
+            };
+            scene.push_car(
+                &mut out,
+                c.model,
+                remap,
+                pos,
+                c.face + 128,
+                c.dmg_bits | lights,
+            );
+        }
+        if c.cop == 4 {
+            use gfa_sim::gfa_fixed::trig::{cos, sin};
+            let ba = (c.face + 64) & 255;
+            let bx = c.x + i64::from(sin(ba)) * 32 * 4;
+            let by = c.y - i64::from(cos(ba)) * 32 * 4;
+            out.extend(scene.object_sprite(0x18, 0, at(bx, by, c.layer, 0), c.face + 128));
+        }
+        let fire = if c.fuse > 0 { c.fuse } else { c.fire_ticks };
+        if fire > 0 {
+            out.extend(scene.object_sprite(
+                0x2e,
+                ((fire / 3) % 7) as usize,
+                [x, y, pos[2] + (1 << 16)],
+                0,
+            ));
+        }
     }
     if let (Some(d), Some((deltas, _))) = (&world.driven, world.driven_look()) {
         let v = &d.veh;
@@ -265,5 +331,16 @@ fn push_weapons(
             let pos = at(b.x + (dx << 16), b.y + (dy << 16), b.layer, 8);
             out.extend(scene.blast_sprite(n, pos));
         }
+    }
+    for j in world.service.water_jets(&world.traffic) {
+        let obj = if j.end {
+            gfa_sim::service::OBJ_WATER_JET_END
+        } else {
+            gfa_sim::service::OBJ_WATER_JET
+        };
+        out.extend(scene.object_sprite(obj, 0, at(j.x, j.y, j.layer, 2), j.angle + 128));
+    }
+    for c in world.marks.air_sprites() {
+        out.extend(scene.object_sprite(c.object, c.frame, at(c.x, c.y, c.layer, 10), 0));
     }
 }

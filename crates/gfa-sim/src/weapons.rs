@@ -35,6 +35,7 @@ use crate::cars;
 use crate::hash::StateHasher;
 use crate::map::{SimMap, ground};
 use crate::peds::Peds;
+use crate::pickups::Pickups;
 use crate::score::{self, Score, crime};
 use crate::traffic::{self, Traffic};
 
@@ -83,6 +84,12 @@ pub struct Arms {
     pub punch_left: i32,
     /// The fire key, held.
     pub fire_held: bool,
+    /// Endless weapon from a kill frenzy (`0` when none).
+    pub inf_w: usize,
+    /// Ticks left of the endless weapon.
+    pub inf_ticks: i32,
+    inf_save_w: usize,
+    inf_save_ammo: [i32; weapon::COUNT],
 }
 
 impl Default for Arms {
@@ -94,6 +101,10 @@ impl Default for Arms {
             cool: 0,
             punch_left: 0,
             fire_held: false,
+            inf_w: 0,
+            inf_ticks: 0,
+            inf_save_w: weapon::FIST,
+            inf_save_ammo: [0; weapon::COUNT],
         }
     }
 }
@@ -139,6 +150,48 @@ impl Arms {
         self.ammo = [0; weapon::COUNT];
         self.weapon = weapon::FIST;
         self.fire_held = false;
+        self.inf_w = 0;
+        self.inf_ticks = 0;
+    }
+
+    /// Hand him an endless weapon for `ticks` ticks (e.g. a kill frenzy),
+    /// saving his previous weapon and ammunition to restore when it ends.
+    pub fn give_endless(&mut self, w: usize, ticks: i32) {
+        if !(weapon::PISTOL..weapon::COUNT).contains(&w) {
+            return;
+        }
+        if self.inf_ticks <= 0 {
+            self.inf_save_w = self.weapon;
+            self.inf_save_ammo = self.ammo;
+        }
+        self.inf_w = w;
+        self.inf_ticks = ticks;
+        self.weapon = w;
+        self.ammo[w] = 99;
+    }
+
+    /// Step the endless weapon timer; returns the restored weapon when it expires.
+    pub fn step_endless(&mut self) -> Option<usize> {
+        if self.inf_ticks <= 0 {
+            return None;
+        }
+        self.inf_ticks -= 1;
+        if self.inf_ticks > 0 {
+            return None;
+        }
+        let w = self.inf_w;
+        self.inf_w = 0;
+        self.ammo[w] = self.inf_save_ammo[w];
+        if self.weapon == w && self.ammo[w] <= 0 {
+            let mut pick = self.inf_save_w;
+            if pick >= weapon::COUNT || (pick > weapon::FIST && self.ammo[pick] <= 0) {
+                pick = (weapon::PISTOL..weapon::COUNT)
+                    .find(|&k| self.ammo[k] > 0)
+                    .unwrap_or(weapon::FIST);
+            }
+            self.weapon = pick;
+        }
+        Some(self.weapon)
     }
 
     /// A gun out with the fire key held: drawn armed.
@@ -182,6 +235,10 @@ impl Arms {
     pub fn spent(&mut self) -> bool {
         let w = self.weapon;
         self.cool = cooldown(w);
+        if self.inf_w != 0 && self.inf_w == w && self.inf_ticks > 0 {
+            self.ammo[w] = 99;
+            return false;
+        }
         if self.sub[w] > 0 {
             self.sub[w] -= 1;
             if self.sub[w] == 0 {
@@ -211,6 +268,10 @@ impl Arms {
         h.i32(self.cool);
         h.i32(self.punch_left);
         h.bool(self.fire_held);
+        if self.inf_ticks > 0 {
+            h.u32(self.inf_w as u32);
+            h.i32(self.inf_ticks);
+        }
     }
 }
 
@@ -358,6 +419,7 @@ pub struct Street<'a> {
     pub cars: &'a [CarInfo],
     pub peds: &'a mut Peds,
     pub traffic: &'a mut Traffic,
+    pub pickups: &'a mut Pickups,
     pub score: &'a mut Score,
     pub say: &'a mut dyn FnMut(String),
 }
@@ -575,6 +637,8 @@ impl Weapons {
             };
         }
         self.stats.blasts += 1;
+        st.pickups
+            .open_at(x, y, layer, BLAST_KILL_PX as i32, &mut *st.say);
         for i in 0..st.peds.p.len() {
             let p = &st.peds.p[i];
             if !p.alive || p.corpse || p.layer != layer {
@@ -821,6 +885,14 @@ impl Weapons {
             if s.kind == Kind::Rocket {
                 self.explode(st, s.x, s.y, s.layer, false);
             } else {
+                self.splat(s.x, s.y, s.layer);
+            }
+            self.shots[i].alive = false;
+            return;
+        } else if st.pickups.open_at(s.x, s.y, s.layer, 12, &mut *st.say) > 0 {
+            if s.kind == Kind::Rocket {
+                self.explode(st, s.x, s.y, s.layer, by_player);
+            } else if s.kind == Kind::Bullet {
                 self.splat(s.x, s.y, s.layer);
             }
             self.shots[i].alive = false;

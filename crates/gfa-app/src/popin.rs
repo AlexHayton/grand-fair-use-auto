@@ -87,7 +87,7 @@ fn things(game: &Game, born: &mut [u32], last: &mut [Option<Vec3>]) -> HashMap<(
         last[i] = Some(at);
         let what = if p.corpse { "body" } else { "person" };
         let key = (1, (i as u64) << 32 | u64::from(born[i]));
-        let note = format!("slot {i}");
+        let note = format!("slot {i} cop {} mission {}", p.cop, p.mission);
         out.insert(
             key,
             Thing {
@@ -288,7 +288,7 @@ fn check(section: u32, drive: bool, frames: u32, seed: u64, capped: bool) -> Fou
     let n = game.world.peds.p.len();
     let (mut born, mut last) = (vec![0u32; n], vec![None; n]);
     let mut before = things(&game, &mut born, &mut last);
-    let mut seen_before: Vec<_> = vec![None; ASPECTS.len()];
+    let mut seen_before: Vec<Option<(Vec3, f32, f32)>> = vec![None; ASPECTS.len()];
     let mut bad = Vec::new();
     let mut checked = 0;
     let mut zoom = 1.0f32;
@@ -322,6 +322,16 @@ fn check(section: u32, drive: bool, frames: u32, seed: u64, capped: bool) -> Fou
             let seen = shown(cams[k].camera().eye, *aspect, floor);
             for (key, t) in &now {
                 if !before.contains_key(key) && handed != Some(*key) {
+                    // A policeman or medic stepping out of a vehicle door is
+                    // coming out of a car already in the scene, not popping in.
+                    let from_car = key.0 == 1
+                        && (t.note.contains("cop true") || t.note.contains("mission true"))
+                        && now
+                            .iter()
+                            .any(|(ck, ct)| ck.0 == 0 && (ct.at - t.at).length() < 72.0);
+                    if from_car {
+                        continue;
+                    }
                     checked += 1;
                     if inside(t, seen) {
                         bad.push(format!(
@@ -331,11 +341,22 @@ fn check(section: u32, drive: bool, frames: u32, seed: u64, capped: bool) -> Fou
                     }
                 }
             }
-            if let Some(seen) = seen_before[k] {
+            if let Some(seen_prev) = seen_before[k]
+                && (seen.0.truncate() - seen_prev.0.truncate()).length() <= 256.0
+            {
                 for (key, t) in &before {
                     if !now.contains_key(key) {
+                        // A medic boarding his ambulance to leave the scene.
+                        let into_car = key.0 == 1
+                            && t.note.contains("mission true")
+                            && before
+                                .iter()
+                                .any(|(ck, ct)| ck.0 == 0 && (ct.at - t.at).length() < 72.0);
+                        if into_car {
+                            continue;
+                        }
                         checked += 1;
-                        if inside(t, seen) {
+                        if inside(t, seen_prev) {
                             bad.push(format!(
                                 "tick {} {name}: a {} went in sight at {:.0},{:.0} ({})",
                                 game.world.tick, t.what, t.at.x, t.at.y, t.note

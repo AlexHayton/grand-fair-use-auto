@@ -259,6 +259,11 @@ impl Score {
         self.crimes = [0; crime::COUNT];
     }
 
+    /// How many events of the current type have been scored in this streak.
+    pub fn streak_count(&self) -> i32 {
+        self.streak_count
+    }
+
     fn relevel(&mut self) {
         self.level = if self.no_police {
             0

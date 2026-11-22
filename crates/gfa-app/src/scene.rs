@@ -105,6 +105,41 @@ impl Scene {
             let pos = ground(sp.x, sp.y, sp.layer, 0);
             out.extend(object_sprite(style, &self.atlas, OBJ_SPLAT, 0, pos, 0.0));
         }
+        for m in world.marks.ground_sprites() {
+            let pos = ground(m.x, m.y, m.layer, 0);
+            out.extend(object_sprite(
+                style,
+                &self.atlas,
+                m.object,
+                m.frame,
+                pos,
+                sim_angle(m.angle + 128),
+            ));
+        }
+        for p in &world.pickups.p {
+            use gfa_sim::pickups::{OBJ_CRATE, OBJ_CRATE_OPEN, PickupState, item_object};
+            match p.state {
+                PickupState::Gone => {}
+                PickupState::Crate => {
+                    let pos = ground(p.x, p.y, p.layer, 0);
+                    out.extend(object_sprite(style, &self.atlas, OBJ_CRATE, 0, pos, 0.0));
+                }
+                PickupState::Open => {
+                    let pos = ground(p.x, p.y, p.layer, 0);
+                    out.extend(object_sprite(
+                        style,
+                        &self.atlas,
+                        OBJ_CRATE_OPEN,
+                        0,
+                        pos,
+                        0.0,
+                    ));
+                    if let Some(obj) = item_object(p.kind) {
+                        out.extend(object_sprite(style, &self.atlas, obj, 0, pos, 0.0));
+                    }
+                }
+            }
+        }
         for p in game.peds() {
             let pos = p.pose.pos.to_array();
             out.extend(ped_sprite(
@@ -133,16 +168,44 @@ impl Scene {
             );
         }
         for t in game.traffic() {
-            push_car(
-                &mut out,
-                style,
-                &self.atlas,
-                t.model,
-                t.remap,
-                t.pose.pos.to_array(),
-                t.pose.draw_angle,
-                t.deltas,
-            );
+            if t.wrecked
+                && let Some(ci) = style.cars.get(t.model)
+                && let Some(ws) = gfa_render::sprites::wreck_sprite(style, ci.vtype)
+            {
+                out.extend(own_sprite(
+                    style,
+                    &self.atlas,
+                    ws,
+                    t.pose.pos.to_array(),
+                    t.pose.draw_angle,
+                ));
+            } else {
+                push_car(
+                    &mut out,
+                    style,
+                    &self.atlas,
+                    t.model,
+                    t.remap,
+                    t.pose.pos.to_array(),
+                    t.pose.draw_angle,
+                    t.deltas,
+                );
+            }
+            if t.cop == 4 {
+                use gfa_sim::gfa_fixed::trig::{cos, sin};
+                let ba = (t.face + 64) & 255;
+                let bx = t.x + i64::from(sin(ba)) * 32 * 4;
+                let by = t.y - i64::from(cos(ba)) * 32 * 4;
+                let bpos = ground(bx, by, t.layer, 0);
+                out.extend(object_sprite(
+                    style,
+                    &self.atlas,
+                    OBJ_BARRIER,
+                    0,
+                    bpos,
+                    sim_angle(t.face + 128),
+                ));
+            }
             if t.fuse > 0 {
                 out.extend(fire_sprite(
                     style,
@@ -231,6 +294,33 @@ impl Scene {
                 let pos = ground(b.x + (dx << 16), b.y + (dy << 16), b.layer, 8);
                 out.extend(own_sprite(style, &self.atlas, sprite, pos, 0.0));
             }
+        }
+        for j in world.service.water_jets(&world.traffic) {
+            let obj = if j.end {
+                gfa_sim::service::OBJ_WATER_JET_END
+            } else {
+                gfa_sim::service::OBJ_WATER_JET
+            };
+            let pos = ground(j.x, j.y, j.layer, 2);
+            out.extend(object_sprite(
+                style,
+                &self.atlas,
+                obj,
+                0,
+                pos,
+                sim_angle(j.angle + 128),
+            ));
+        }
+        for c in world.marks.air_sprites() {
+            let pos = ground(c.x, c.y, c.layer, 10);
+            out.extend(object_sprite(
+                style,
+                &self.atlas,
+                c.object,
+                c.frame,
+                pos,
+                0.0,
+            ));
         }
         out
     }
@@ -349,6 +439,7 @@ fn flames(
 
 /// The map objects the weapons draw with.
 const OBJ_SPLAT: usize = 0x0d;
+const OBJ_BARRIER: usize = 0x18;
 const OBJ_ROCKET: usize = 0x1f;
 const OBJ_BULLET: usize = 0x4a;
 const OBJ_FLAME: usize = 0x4b;

@@ -43,7 +43,7 @@ AmiGTA1 references are to `native/` in a sibling `../AmiGTA1` checkout.
 | Car handling (two-tyre body, style physics) | ✓ | full | done | M4 | `gta_vehphys.c`; oracle traces match |
 | Wall resolve, ramps, layers, jumps | ✓ | full | done | M4 | `gta_vehphys.c`, `gta_main.c:790-805`; NYC jump at x 91 lands |
 | Damage deltas, burning, write-offs | ✓ | full | done | M4 | `gta_car.c` (`gta_car_panel_delta`), `gta_main.c` (fuse) |
-| Explosions harming what is near, burnt wrecks | ✓ | full | wip | M4/M6 | `gta_weapon.c` (`gta_weapons_explode`, `_wreck_car`): kills within 17 px, sets alight to 30, writes off cars within 32, the player too; one, three or five blasts by body (`rocket.txt`, `rocket_close.txt` match AmiGTA1). The burnt look of a wreck remains |
+| Explosions harming what is near, burnt wrecks | ✓ | full | done | M4/M6 | `gta_weapon.c` (`gta_weapons_explode`, `_wreck_car`): kills within 17 px, sets alight to 30, writes off cars within 32, the player too; one, three or five blasts by body (`rocket.txt`, `rocket_close.txt` match AmiGTA1). Burnt-out wrecks drawn with `gfa_render::sprites::wreck_sprite` (`WBus` / `WreckedCar`) and burn for 400 ticks |
 | Enter/exit by door, bikes | ✓ | full | wip | M4/M6b | `gta_main.c` (door point, enter and exit steps). Known issue (user report, 2026-11-21): the get-in animation does not match the original. He seems to enter the door from the wrong side. Compare frame by frame under DOSBox-X |
 | Vault over a car | ✓ | full | done | M4 | `gta_main.c` (vault states, far-side entry, blocked-door exit); `tools/scripts/vault.txt` |
 | Slide under a tall vehicle | ✓ | partial | done | M4/M6b | only while one is over him, as AmiGTA1; the original's approach from outside to verify |
@@ -57,8 +57,8 @@ AmiGTA1 references are to `native/` in a sibling `../AmiGTA1` checkout.
 | Trains: routes, stops, boarding, crush | ✓ | partial | done | M4 | `gta_train.c`; straights and quarter circles, not yet the original's path table; oracle matches |
 | Trams | ✓ (static) | full | done | M4 | the original's trams stand still |
 | Horn / pull-over look-ahead | ✓ | partial | wip | M5/M6b | The horn: TAB held in a car without a siren (`special_key`), done, `horn.txt`. The pull-over (`gta_main.c:3957`, NOT PORTED there): TAB held in a car, the nearest car up to five blocks ahead moves to the kerb (the original's offsets 7 and 0x37 of 0x40) and stops; `Traffic::pull_over`, `the_car_ahead_pulls_over_for_the_horn`. **(verify)** under DOSBox-X: how far to the side the look reaches, how slowly it moves over, that it stops, for how long, and whether the siren left on does it too |
-| Bombs: timed, speed | ✓ | full | — | M6 | `gta_main.c:4266` |
-| Bombs: tanker (type 4, five blasts) | ✓ | none | — | M6 | `gta_main.c:4272` |
+| Bombs: timed, speed | ✓ | full | done | M6 | `gta_main.c:4266`; `World::shops_tick`, `World::bombs_tick` (5-second fuse armed by FIRE in car, trigger, damage, speed bombs); `spray_shop_and_bomb_shop_respray_and_rig_car_bomb` |
+| Bombs: tanker (type 4, five blasts) | ✓ | none | done | M6 | `gta_main.c:4272`, `Weapons::wreck_car` (5 blasts for tanker, damage bomb type 4 in `World::bombs_tick`) |
 | Chain explosions of wrecks | ✓ | full | done | M6 | A blast writes off cars in reach, whose own fuses run (`rocket.txt`) |
 | Siren/lights toggle in emergency vehicles | ✓ | partial | done | M5 | `special_key` (from the original's routine; `car+0x113`): models 4, 5 and 0x2a; first press on, a press after that sounds it while held, off when he gets out. AmiGTA1 plays the sound but does not light his car; ours flashes lighting deltas 15 and 16 as its dispatched cops do. `siren.txt`, `the_special_key_works_the_siren_then_sounds_it`. The sound itself is M8 |
 
@@ -88,22 +88,22 @@ AmiGTA1 references are to `native/` in a sibling `../AmiGTA1` checkout.
 |---|---|---|---|---|---|
 | Pistol, machine gun, rocket, flamethrower | ✓ | full | done | M6 | `gfa_sim::weapons` from `gta_weapon.c`; `shoot_ped.txt`, `rocket*.txt`, `flame.txt` match AmiGTA1 tick for tick. Crates hold the original's 20/20/5/10 (AmiGTA1 triples them). Splat life and a few latch details **(verify)** M6b |
 | Respray refusals (emergency, RC car, tank, no cash) | ✓ | ? | — | M6 | ENGLISH.FXT `no_emerg_respray`, `no_modelcar_respray`, `no_tank_respray`, `no_respray` |
-| Weapon crates | ✓ | ? | — | M6 | `gta_weapon.h:34` list is partly stale |
-| Friendly-fire groups | ✓? | none | — | M6 | `gta_weapon.h:34` |
-| Armour absorbing hits | ✓ | partial | wip | M6 | A point stops a bullet (`World::harm`); the pickup that gives it comes with the crates |
+| Weapon crates | ✓ | full | done | M6 | `gfa_sim::pickups` from `gta_pickup.c`; `POWERUP` declarations loaded from section, opened by shots, cars or blasts; `crates_open_by_shot_car_or_blast_and_powerups_obey_caps` |
+| Friendly-fire groups | ✓? | none | done | M6 | `Peds::hit_segment`: cops do not hit cops; gunmen of the same gang group do not hit each other; `friendly_fire_groups_and_gouranga_bonus` |
+| Armour absorbing hits | ✓ | full | done | M6 | A point stops a bullet (`World::harm`); crate kind 10 adds armour up to 10 (refused at cap) |
 | Fires left on walls by rockets | ✓? | full | done | M6 | AmiGTA1 has built them since `gta_weapon.h:34` was written: three fires 10 px back from the wall, 250 ticks (`rocket_wall.txt`) |
-| Power-ups (speed, multiplier, frenzy…) | ✓ | partial | — | M6 | "nothing reads them", `gta_main.c:10291` |
-| Kill frenzies | ✓ | partial | — | M6/M7 | crate handed to the script |
-| Bonuses: GOURANGA, Elvis, cop kills | ✓ (GOURANGA) / ? | none | — | M6 | `gta_score.h:17`. ENGLISH.FXT has `[8787] GOURANGA!`, cards `4000`–`4005` (YOU GOT IT!, FRENZY PASSED!, BONUS LOST!, BUSTED!, WASTED!, GO! GO! GO!), `frenzy`, `multiplier+`. No Elvis or cop-kill card text found yet |
-| Wanted levels, chases, roadblocks, arrest | ✓ | full | wip | M6 | `gta_traffic.c:9681-10500`. The heat and the level (`gfa_sim::score`, each city's thresholds) are done; the police are next |
+| Power-ups (speed, multiplier, frenzy…) | ✓ | full | done | M6 | `gfa_sim::pickups`, `World::pickups_tick`: pistol, MG, rocket, flamethrower, speed (`375` ticks double step), police bribe, armour, multiplier, get-out-of-jail-free key, extra life, kill frenzy endless weapon (`Arms::give_endless`); refused when already at cap |
+| Kill frenzies | ✓ | partial | wip | M6/M7 | Crate kind 14 grants endless weapon with ammo restoration on expiry (`Arms::give_endless`, `step_endless`); mission script frenzy hooks come in M7 |
+| Bonuses: GOURANGA, Elvis, cop kills | ✓ (GOURANGA) / ? | none | wip | M6/M6b | `World::run_over` awards `GOURANGA!` bonus on a 4-ped run-over streak (`friendly_fire_groups_and_gouranga_bonus`). Special ped groups (Hare Krishnas / Elvises) **(verify)** in M6b |
+| Wanted levels, chases, roadblocks, arrest | ✓ | full | done | M6 | `gta_traffic.c:9681-10500`, `gta_peds.c:1770-2112`. Patrol cars from `0xff` routes, dispatch, reinforcement near stations or view ring, speed scaling (85%..115%), chase routing, U-turns, junction box push-through, cut-off lane offset, roadblocks at level 3+ with barriers (`0x18`) and posted cops, cop out on foot, door pull-out in car, on-foot arrest (`FOOT_ARREST_TICKS = 14`), shooting when armed or level 3+, point-blank execution at level 4, 150-tick `BUSTED`/`WASTED` cards, lives, `GAME OVER`, hospital and police station respawn |
 | Police: army/SWAT/FBI escalation | ✗ | n/a | n/a | — | `gta_traffic.h:2622`: cop cars only |
-| Siren reason in police AI | ✓ | partial | — | M6 | `gta_main.c:9976` |
-| Cop 0x13 call | ✓ | none | — | M6/M8 | `gta_snd.h:219` |
-| Crime counters on the bust pager | ✓ | partial | wip | M6 | `gta_score.h:16`. Counted per life and per level (`Score::crimes`, `total`); the pager is M7's HUD |
-| Bribes, jail-free card | ✓ | partial | — | M6 | check end to end |
-| Ambulance, fire engine (water cannon) | ✓ | full | — | M6 | `gta_service.c` |
-| Spray shop, bomb shop | ✓ | full | — | M6 | |
-| Tyre marks, blood, oil for every car | ✓ | partial | — | M6 | player car only; `gta_marks.h:18` |
+| Siren reason in police AI | ✓ | full | done | M6 | `Traffic::police_siren`: nearest chasing cop within 512 px; `Siren::Sounding` when `lead_kind != 0`, else `Siren::On` |
+| Cop 0x13 call | ✓ | none | — | M6/M8 | `gta_snd.h:219` (audio sample in M8) |
+| Crime counters on the bust pager | ✓ | partial | wip | M6 | `gta_score.h:16`. Counted per life and per level (`Score::crimes`, `total`, reset on `new_life` after card); the pager is M7's HUD |
+| Bribes, jail-free card | ✓ | full | done | M6 | Bribe crate (kind 9) clears wanted level and resets police; jail-free key (kind 12) preserves weapons, armour and multiplier on bust and is consumed (`police_arrest_on_foot_and_jail_free_key_saves_weapons_and_multiplier`) |
+| Ambulance, fire engine (water cannon) | ✓ | full | done | M6 | `gfa_sim::service` from `gta_service.c`, long-route 64KB BFS field (`route::field_build`, `field_follow`); ambulance dispatches to corpses and deploys medics who revive after 75 ticks (`ambulance_dispatches_and_medic_revives_dead_ped`); fire engine dispatches to burning wrecks and sprays water cannon jets (`0x30`, `0x31`) that extinguish car and ground fires and knock down peds (`fire_engine_dispatches_and_extinguishes_burning_wreck`) |
+| Spray shop, bomb shop | ✓ | full | done | M6 | `SPRAY`, `BOMBSHOP`, `BOMBSHOP_COST` loaded from mission section (`World::load_section`, `World::shops_tick`); respray clears damage, dents, wanted level and changes remap; bomb shop fits bomb for 5,000 points, armed by FIRE in car for 250 ticks |
+| Tyre marks, blood, oil for every car | ✓ | partial | done | M6 | `gfa_sim::marks` from `gta_marks.c`, extended to both the player's sliding car and knocked fleet cars: tyre marks (`0x0b`), bloody tyre marks (`0x0c`), wheel smoke (`0x0a`), blood pools (`0x3f`), ped splats (`0x40`) and footprint trails (`0x4d`), jump landing sparks (`0x0d`), water splashes (`0x36`), explosion clouds (`0x33`), and building rubble/lumps (`0x2b`–`0x2d`, `0x05`); `blood.txt`, `bankblast.txt` |
 
 ## Missions, HUD, text (M7)
 
