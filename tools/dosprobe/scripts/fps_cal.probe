@@ -1,0 +1,14 @@
+# Frame-rate calibration for GTADOS/GTA8.EXE against the arena overlay.
+# Holds Up across ~1.5 emulated seconds while capturing every VGA frame so
+# we can measure the true game-frame rate at different DOSBox-X --cycles values.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
++2000 tap enter 80
+19500 shot cal_before
+20000 down up
++0 burst walk 105 0
++1600 up up
++200 shot cal_after
++200 quit

@@ -252,6 +252,8 @@ pub struct World {
     pub arms: Arms,
     /// Everything in flight, every explosion and fire.
     pub weapons: Weapons,
+    /// Weapon cooldown, projectile flight, and splat clock: 23.333 Hz against 50.
+    weapons_clock: crate::clock::Ratio,
     pub pickups: Pickups,
     pub marks: Marks,
     pub service: Service,
@@ -331,6 +333,7 @@ impl World {
             burning: 0,
             arms: Arms::default(),
             weapons: Weapons::default(),
+            weapons_clock: crate::clock::weapons(),
             pickups: Pickups::new(),
             marks: Marks::new(),
             service: Service::new(),
@@ -528,7 +531,8 @@ impl World {
             };
             self.drive(pedals);
         }
-        self.trigger();
+        let gun_step = self.weapons_clock.step();
+        self.trigger(gun_step);
         self.follow(was);
         let centre = self.run_traffic();
         self.run_trains();
@@ -554,7 +558,7 @@ impl World {
         self.score.tick();
         self.run_peds(centre);
         // The shots fly after the people have moved.
-        self.street(|w, st| w.tick(st));
+        self.street(|w, st| w.tick(st, gun_step));
         self.marks.tick(&self.map, &mut self.peds, &self.weapons);
         self.pickups_tick();
         self.aim_at_player();
@@ -690,14 +694,15 @@ impl World {
         }
     }
 
-    /// The fire key's tick: the cooldown and a punch in the air run every
-    /// tick; on his feet, a punch is thrown or a shot fired, and the shot
-    /// frightens the people around (AmiGTA1's main loop).
-    fn trigger(&mut self) {
+    /// The fire key's tick: a punch in the air runs every tick (`50 Hz`),
+    /// while gun cooldowns and triggers step on the `23.333 Hz` weapon clock
+    /// (`gun_step`). On his feet, a punch is thrown or a shot fired, and the
+    /// shot frightens the people around (AmiGTA1's main loop).
+    fn trigger(&mut self, gun_step: bool) {
         let can = self.doing == Doing::OnFoot;
         let p = &self.player;
         let (x, y, layer, angle) = (i64::from(p.x), i64::from(p.y), p.layer, p.angle);
-        match self.arms.tick(can) {
+        match self.arms.tick(can, gun_step) {
             None | Some(Trigger::Swing) => {}
             Some(Trigger::Blow) => match self.peds.punch(x, y, angle, layer) {
                 Ok(i) => self.say(format!("player: punch - ped {i} down")),
@@ -2936,6 +2941,7 @@ impl World {
         h.i32(self.armour);
         h.i32(self.burning);
         self.arms.sim_hash(&mut h);
+        h.u32(self.weapons_clock.phase());
         self.weapons.sim_hash(&mut h);
         self.pickups.sim_hash(&mut h);
         self.marks.sim_hash(&mut h);

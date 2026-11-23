@@ -1,0 +1,79 @@
+# Measure weapon fire rates, projectile speeds, and bullet splat lifetime
+# against unmodified GTADOS/GTA8.EXE on the `shooting` overlay (`150000` cycles).
+# Boots with `suckmyrocket` character name for all 4 weapons (99 rounds) + armour/key.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap delete 60
++300 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap s 50
++120 tap u 50
++120 tap c 50
++120 tap k 50
++120 tap m 50
++120 tap y 50
++120 tap r 50
++120 tap o 50
++120 tap c 50
++120 tap k 50
++120 tap e 50
++120 tap t 50
++150 tap enter 80
++500 tap enter 80
++1200 tap enter 80
+
+20000 shot setup_start
+
+# 1. Fist punch (held continuous)
+20200 down lctrl
++0 burst punch 110 0
++1650 up lctrl
++200 shot after_punch
+
+# 2. Pistol single shot (bullet flight speed + wall splat lifetime)
++150 tap x 60
++300 shot pistol_ready
++100 burst p_single 60 0
++40 tap lctrl 45
+
+# 3. Pistol continuous fire rate
+23600 down lctrl
++0 burst p_auto 160 0
++2350 up lctrl
++200 shot after_p_auto
+
+# 4. Machine gun continuous fire rate + shots/ammo-unit
+26300 tap x 60
++300 shot mg_ready
++100 down lctrl
++0 burst mg 130 0
++1950 up lctrl
++200 shot after_mg
+
+# 5. Rocket launcher continuous fire rate + flight speed
+29000 tap x 60
++300 shot rocket_ready
++100 down lctrl
++0 burst rocket 180 0
++2650 up lctrl
++400 shot after_rocket
+
+# 6. Flamethrower: turn ~180 deg west down open corridor, single puff + continuous
+32600 tap x 60
++300 down left
++512 up left
++150 shot flame_west
++100 burst fl_single 75 0
++40 tap lctrl 45
+
+34850 down lctrl
++0 burst fl_auto 110 0
++1650 up lctrl
++200 shot after_flame
++100 quit

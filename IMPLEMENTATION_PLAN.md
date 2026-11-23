@@ -337,13 +337,14 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
   - Readouts are screenshots, with sprite position and angle measured from the pixels, and memory dumps once the player's vehicle is found in memory.
   - Nothing it captures is committed. The input scripts and the measured numbers are.
   - The harness also serves the later **(verify)** items: special ped groups, the counter-punch, gang roles, bonuses, cheats.
+  - Overlay test maps: `run.py`'s DOSBox-X `-t overlay` layer can inject either synthetic `CmpBuilder` `.CMP` + custom `MISSION.INI` arenas (run side-by-side in both `GTA8.EXE` and `gfa-tool`) or `MISSION.INI`-only overrides over real cities without touching the owner's game data; see `docs/M6B_PROBES.md` for the per-probe checklist and results.
 - [ ] Boats: handling on water, getting on and off, what happens at the shore.
 - [ ] Tank: its handling against AmiGTA1's; the turret; the cannon; its armour; pushing cars; where it is found.
 - [ ] RC car and helicopter: whether either can be driven, and how. The escape helicopter's scripted flight is M7's.
 - [ ] The counter-punch: what the victim's punch back does to the player (AmiGTA1 has only the 13-step counter whose last two are it). For M6.
 - [ ] Gang roles: the state machine of the original's gang AI types (`gta_peds.c:1111`: AmiGTA1 has read the police ones only). For M7.
 - [ ] Special ped groups: where Hare Krishnas and Elvises appear, in which cities, how often and how they walk. For M6.
-- [ ] The weapons where AmiGTA1 chose for itself: how long the original's bullet splat stays on the map; whether every car blowing up pays the player 100, whoever wrote it off; whether a held fire key fires again after WASTED; whether a drowning man can fire.
+- [ ] The weapons where AmiGTA1 chose for itself: weapon fire rates/cooldowns and projectile speeds (the owner notes guns fire too fast at 50 Hz); how long the original's bullet splat stays on the map; whether every car blowing up pays the player 100, whoever wrote it off; whether a held fire key fires again after WASTED; whether a drowning man can fire.
 - [ ] The pull-over: how far to the side the look reaches, how slowly the car moves over, whether it stops and for how long, whether the siren left on does it too. And the keys for the game's police and zoom toggles, which its README does not list.
 - [ ] Getting into a car, frame by frame against the original. The owner reports that ours looks as if he goes in through the wrong side of the door (2026-11-21). Check the door point, the walk-in path, the sprite frames and the door's opening delta.
 - Exit: each drives as measured; the numbers and the probe scripts that produced them are in the decision log.

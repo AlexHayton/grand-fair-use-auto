@@ -1,0 +1,12 @@
+# Smoke test for tools/dosprobe against GTADOS/GTA8.EXE.
+# Boot at fixed 60000 cycles, step past intro/menu prompts if shown,
+# capture screenshots + a 1 MiB physical RAM slice, then quit cleanly.
+2500 shot boot_2500
+3500 tap esc 80
++1000 shot boot_4500
++1000 tap enter 80
++2000 shot boot_7500
++1000 tap enter 80
++2000 shot boot_10500
++100 memdump ram_sample 0x100000 0x100000
++200 quit

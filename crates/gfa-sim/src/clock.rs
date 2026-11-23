@@ -9,6 +9,7 @@
 //! | mission script                 | 25 Hz     | [`Half`], second tick   |
 //! | marks (blood, fires), trains   | 25 Hz     | [`Half`], first tick    |
 //! | vehicle physics                | 23.333 Hz | [`Ratio`] 7/15          |
+//! | weapons (gun cooldown, shots, splats) | 23.333 Hz | [`Ratio`] 7/15   |
 //! | ped timers                     | 50 Hz     | [`ped_frames`] scales   |
 //!
 //! Vehicle physics runs at the original's own 23.333 Hz (three ticks of a
@@ -68,6 +69,11 @@ impl Ratio {
         Ratio { num, den, acc: 0 }
     }
 
+    /// Accumulator phase, for state hashes.
+    pub fn phase(&self) -> u32 {
+        self.acc
+    }
+
     /// Advance one tick; true if the subsystem steps on it. Needs
     /// `num <= den`.
     pub fn step(&mut self) -> bool {
@@ -82,6 +88,12 @@ impl Ratio {
 
 /// The vehicle physics clock: the original's 23.333 Hz against our 50.
 pub const fn vehicle_physics() -> Ratio {
+    Ratio::new(7, 15)
+}
+
+/// The weapons clock (gun cooldowns, projectile flight, splats): the
+/// original's 23.333 Hz against our 50.
+pub const fn weapons() -> Ratio {
     Ratio::new(7, 15)
 }
 
@@ -108,11 +120,14 @@ mod tests {
     #[test]
     fn vehicle_physics_is_seven_in_fifteen() {
         let mut r = vehicle_physics();
+        assert_eq!(r.phase(), 0);
         let steps: Vec<bool> = (0..15).map(|_| r.step()).collect();
         assert_eq!(steps.iter().filter(|&&s| s).count(), 7);
+        assert_eq!(r.phase(), 0);
         // AmiGTA1's accumulator first fires on the third tick.
         assert_eq!(&steps[..5], &[false, false, true, false, true]);
         let mut r = vehicle_physics();
         assert_eq!((0..1500).filter(|_| r.step()).count(), 700);
+        assert_eq!(weapons(), vehicle_physics());
     }
 }

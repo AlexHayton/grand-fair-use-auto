@@ -1,0 +1,51 @@
+# Measure car-body bullet splat duration, open-air bullet life/range,
+# and open-air MG fire cadence at 150000 cycles.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap delete 60
++300 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap s 50
++120 tap u 50
++120 tap c 50
++120 tap k 50
++120 tap m 50
++120 tap y 50
++120 tap r 50
++120 tap o 50
++120 tap c 50
++120 tap k 50
++120 tap e 50
++120 tap t 50
++150 tap enter 80
++500 tap enter 80
++1200 tap enter 80
+
+# Wait until in-game, select Pistol (1 press of x), shoot single bullet east into parked car (129,128)
+19800 tap x 60
++400 shot car_before
++100 burst car_splat 65 0
++40 tap lctrl 45
+
+# Switch to Machine Gun (1 press of x), turn ~180 deg west down open 22-block corridor
+21500 tap x 60
++200 down left
++512 up left
++150 shot west_mg_ready
+
+# Single MG shot (or short burst) west down open corridor to measure BULLET_LIFE / range
++100 burst mg_range 90 0
++40 tap lctrl 45
+
+# Continuous MG fire in open corridor (110 VGA frames ~ 1.57s) + hold extra 6s to test if HUD 99 ever drops
+23500 down lctrl
++0 burst mg_open 110 0
++6000 up lctrl
++200 shot after_mg_long
++100 quit

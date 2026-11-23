@@ -927,7 +927,7 @@ fn crates_open_by_shot_car_or_blast_and_powerups_obey_caps() {
     w.drop_crate(0, 1, kind::PISTOL, 0);
     assert_eq!(w.pickups.p[0].state, PickupState::Crate);
     w.give_weapon(1, 5);
-    run(&mut w, Buttons::FIRE, 5);
+    run(&mut w, Buttons::FIRE, 10);
     assert_eq!(w.pickups.p[0].state, PickupState::Open);
 
     // Refused when ammo is already 99; taken when below 99.
@@ -1232,4 +1232,128 @@ fn friendly_fire_groups_and_gouranga_bonus() {
     }
     run(&mut w, Buttons::UP, 25);
     assert!(log_has(&mut w, "score: GOURANGA!"));
+}
+
+#[test]
+fn weapon_fire_rates_projectile_speed_and_splat_lifetime_match_original() {
+    use gfa_sim::weapons::weapon;
+
+    let open = || {
+        let mut b = CmpBuilder::new(1);
+        street(&mut b, 5..45, 5..45);
+        let mut w = world(&b, south(10, 10));
+        w.peds.clear();
+        w.traffic.clear();
+        w
+    };
+
+    // Pistol: 7 shots over 150 ticks (3.0 s = 70 weapon steps at 23.333 Hz);
+    // bullet travels 7.5 wpx per weapon step and expires after 20 weapon steps (~43 ticks).
+    let mut w = open();
+    w.give_weapon(weapon::PISTOL as i32, 20);
+    let mut positions = Vec::new();
+    let mut bullet_alive_ticks = 0u32;
+    let mut bullet_done = false;
+    for t in 0..150 {
+        w.step(press(Buttons::FIRE));
+        if w.weapons.stats.fired >= 1 && !bullet_done {
+            if w.weapons.shots[0].alive {
+                bullet_alive_ticks += 1;
+                positions.push((t, w.weapons.shots[0].y));
+            } else {
+                bullet_done = true;
+            }
+        }
+    }
+    assert_eq!(w.arms.ammo[weapon::PISTOL], 13);
+    assert_eq!(w.weapons.stats.fired, 7);
+    assert!(
+        (40..=45).contains(&bullet_alive_ticks),
+        "pistol bullet lived {bullet_alive_ticks} sim ticks (expected 40 = visible across 20 @ 23.333 Hz steps)"
+    );
+    let weapon_moves: Vec<i64> = positions
+        .windows(2)
+        .filter_map(|p| (p[1].1 != p[0].1).then_some((p[1].1 - p[0].1) >> 15))
+        .collect();
+    // Step 0 spawns & flies (life 20->19); steps 1..18 record 18 more moves; step 19 expires it.
+    assert_eq!(weapon_moves.len(), 18);
+    assert!(weapon_moves.iter().all(|&d| d == 15), "{weapon_moves:?}");
+
+    // Machine gun: 70 rounds in 150 ticks (23.333/s, 5 rounds per ammo unit),
+    // never spawning two bullets on the same tick.
+    let mut w = open();
+    w.give_weapon(weapon::MACHINE_GUN as i32, 20);
+    let mut prev_fired = 0;
+    for _ in 0..150 {
+        w.step(press(Buttons::FIRE));
+        let delta = w.weapons.stats.fired - prev_fired;
+        assert!(delta <= 1, "at most 1 MG bullet spawned per tick ({delta})");
+        prev_fired = w.weapons.stats.fired;
+    }
+    assert_eq!(w.weapons.stats.fired, 70);
+    assert_eq!(w.arms.ammo[weapon::MACHINE_GUN], 6);
+
+    // Rocket launcher: 4 rockets in 150 ticks (weapon steps 0, 20, 40, 60 = ~1.17/s).
+    let mut w = open();
+    w.give_weapon(weapon::ROCKET as i32, 20);
+    run(&mut w, Buttons::FIRE, 150);
+    assert_eq!(w.weapons.stats.fired, 4);
+    assert_eq!(w.arms.ammo[weapon::ROCKET], 16);
+
+    // Flamethrower: single puff is visible for 9 weapon steps (~19 sim ticks / 380 ms)
+    // and expires on the 10th step, matching `fl_single` (9 game frames / 385 ms).
+    let mut w = open();
+    w.give_weapon(weapon::FLAME as i32, 20);
+    let mut flame_ticks = 0u32;
+    for _ in 0..60 {
+        let btn = if w.weapons.stats.fired == 0 {
+            Buttons::FIRE
+        } else {
+            Buttons::NONE
+        };
+        w.step(press(btn));
+        if w.weapons.alive() > 0 {
+            flame_ticks += 1;
+        } else if flame_ticks > 0 {
+            break;
+        }
+    }
+    assert_eq!(w.weapons.stats.fired, 1);
+    assert!(
+        (18..=22).contains(&flame_ticks),
+        "flame puff lived {flame_ticks} sim ticks (expected ~19 = 9 visible steps @ 23.333 Hz)"
+    );
+
+    // Bullet splat against a building wall lasts 5 weapon steps (~10-11 sim ticks / ~214 ms).
+    let mut b = CmpBuilder::new(1);
+    street(&mut b, 5..20, 5..20);
+    b.set(10, 12, 2, block(BUILDING));
+    let mut w = world(&b, south(10, 10));
+    w.peds.clear();
+    w.traffic.clear();
+    w.give_weapon(weapon::PISTOL as i32, 5);
+    let mut splat_ticks = 0u32;
+    let mut saw_initial_five = false;
+    for _ in 0..60 {
+        let btn = if w.weapons.stats.fired == 0 {
+            Buttons::FIRE
+        } else {
+            Buttons::NONE
+        };
+        w.step(press(btn));
+        let ticks = w.weapons.splats[0].ticks;
+        if ticks > 0 {
+            if splat_ticks == 0 {
+                saw_initial_five = ticks == 5;
+            }
+            splat_ticks += 1;
+        } else if splat_ticks > 0 {
+            break;
+        }
+    }
+    assert!(saw_initial_five, "initial splat lifetime should be 5 steps");
+    assert!(
+        (9..=13).contains(&splat_ticks),
+        "splat visible for {splat_ticks} sim ticks (expected ~10-11 = 5 @ 23.333 Hz)"
+    );
 }

@@ -5,17 +5,22 @@
 //! Ported from AmiGTA1 (MIT): `gta_weapon.c`, whose rules it measured from
 //! the original. In short:
 //!
+//! - **Gun timing and projectile flight run at the original's 23.333 Hz**
+//!   ([`crate::clock::weapons()`], `Ratio(7, 15)` against 50 Hz), while a
+//!   fist punch (`PUNCH_TICKS = 4`), blasts and ground fires stay on AmiGTA1's
+//!   50 Hz-scaled constants.
 //! - **Projectiles are objects with a heading and a speed**, in a pool of
-//!   40 shared by every kind. A unit of speed is half a world pixel.
+//!   40 shared by every kind. A unit of speed is half a world pixel per
+//!   23.333 Hz step.
 //! - **The bullet** (pistol and machine gun) starts just behind the
-//!   shooter, moves 15 units a tick and dies after 20 ticks. Each tick it
-//!   is tested first against flat faces (fences, railings, doors), then
-//!   people, then cars, then the block under it, where a wall or water
+//!   shooter, moves 15 units a step and dies after 20 steps (~857 ms). Each
+//!   step it is tested first against flat faces (fences, railings, doors),
+//!   then people, then cars, then the block under it, where a wall or water
 //!   stops it.
 //! - **The rocket** starts ahead of him, speeds up from 10 units to 15, has
 //!   no range limit and bursts on the first thing it meets. Against a wall
 //!   it leaves three fires.
-//! - **The flame** is a puff a tick that lives ten frames. It sets alight
+//! - **The flame** is a puff a step that lives ten frames. It sets alight
 //!   everybody it passes through and stops only at a car or a wall.
 //! - **An explosion** kills people inside 17 px, sets them alight out to
 //!   30, and writes off any car within 32, whose own fuse then runs: that
@@ -84,6 +89,8 @@ pub struct Arms {
     pub punch_left: i32,
     /// The fire key, held.
     pub fire_held: bool,
+    /// Fire pressed or held between 23.333 Hz weapon steps, consumed on the next step.
+    fire_queued: bool,
     /// Endless weapon from a kill frenzy (`0` when none).
     pub inf_w: usize,
     /// Ticks left of the endless weapon.
@@ -101,6 +108,7 @@ impl Default for Arms {
             cool: 0,
             punch_left: 0,
             fire_held: false,
+            fire_queued: false,
             inf_w: 0,
             inf_ticks: 0,
             inf_save_w: weapon::FIST,
@@ -150,6 +158,7 @@ impl Arms {
         self.ammo = [0; weapon::COUNT];
         self.weapon = weapon::FIST;
         self.fire_held = false;
+        self.fire_queued = false;
         self.inf_w = 0;
         self.inf_ticks = 0;
     }
@@ -199,11 +208,13 @@ impl Arms {
         self.fire_held && self.weapon != weapon::FIST
     }
 
-    /// One tick of the fire key. The cooldown and a punch in the air run
-    /// every tick; `can` is whether he may start one (on his feet, not in
-    /// a car or mid-animation).
-    pub fn tick(&mut self, can: bool) -> Option<Trigger> {
-        if self.cool > 0 {
+    /// One tick of the fire key. A punch in the air runs every simulation tick
+    /// (`50 Hz`); gun cooldowns and triggers step on the `23.333 Hz` weapon
+    /// clock (`gun_step`), with `fire_queued` latching presses between steps.
+    /// `can` is whether he may start one (on his feet, not in a car or
+    /// mid-animation).
+    pub fn tick(&mut self, can: bool, gun_step: bool) -> Option<Trigger> {
+        if gun_step && self.cool > 0 {
             self.cool -= 1;
         }
         let mut out = None;
@@ -213,17 +224,23 @@ impl Arms {
                 out = Some(Trigger::Blow);
             }
         }
-        if !(self.fire_held && can) {
-            return out;
-        }
         if self.weapon == weapon::FIST {
-            if self.punch_left == 0 {
+            self.fire_queued = false;
+            if self.fire_held && can && self.punch_left == 0 {
                 self.punch_left = PUNCH_TICKS * PUNCH_STATES;
                 return Some(Trigger::Swing);
             }
             return out;
         }
-        if self.cool == 0 && self.ammo[self.weapon] > 0 {
+        if self.fire_held && can {
+            self.fire_queued = true;
+        }
+        if !gun_step {
+            return out;
+        }
+        let want_fire = can && (self.fire_held || self.fire_queued);
+        self.fire_queued = false;
+        if want_fire && self.cool == 0 && self.ammo[self.weapon] > 0 {
             return Some(Trigger::Shot(self.weapon));
         }
         out
@@ -268,6 +285,7 @@ impl Arms {
         h.i32(self.cool);
         h.i32(self.punch_left);
         h.bool(self.fire_held);
+        h.bool(self.fire_queued);
         if self.inf_ticks > 0 {
             h.u32(self.inf_w as u32);
             h.i32(self.inf_ticks);
@@ -300,10 +318,10 @@ const BLAST_KILL_PX: i64 = 17;
 const BLAST_BURN_PX: i64 = 30;
 const BLAST_CAR_PX: i64 = 32;
 
-/// Where a bullet stopped: a brief splat. (The original leaves its splat
-/// object on the map; AmiGTA1 shows it for a moment. How long the
-/// original's stays is to be measured in M6b.)
-const SPLAT_TICKS: i32 = 8;
+/// Where a bullet stopped: a brief splat. Measured in M6b under DOSBox-X
+/// (`weapons_open.probe` / `weapons_rate.probe`): five game frames at 23.333 Hz
+/// (~214 ms).
+const SPLAT_TICKS: i32 = 5;
 
 /// A fire left on the ground burns this long.
 const FIRE_TICKS: i32 = 250;
@@ -737,13 +755,14 @@ impl Weapons {
         }
     }
 
-    /// One tick: splats fade, fires burn, explosions play on, write-offs in
-    /// the fleet burn and blow up, and every projectile moves and is tested
-    /// against what it meets.
-    pub fn tick(&mut self, st: &mut Street) {
-        for s in &mut self.splats {
-            if s.ticks > 0 {
-                s.ticks -= 1;
+    /// One tick: fires burn and blasts advance at `50 Hz`, while splats fade
+    /// and projectiles advance on the `23.333 Hz` weapon clock (`gun_step`).
+    pub fn tick(&mut self, st: &mut Street, gun_step: bool) {
+        if gun_step {
+            for s in &mut self.splats {
+                if s.ticks > 0 {
+                    s.ticks -= 1;
+                }
             }
         }
         self.burn_fires(st);
@@ -760,9 +779,11 @@ impl Weapons {
             }
         }
         self.wreck_sweep(st);
-        for i in 0..MAX_SHOTS {
-            if self.shots[i].alive {
-                self.fly(st, i);
+        if gun_step {
+            for i in 0..MAX_SHOTS {
+                if self.shots[i].alive {
+                    self.fly(st, i);
+                }
             }
         }
     }
@@ -1236,7 +1257,7 @@ mod tests {
         a.fire_held = true;
         let mut shots = 0;
         for _ in 0..40 {
-            if let Some(Trigger::Shot(_)) = a.tick(true) {
+            if let Some(Trigger::Shot(_)) = a.tick(true, true) {
                 shots += 1;
                 if a.spent() {
                     break;
@@ -1256,7 +1277,7 @@ mod tests {
         };
         let mut events = Vec::new();
         for t in 0..60 {
-            if let Some(e) = a.tick(t < 30) {
+            if let Some(e) = a.tick(t < 30, true) {
                 events.push((t, e));
             }
         }
@@ -1269,6 +1290,73 @@ mod tests {
                 (32, Trigger::Blow),
             ]
         );
+    }
+
+    #[test]
+    fn a_tap_between_weapon_steps_latches_until_the_next_step_unless_cancelled() {
+        let mut a = Arms::default();
+        a.give(weapon::PISTOL, 5);
+
+        // One-tick tap on a non-gun_step tick latches through release until gun_step.
+        a.fire_held = true;
+        assert_eq!(a.tick(true, false), None);
+        a.fire_held = false;
+        assert_eq!(a.tick(true, false), None);
+        assert_eq!(a.tick(true, true), Some(Trigger::Shot(weapon::PISTOL)));
+        assert!(!a.spent());
+
+        // Fast-forward cooldown.
+        for _ in 0..10 {
+            a.tick(true, true);
+        }
+
+        // Becoming unable to shoot before the weapon step cancels the latch.
+        a.fire_held = true;
+        assert_eq!(a.tick(true, false), None);
+        a.fire_held = false;
+        assert_eq!(a.tick(false, true), None);
+        assert_eq!(a.tick(true, true), None);
+
+        // Switching to fists cancels a latched shot too.
+        a.fire_held = true;
+        assert_eq!(a.tick(true, false), None);
+        a.fire_held = false;
+        a.weapon = weapon::FIST;
+        assert_eq!(a.tick(true, false), None);
+        a.weapon = weapon::PISTOL;
+        assert_eq!(a.tick(true, true), None);
+    }
+
+    #[test]
+    fn gun_cooldown_steps_only_on_gun_step_even_while_switched_to_fist() {
+        let mut a = Arms::default();
+        a.give(weapon::PISTOL, 10);
+        a.fire_held = true;
+        assert_eq!(a.tick(true, true), Some(Trigger::Shot(weapon::PISTOL)));
+        assert!(!a.spent());
+        assert_eq!(a.cool, cooldown(weapon::PISTOL));
+
+        // Non-gun_step ticks never advance gun cooldown.
+        for _ in 0..20 {
+            assert_eq!(a.tick(true, false), None);
+        }
+        assert_eq!(a.cool, 10);
+
+        // Switching to fists still ticks cooldown down on gun_step ticks.
+        a.fire_held = false;
+        a.weapon = weapon::FIST;
+        for _ in 0..5 {
+            assert_eq!(a.tick(true, true), None);
+        }
+        a.weapon = weapon::PISTOL;
+        assert_eq!(a.cool, 5);
+
+        a.fire_held = true;
+        for _ in 0..4 {
+            assert_eq!(a.tick(true, true), None);
+        }
+        assert_eq!(a.cool, 1);
+        assert_eq!(a.tick(true, true), Some(Trigger::Shot(weapon::PISTOL)));
     }
 
     #[test]

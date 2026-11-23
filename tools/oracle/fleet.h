@@ -78,6 +78,8 @@ int gta_render_add_sprite_r(gta_view *v, long wx, long wy, int layer, int grid,
 int gta_pickups_open_at(gta_pickups *pk, long x, long y, int layer, int radius)
 { (void)pk; (void)x; (void)y; (void)layer; (void)radius; return 0; }
 
+void gfa_weapons_set_step(int s);
+
 static gta_traffic fleet;
 static gta_trains fleet_trains;
 static gta_peds crowd;
@@ -85,6 +87,16 @@ static const gta_map *fleet_map;
 static const gta_nav *fleet_nav;
 static gta_weapons weapons;
 static gta_score score;
+static int weapons_acc = 0;
+
+static int fleet_weapons_clock_step(void)
+{
+    weapons_acc += 7;
+    if (weapons_acc < 15)
+        return 0;
+    weapons_acc -= 15;
+    return 1;
+}
 
 /* The crowd asks the fleet about the lights (gta_main.c). */
 static int crowd_light_green(void *ctx, int bx, int by, int along_x)
@@ -95,6 +107,7 @@ static int crowd_light_green(void *ctx, int bx, int by, int along_x)
 static void fleet_start(const gta_map *m, const gta_nav *nav,
                         const gta_tiles *t, int bx, int by)
 {
+    weapons_acc = 0;
     fleet_map = m;
     fleet_nav = nav;
     gta_weapons_init(&weapons, t);
@@ -161,9 +174,10 @@ static void fleet_hold_walker(long *x, long *y, int layer, long ox, long oy)
 /* One tick of the street, with the player at (x, y): his speed, heading,
  * layer and half size as the fleet sees him, whether he is on foot (for
  * the trains and the crowd) and whether he is moving (for where the crowd
- * spawns). Returns 1 if a train ran him over. */
+ * spawns), and `gun_step` (23.333 Hz weapon clock gate). Returns 1 if a
+ * train ran him over. */
 static int fleet_tick(long x, long y, long speed, int face, int layer,
-                      int hl, int hw, int on_foot, int moving)
+                      int hl, int hw, int on_foot, int moving, int gun_step)
 {
     int hit, i;
     gta_traffic_set_player(&fleet, 1, x, y, speed, face, layer, hl, hw);
@@ -188,6 +202,7 @@ static int fleet_tick(long x, long y, long speed, int face, int layer,
     gta_score_tick(&score);
     gta_peds_set_view(&crowd, FLEET_VIEW, CROWD_VIEW_H, face, moving);
     gta_peds_tick(&crowd, fleet_map, x, y);
+    gfa_weapons_set_step(gun_step);
     gta_weapons_tick(&weapons, fleet_nav, &crowd, &fleet, fleet.tiles, &score);
     return hit;
 }

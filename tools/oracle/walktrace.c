@@ -42,7 +42,7 @@
 #include "fleet.h"
 
 /* gta_main.c's fire latch and the player's guns. */
-static int fire_held, weapon, punch_left, fire_cool, burning;
+static int fire_held, fire_queued, weapon, punch_left, fire_cool, burning;
 static int ammo[GTA_WEAPON_COUNT];
 static int ammo_sub[GTA_WEAPON_COUNT] = { 0, 0, GTA_AMMO_PER_UNIT, 0,
                                           GTA_AMMO_PER_UNIT };
@@ -163,7 +163,7 @@ int main(int argc, char **argv)
             ticks = 1;
         for (i = 0; i < ticks; i++) {
             long speed;
-            int hb, hc, bl, bu;
+            int hb, hc, bl, bu, gun_step;
             if (!drown && punch_left > 0 && fwd == 0) {
                 /* THE STANDING PUNCH, a state of its own; he may turn. */
                 pl.anim = GTA_ANIM_PUNCH;
@@ -191,42 +191,53 @@ int main(int argc, char **argv)
                     }
                 }
             }
-            /* THE FIRE LATCH (gta_main.c), on his feet only. */
-            if (fire_cool > 0)
+            /* THE FIRE LATCH (gta_main.c), on his feet only. Punches run at
+             * 50 Hz; guns step on the 23.333 Hz weapon clock (gun_step) and
+             * latch presses/holds between steps. */
+            gun_step = fleet_weapons_clock_step();
+            if (gun_step && fire_cool > 0)
                 fire_cool--;
             if (punch_left > 0) {
                 punch_left--;
                 if (punch_left == GTA_PUNCH_TICKS * (GTA_PED_PUNCH_FRAMES - 2))
                     gta_peds_punch(&crowd, pl.x, pl.y, pl.angle, pl.layer);
             }
-            if (fire_held && !drown) {
-                if (weapon == 0) {
-                    if (punch_left == 0)
-                        punch_left = GTA_PUNCH_TICKS * GTA_PED_PUNCH_FRAMES;
-                } else if (fire_cool == 0 && ammo[weapon] > 0
-                           && gta_weapons_fire(&weapons, weapon, pl.x, pl.y,
-                                               pl.layer, pl.angle,
-                                               pl.anim == GTA_ANIM_RUN, -1)) {
-                    fire_cool = gta_weapons_cooldown(weapon);
-                    gta_peds_panic(&crowd, pl.x, pl.y, pl.layer);
-                    if (ammo_sub[weapon] > 0) {
-                        if (--ammo_sub[weapon] == 0) {
-                            ammo_sub[weapon] = GTA_AMMO_PER_UNIT;
+            if (weapon == 0) {
+                fire_queued = 0;
+                if (fire_held && !drown && punch_left == 0)
+                    punch_left = GTA_PUNCH_TICKS * GTA_PED_PUNCH_FRAMES;
+            } else {
+                if (fire_held && !drown)
+                    fire_queued = 1;
+                if (gun_step) {
+                    int want = !drown && (fire_held || fire_queued);
+                    fire_queued = 0;
+                    if (want && fire_cool == 0 && ammo[weapon] > 0
+                        && gta_weapons_fire(&weapons, weapon, pl.x, pl.y,
+                                            pl.layer, pl.angle,
+                                            pl.anim == GTA_ANIM_RUN, -1)) {
+                        fire_cool = gta_weapons_cooldown(weapon);
+                        gta_peds_panic(&crowd, pl.x, pl.y, pl.layer);
+                        if (ammo_sub[weapon] > 0) {
+                            if (--ammo_sub[weapon] == 0) {
+                                ammo_sub[weapon] = GTA_AMMO_PER_UNIT;
+                                ammo[weapon]--;
+                            }
+                        } else
                             ammo[weapon]--;
+                        if (ammo[weapon] <= 0) {
+                            ammo[weapon] = 0;
+                            weapon = ammo[GTA_WEAPON_PISTOL] > 0
+                                   ? GTA_WEAPON_PISTOL : GTA_WEAPON_FIST;
                         }
-                    } else
-                        ammo[weapon]--;
-                    if (ammo[weapon] <= 0) {
-                        ammo[weapon] = 0;
-                        weapon = ammo[GTA_WEAPON_PISTOL] > 0
-                               ? GTA_WEAPON_PISTOL : GTA_WEAPON_FIST;
                     }
                 }
             }
             speed = pl.anim == GTA_ANIM_RUN || pl.anim == GTA_ANIM_WALK
                   ? GTA_RUN_SPEED_FP : 0;
             if (fleet_tick(pl.x, pl.y, speed, pl.angle, pl.layer, 3, 3, 1,
-                           pl.anim == GTA_ANIM_RUN || pl.anim == GTA_ANIM_WALK)) {
+                           pl.anim == GTA_ANIM_RUN || pl.anim == GTA_ANIM_WALK,
+                           gun_step)) {
                 printf("player: run over by a train\n");
                 health = 0;
             }
@@ -257,6 +268,7 @@ int main(int argc, char **argv)
                 drown = 0;
                 health = 100;
                 burning = 0;
+                fire_queued = 0;
                 for (a = 1; a < GTA_WEAPON_COUNT; a++)
                     ammo[a] = 0;
                 weapon = 0;

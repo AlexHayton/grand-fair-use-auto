@@ -1,0 +1,27 @@
+# Drives Bulldog over MG (20) and Flame (10) crates; Flame is equipped last (10).
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+17000 shot before_board
++200 tap enter 80
++2400 shot boarded
++200 down up
++650 up up
++200 shot after_drive
++1500 tap enter 80
++2000 shot on_foot
++100 down lctrl
++0 burst fl_crate 95 0
++1450 up lctrl
++200 shot after_fl_crate
+# Flame (10->4) -> x cycles to Fist -> x cycles to Machine Gun (20)
++200 tap x 60
++400 tap x 60
++300 shot mg_ready
++100 down lctrl
++0 burst mg_crate 95 0
++1450 up lctrl
++200 shot after_mg_crate
++100 quit

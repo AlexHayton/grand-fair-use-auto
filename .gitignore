@@ -61,5 +61,10 @@ tools/hdtex/work/
 # AmiGTA1 oracle build (built from the sibling checkout, never vendored)
 tools/oracle/build/
 
+# DOSBox-X probe build, captures, memory dumps and savestates
+tools/dosprobe/build/
+tools/dosprobe/out/
+tools/dosprobe/states/
+
 # Vercel's local link to a project
 .vercel/

@@ -123,7 +123,7 @@ impl Block {
 }
 
 /// A position in blocks, as the file stores it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct BlockPos {
     pub x: u8,
     pub y: u8,
@@ -403,7 +403,11 @@ pub struct CmpBuilder {
     /// `(x, y)` to the column's blocks, ground first (layer 0 upwards).
     columns: std::collections::BTreeMap<(u8, u8), Vec<Block>>,
     objects: Vec<StartupObject>,
+    routes: Vec<Route>,
+    locations: [[BlockPos; LOCATIONS_PER_GROUP]; LOCATION_GROUPS],
+    districts: Vec<District>,
     pub style_number: u8,
+    pub sample_number: u8,
 }
 
 impl CmpBuilder {
@@ -412,6 +416,11 @@ impl CmpBuilder {
             style_number,
             ..CmpBuilder::default()
         }
+    }
+
+    pub fn sample_number(&mut self, sample_number: u8) -> &mut Self {
+        self.sample_number = sample_number;
+        self
     }
 
     /// Put `block` at `(x, y, z)`; layers below it that are not set become
@@ -431,29 +440,102 @@ impl CmpBuilder {
         self
     }
 
+    pub fn route(&mut self, r: Route) -> &mut Self {
+        self.routes.push(r);
+        self
+    }
+
+    fn push_location(&mut self, group: usize, pos: BlockPos) -> &mut Self {
+        let slot = self.locations[group]
+            .iter_mut()
+            .find(|p| (p.x, p.y, p.z) == (0, 0, 0))
+            .expect("CMP location group full (max 6)");
+        *slot = pos;
+        self
+    }
+
+    pub fn police_station(&mut self, pos: BlockPos) -> &mut Self {
+        self.push_location(0, pos)
+    }
+
+    pub fn hospital(&mut self, pos: BlockPos) -> &mut Self {
+        self.push_location(1, pos)
+    }
+
+    pub fn fire_station(&mut self, pos: BlockPos) -> &mut Self {
+        self.push_location(4, pos)
+    }
+
+    pub fn district(&mut self, d: District) -> &mut Self {
+        self.districts.push(d);
+        self
+    }
+
     /// The file's bytes.
     pub fn build(&self) -> Vec<u8> {
+        let mut block_ids: std::collections::HashMap<Block, u16> = std::collections::HashMap::new();
         let mut blocks: Vec<Block> = Vec::new();
         let mut columns: Vec<u16> = vec![MAP_LAYERS as u16];
+        let mut col_offsets: std::collections::HashMap<Vec<u16>, u32> =
+            std::collections::HashMap::new();
+        col_offsets.insert(vec![MAP_LAYERS as u16], 0);
         let mut base = vec![0u32; MAP_DIM * MAP_DIM];
+
         for (&(x, y), col) in &self.columns {
-            base[usize::from(y) * MAP_DIM + usize::from(x)] = (columns.len() * 2) as u32;
-            columns.push((MAP_LAYERS - col.len()) as u16);
+            let mut words = Vec::with_capacity(1 + col.len());
+            words.push((MAP_LAYERS - col.len()) as u16);
             // Block indices are stored top down.
             for b in col.iter().rev() {
-                columns.push(blocks.len() as u16);
-                blocks.push(*b);
+                let id = match block_ids.get(b) {
+                    Some(&id) => id,
+                    None => {
+                        let id =
+                            u16::try_from(blocks.len()).expect("CMP block count exceeds u16::MAX");
+                        blocks.push(*b);
+                        block_ids.insert(*b, id);
+                        id
+                    }
+                };
+                words.push(id);
+            }
+            let off = *col_offsets.entry(words).or_insert_with_key(|w| {
+                let off =
+                    u32::try_from(columns.len() * 2).expect("CMP column bytes exceed u32::MAX");
+                columns.extend_from_slice(w);
+                off
+            });
+            base[usize::from(y) * MAP_DIM + usize::from(x)] = off;
+        }
+
+        let mut route_bytes = Vec::new();
+        for r in &self.routes {
+            let count = u8::try_from(r.nodes.len()).expect("CMP route node count exceeds u8::MAX");
+            route_bytes.push(count);
+            route_bytes.push(r.kind);
+            for n in &r.nodes {
+                route_bytes.extend([n.x, n.y, n.z]);
             }
         }
+
+        let mut nav_bytes = Vec::with_capacity(self.districts.len() * DISTRICT_RECORD);
+        for d in &self.districts {
+            nav_bytes.extend([d.x, d.y, d.w, d.h, d.sample]);
+            let mut name = [0u8; 30];
+            for (dst, c) in name.iter_mut().zip(d.name.chars().take(29)) {
+                *dst = u8::try_from(u32::from(c)).unwrap_or(b'?');
+            }
+            nav_bytes.extend(name);
+        }
+
         let mut f = Vec::new();
         f.extend(CMP_VERSION.to_le_bytes());
-        f.extend([self.style_number, 1, 0, 0]);
+        f.extend([self.style_number, self.sample_number, 0, 0]);
         let sizes = [
-            0u32,
+            route_bytes.len() as u32,
             (self.objects.len() * OBJECT_RECORD) as u32,
             (columns.len() * 2) as u32,
             (blocks.len() * BLOCK_RECORD) as u32,
-            0,
+            nav_bytes.len() as u32,
         ];
         for n in sizes {
             f.extend(n.to_le_bytes());
@@ -478,7 +560,13 @@ impl CmpBuilder {
                 f.extend(v.to_le_bytes());
             }
         }
-        f.extend([0u8; LOCATION_GROUPS * LOCATIONS_PER_GROUP * 3]);
+        f.extend(route_bytes);
+        for group in &self.locations {
+            for loc in group {
+                f.extend([loc.x, loc.y, loc.z]);
+            }
+        }
+        f.extend(nav_bytes);
         f
     }
 }
@@ -597,5 +685,73 @@ mod tests {
         assert_eq!(m.block(10, 20, 1), Some(&floor));
         assert_eq!(m.block(10, 20, 0), Some(&Block::default()));
         assert_eq!(m.block(11, 20, 0), None);
+    }
+
+    #[test]
+    fn builder_dedups_and_writes_metadata() {
+        let road = Block {
+            type_map: 0x20,
+            ..Block::default()
+        };
+        let floor = Block {
+            faces: [0, 0, 0, 0, 1],
+            ..Block::default()
+        };
+        let mut b = CmpBuilder::new(1);
+        b.sample_number(2);
+        for x in 10..18 {
+            b.set(x, 20, 1, floor).set(x, 20, 2, road);
+        }
+        b.police_station(BlockPos { x: 11, y: 20, z: 4 })
+            .hospital(BlockPos { x: 12, y: 20, z: 4 })
+            .fire_station(BlockPos { x: 13, y: 20, z: 4 })
+            .route(Route {
+                kind: 0xff,
+                nodes: vec![
+                    BlockPos { x: 10, y: 20, z: 4 },
+                    BlockPos { x: 17, y: 20, z: 4 },
+                ],
+            })
+            .district(District {
+                x: 1,
+                y: 1,
+                w: 50,
+                h: 50,
+                sample: 0,
+                name: "Test District".into(),
+            })
+            .object(StartupObject {
+                x: 10,
+                y: 20,
+                z: 4,
+                kind: 3,
+                remap: 1,
+                rotation: 256,
+                pitch: 0,
+                roll: 0,
+            });
+        let m = Cmp::parse(&b.build()).unwrap();
+        assert_eq!(m.sample_number, 2);
+        // 8 columns share just 3 distinct block records: default, floor, road.
+        assert_eq!(m.blocks.len(), 3);
+        // Header + column0(1 word) + shared column(4 words) = 5 words.
+        assert_eq!(m.columns.len(), 5);
+        assert_eq!(
+            m.police_stations().collect::<Vec<_>>(),
+            [BlockPos { x: 11, y: 20, z: 4 }]
+        );
+        assert_eq!(
+            m.hospitals().collect::<Vec<_>>(),
+            [BlockPos { x: 12, y: 20, z: 4 }]
+        );
+        assert_eq!(
+            m.fire_stations().collect::<Vec<_>>(),
+            [BlockPos { x: 13, y: 20, z: 4 }]
+        );
+        assert_eq!(m.routes.len(), 1);
+        assert_eq!(m.districts.len(), 1);
+        assert_eq!(m.districts[0].name, "Test District");
+        assert_eq!(m.objects.len(), 1);
+        assert_eq!(m.block(17, 20, 2), Some(&road));
     }
 }

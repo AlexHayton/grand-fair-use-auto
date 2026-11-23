@@ -4,6 +4,7 @@
 //! (M2), and script runs against the simulation (M3).
 
 mod export;
+mod probe;
 mod sheet;
 
 use gfa_tool::{render, run};
@@ -180,6 +181,14 @@ enum Command {
         #[arg(long)]
         save: bool,
     },
+    /// Generate a synthetic Level 1 overlay (GTADATA/TEST.CMP + MISSION.INI) for tools/dosprobe.
+    ProbeOverlay {
+        /// Overlay preset name (e.g. `arena`).
+        preset: String,
+        /// Output directory to populate with GTADATA/.
+        #[arg(long)]
+        out: PathBuf,
+    },
 }
 
 fn parse_xy(s: &str) -> Result<(usize, usize), String> {
@@ -203,11 +212,14 @@ fn main() -> Result<()> {
     if let Command::Archive { path, all, list } = &cli.command {
         return archive(path, *all, *list);
     }
+    if let Command::ProbeOverlay { preset, out } = &cli.command {
+        return probe::probe_overlay(preset, out);
+    }
     let data = DataPath::resolve(cli.data.as_deref()).context("finding the game data")?;
     let owned = data.open()?;
     let src: &dyn AssetSource = owned.as_ref();
     match cli.command {
-        Command::Archive { .. } => unreachable!("handled above"),
+        Command::Archive { .. } | Command::ProbeOverlay { .. } => unreachable!("handled above"),
         Command::Info { files } => info(&data, src, files),
         Command::Map { path, at } => map(src, &path, at),
         Command::Style { path, cars } => style(src, &path, cars),
