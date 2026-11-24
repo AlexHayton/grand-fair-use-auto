@@ -1535,7 +1535,9 @@ fn far_side_enter_on_bus_walks_around_body() {
         if w.doing == Doing::Driving {
             break;
         }
-        if let Doing::Entering(e) = w.doing {
+        if let Doing::Entering(e) = w.doing
+            && (e.walk_t < e.walk_len || e.via_n > 0)
+        {
             let ci = &w.cars[e.car.model];
             let (hl, hw) = gfa_sim::cars::half_size(ci);
             assert!(
@@ -1567,7 +1569,10 @@ fn jump_at_bus_from_outside_slides_under() {
     w.park(1, 26, 0, 128);
     let bus = standing(&w, 0);
     run(&mut w, Buttons::UP, 20);
-    assert!(i64::from(w.player.x) < bus.x - (10 << 16), "held outside west flank");
+    assert!(
+        i64::from(w.player.x) < bus.x - (10 << 16),
+        "held outside west flank"
+    );
     w.step(press(Buttons::UP.with(Buttons::HANDBRAKE, true)));
     assert!(matches!(w.doing, Doing::Sliding(_)));
     assert_eq!(w.player_frame(), Some(41));
@@ -1595,7 +1600,10 @@ fn flush_wall_enter_refused_and_vault_turns_off_roof() {
     let car_y = standing(&w, 0).y;
     w.step(press(Buttons::ENTER));
     assert_eq!(w.doing, Doing::OnFoot);
-    assert!(log_has(&mut w, "door blocked by a building - cannot get in"));
+    assert!(log_has(
+        &mut w,
+        "door blocked by a building - cannot get in"
+    ));
     assert_eq!(w.traffic.standing().count(), 1);
 
     // Run east from the clear west side and press SPACE: vault turns off north onto clear road.
@@ -1608,7 +1616,10 @@ fn flush_wall_enter_refused_and_vault_turns_off_roof() {
     assert_eq!(w.doing, Doing::OnFoot);
     let (bx, by) = w.player.block();
     assert!(bx < 16, "never dropped into east building column {bx}");
-    assert_ne!(w.map.nav_ground(bx, by, w.player.layer), BUILDING as u8 >> 4);
+    assert_ne!(
+        w.map.nav_ground(bx, by, w.player.layer),
+        BUILDING as u8 >> 4
+    );
     assert!(
         i64::from(w.player.y) < car_y - (10 << 16),
         "turned north along roof off the wall edge"
@@ -1634,11 +1645,12 @@ fn blocked_door_exit_forward_on_north_car_bus_and_l_corner() {
     assert_eq!(w.doing, Doing::OnFoot);
     assert!(i64::from(w.player.y) < y0 - (15 << 16));
 
-    // 2. SOUTH Coach (model 1, length = 120): door blocked -> clears full roof along heading 128.
+    // 2. SOUTH Coach (model 1, length = 120, cab door at dy = +25): door
+    //    blocked -> clears full roof along heading 128.
     let mut bw = world(&b, south(15, 15));
     bw.peds.clear();
     bw.put_in_car(1, 15, 15, 128);
-    bw.park(0, 17, 0, 128);
+    bw.park(0, 17, 25, 128);
     let by0 = i64::from(bw.player.y);
     bw.step(press(Buttons::ENTER));
     assert!(log_has(
@@ -1677,5 +1689,8 @@ fn blocked_door_exit_forward_on_north_car_bus_and_l_corner() {
     assert_eq!(lw.doing, Doing::OnFoot);
     let (bx, by) = lw.player.block();
     assert!(bx < 16 && by < 16, "exited onto clear road at ({bx},{by})");
-    assert_ne!(lw.map.nav_ground(bx, by, lw.player.layer), BUILDING as u8 >> 4);
+    assert_ne!(
+        lw.map.nav_ground(bx, by, lw.player.layer),
+        BUILDING as u8 >> 4
+    );
 }

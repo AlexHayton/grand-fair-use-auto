@@ -295,12 +295,7 @@ pub fn far_side_around(
     let end_along = hl + i64::from(PED_CAR_MARGIN) + 3;
     let near_across = if across_p < 0 { -(hw + 4) } else { hw + 4 };
     let door_across = door_side(ci) * (hw + 4);
-    let to_world = |al: i64, ac: i64| {
-        (
-            cx + (fx * al + rx * ac) * 4,
-            cy + (fy * al + ry * ac) * 4,
-        )
-    };
+    let to_world = |al: i64, ac: i64| (cx + (fx * al + rx * ac) * 4, cy + (fy * al + ry * ac) * 4);
     let nose = [
         to_world(end_along, near_across),
         to_world(end_along, door_across),

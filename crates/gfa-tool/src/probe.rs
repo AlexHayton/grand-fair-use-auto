@@ -246,10 +246,7 @@ fn build_vault() -> Result<GeneratedOverlay> {
     let (cmp_bytes, cmp) = finish_cmp(&mut b, "Probe Vault")?;
     let ini_bytes = build_mission_ini(
         "Probe Vault",
-        &[
-            "1 1 (124,128,4) PARKED 9 0",
-            "2 1 (127,128,4) PLAYER 1 256",
-        ],
+        &["1 1 (124,128,4) PARKED 9 0", "2 1 (127,128,4) PLAYER 1 256"],
     )?;
 
     Ok(GeneratedOverlay {
@@ -305,10 +302,7 @@ fn build_blocked_exit() -> Result<GeneratedOverlay> {
     });
 
     let (cmp_bytes, cmp) = finish_cmp(&mut b, "Probe Blocked Exit")?;
-    let ini_bytes = build_mission_ini(
-        "Probe Blocked Exit",
-        &["1 1 (126,127,4) PLAYER 1 768"],
-    )?;
+    let ini_bytes = build_mission_ini("Probe Blocked Exit", &["1 1 (126,127,4) PLAYER 1 768"])?;
 
     Ok(GeneratedOverlay {
         cmp_bytes,
