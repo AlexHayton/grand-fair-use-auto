@@ -181,24 +181,24 @@ Because `tools/dosprobe/run.py` mounts the owner's game folder under DOSBox-X wi
 
 - [ ] **Special ped groups & bonuses (Hare Krishnas / Elvises)**
   - Verify which cities/levels spawn Hare Krishna lines and Elvis impersonators, spawn frequency/rules, walking formation, and exact bonus triggers/points (`GOURANGA!`, Elvis, cop kills) (`IMPLEMENTATION_PLAN.md`, `docs/PARITY.md`).
-  - **Probe script:** —
-  - **Measured:** —
-  - **Follow-up / status:** Pending.
+  - **Probe script:** `tools/dosprobe/scripts/special_groups.probe` (Director's Cut) and `tools/dosprobe/scripts/special_groups_london.probe` (London)
+  - **Measured:** Captured the default Liberty City campaign at `19,006`, `49,012` and `79,003` DOSBox-X PIC ticks, plus London 1969/1961 first missions at `22,509`, `52,501` and `82,507`; no Hare Krishna/Elvis formation was identifiable, so no spawn frequency or bonus trigger can be concluded.
+  - **Follow-up / status:** Keep pending. Repeat in San Andreas and Vice City with a reliable group-identification method.
 
 - [ ] **Gang roles state machine (for M7)**
   - Document the original state machine for script-spawned gang AI types (`gta_peds.c:1111`; AmiGTA1 only decoded police roles) (`IMPLEMENTATION_PLAN.md`, `docs/PARITY.md`).
-  - **Probe script:** —
-  - **Measured:** —
-  - **Follow-up / status:** Pending.
+  - **Probe script:** `tools/dosprobe/scripts/gang_roles.probe`
+  - **Measured:** Captured the default Liberty City campaign at `19,006`, `24,000`, `29,008`, `34,002` and `39,010` DOSBox-X PIC ticks, plus a 1 MiB RAM sample. No scripted gunman role or state transition was visible in the sampled frames.
+  - **Follow-up / status:** Keep pending. Drive a mission that spawns gang peds and decode the corresponding actor state from RAM.
 
 - [ ] **Ped anti-pileup departures comparison**
   - Compare AmiGTA1's four anti-bunching departures against `GTA8.EXE` street behaviour: spread corner targets across pavement, ped-ped separation/relax pass, no resting near corners, and per-ped coin flip at T-junctions (`IMPLEMENTATION_PLAN.md` decision log, `docs/PARITY.md`).
-  - **Probe script:** —
-  - **Measured:** —
-  - **Follow-up / status:** Pending.
+  - **Probe script:** `tools/dosprobe/scripts/ped_anti_pileup.probe` (run on the original city map, without a synthetic overlay)
+  - **Measured:** Walked the player through the default Liberty City area and captured frames at `19,006`, `28,808`, `39,010` and `44,003` DOSBox-X PIC ticks. The camera/player moved, but these captures do not isolate ped corner choices or separation.
+  - **Follow-up / status:** Keep pending. Need a reproducible busy intersection and tracked pedestrian positions across repeated runs.
 
 - [ ] **Cheats (for M8)**
   - Verify Director's Cut and London name-entry cheats against AmiGTA1's table (`gta_career.c:223`) (`IMPLEMENTATION_PLAN.md`).
-  - **Probe script:** —
-  - **Measured:** —
-  - **Follow-up / status:** Pending.
+  - **Probe script:** `tools/dosprobe/scripts/cheats.probe` (`buckfast`), `tools/dosprobe/scripts/cheats_control.probe` (Director's Cut default-name control), `tools/dosprobe/scripts/cheats_london.probe` (`buckfast`) and `tools/dosprobe/scripts/cheats_london_control.probe` (London default-name control)
+  - **Measured:** In the Director's Cut, entering `buckfast` then pressing keypad `*` changed the visible ammunition count to `99`; the default-name control did not. In London 1969 and 1961, the name was accepted and gameplay started, but keypad `*` did not show `99`; the corresponding no-name controls were also unchanged.
+  - **Follow-up / status:** Test remaining AmiGTA1 names and decode the London-specific cheat behavior. The probe runner mounts the edition's CD image automatically.

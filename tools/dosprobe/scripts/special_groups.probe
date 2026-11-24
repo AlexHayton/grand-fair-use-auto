@@ -1,0 +1,11 @@
+# Survey special pedestrian groups in the default Liberty City campaign.
+# Select a different city manually before replaying if checking city-specific spawns.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
++9000 shot special_start
++30000 shot special_krishna_window
++30000 shot special_elvis_window
++100 memdump special_ped_ram 0x100000 0x100000
++100 quit

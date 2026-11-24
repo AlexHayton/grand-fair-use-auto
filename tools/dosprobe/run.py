@@ -71,9 +71,19 @@ def resolve_data_dir(explicit: str | None) -> pathlib.Path:
     return p
 
 
+def resolve_cdrom(data_dir: pathlib.Path, exe_name: str) -> pathlib.Path:
+    exe = pathlib.Path(exe_name).name.lower()
+    edition = "LONDON" if "_uk" in exe or "_61" in exe else "GTA"
+    cdrom = data_dir / "MUSIC" / edition / "CDAUDIO.DAT"
+    if not cdrom.is_file():
+        raise SystemExit(f"missing CD image for {exe_name}: {cdrom}")
+    return cdrom
+
+
 def write_conf(
     conf_path: pathlib.Path,
     data_dir: pathlib.Path,
+    cdrom_path: pathlib.Path,
     overlay_dir: pathlib.Path,
     captures_dir: pathlib.Path,
     exe_name: str,
@@ -117,6 +127,7 @@ nosound={nosound}
 @ECHO OFF
 MOUNT C "{data_dir}"
 MOUNT C "{overlay_dir}" -t overlay
+IMGMOUNT D "{cdrom_path}" -t cdrom -fs iso
 C:
 CD \\GTADOS
 {exe_name}
@@ -185,6 +196,7 @@ def main() -> int:
         raise SystemExit(f"missing {DEFAULT_BIN}; run tools/dosprobe/build.sh first")
 
     data_dir = resolve_data_dir(args.data)
+    cdrom_path = resolve_cdrom(data_dir, args.exe)
     headless = (bool(args.script) and not args.windowed and not args.interactive) or args.headless
     if args.interactive:
         headless = False
@@ -208,6 +220,7 @@ def main() -> int:
     write_conf(
         conf_path=conf_path,
         data_dir=data_dir,
+        cdrom_path=cdrom_path,
         overlay_dir=overlay_dir,
         captures_dir=out_dir,
         exe_name=args.exe,

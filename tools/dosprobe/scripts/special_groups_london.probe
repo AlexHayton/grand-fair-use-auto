@@ -1,0 +1,10 @@
+# Survey special pedestrian groups in the first London campaign mission.
+3500 tap esc 80
++7000 tap enter 80
++2000 tap enter 80
++1000 tap enter 80
++9000 shot special_start
++30000 shot special_london_30s
++30000 shot special_london_60s
++100 memdump special_ped_ram 0x100000 0x100000
++100 quit
