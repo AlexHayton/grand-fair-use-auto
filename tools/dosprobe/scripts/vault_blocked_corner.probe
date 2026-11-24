@@ -1,0 +1,28 @@
+# L-corner blocked-door + blocked-front-bumper exit test on blocked_exit overlay:
+# Same Bulldog #1 approach as vault_blocked_car.probe, but hold SOUTH throttle
+# until Bulldog #1 stops flush against the (129,132) L-corner wall ahead so BOTH
+# east door (x=130) and south front bumper (129,132) are blocked, while west/north are clear.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+17000 down right
++512 up right
++100 down up
++1950 up up
++100 down left
++256 up left
++100 down up
++400 up up
++100 shot start_corner
++50 tap enter 70
++2100 down up
++1650 up up
++700 down up
++450 up up
++350 shot pinned_corner
++50 burst blocked_corner_exit 140 0
++30 tap enter 70
++2100 shot after_blocked_corner
++100 quit

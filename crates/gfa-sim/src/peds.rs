@@ -409,7 +409,7 @@ fn pull_place(cars: &[CarInfo], p: &mut Ped) {
     let s = p.pull.clamp(0, PULL_STATES - 1) as usize;
     let (fx, fy) = (i64::from(sin(p.pull_face)), -i64::from(cos(p.pull_face)));
     let (rx, ry) = (i64::from(cos(p.pull_face)), i64::from(sin(p.pull_face)));
-    let along = ci.doors.first().map_or(0, |d| i64::from(d.rpx) / 2) + PULL_ALONG[s];
+    let along = ci.doors.first().map_or(0, |d| i64::from(d.rpy) / 2) + PULL_ALONG[s];
     let across = cars::door_side(ci) * (i64::from(ci.width >> 1) / 2 + PULL_LAT[s]);
     p.x = p.pull_cx + (fx * along + rx * across) * 4;
     p.y = p.pull_cy + (fy * along + ry * across) * 4;

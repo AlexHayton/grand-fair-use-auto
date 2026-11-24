@@ -283,10 +283,9 @@ impl Traffic {
         true
     }
 
-    /// Take the nearest car within `range` px of `(x, y)` on `layer` out of
-    /// the fleet for the player to get into: any car, moving or not, that
-    /// is not a wreck and not locked. The tick drops it from the fleet.
-    pub fn grab(&mut self, x: i64, y: i64, layer: i32, range: i32) -> Option<Taken> {
+    /// Nearest non-wrecked, unlocked car within `range` px of `(x, y)` on
+    /// `layer` (without removing it from the fleet).
+    pub fn nearest_enterable(&self, x: i64, y: i64, layer: i32, range: i32) -> Option<usize> {
         let mut best = None;
         let mut bd = i64::from(range) << FP;
         for (i, c) in self.cars[..self.n].iter().enumerate() {
@@ -299,9 +298,14 @@ impl Traffic {
                 best = Some(i);
             }
         }
-        let c = &mut self.cars[best?];
+        best
+    }
+
+    /// Take fleet slot `slot` out of the street for the player to get into.
+    pub fn take_car(&mut self, slot: usize) -> Taken {
+        let c = &mut self.cars[slot];
         c.done = true;
-        Some(Taken {
+        Taken {
             model: c.model,
             x: c.x,
             y: c.y,
@@ -314,7 +318,15 @@ impl Traffic {
             serial: c.serial,
             mission: c.mission,
             cop: c.cop != 0,
-        })
+        }
+    }
+
+    /// Take the nearest car within `range` px of `(x, y)` on `layer` out of
+    /// the fleet for the player to get into: any car, moving or not, that
+    /// is not a wreck and not locked. The tick drops it from the fleet.
+    pub fn grab(&mut self, x: i64, y: i64, layer: i32, range: i32) -> Option<Taken> {
+        let slot = self.nearest_enterable(x, y, layer, range)?;
+        Some(self.take_car(slot))
     }
 
     /// The fleet car whose body is at `(px, py)` on `layer`, grown by
@@ -327,9 +339,23 @@ impl Traffic {
         layer: i32,
         margin: i32,
     ) -> Option<usize> {
+        self.car_at_except(cars, px, py, layer, margin, None)
+    }
+
+    /// Same as [`Traffic::car_at`], ignoring fleet slot `skip` if set.
+    pub fn car_at_except(
+        &self,
+        cars: &[CarInfo],
+        px: i64,
+        py: i64,
+        layer: i32,
+        margin: i32,
+        skip: Option<usize>,
+    ) -> Option<usize> {
         self.cars[..self.n].iter().position(|c| {
             !c.done
                 && c.layer == layer
+                && !skip.is_some_and(|s| std::ptr::eq(c, &self.cars[s]))
                 && body_hit(
                     c.x,
                     c.y,

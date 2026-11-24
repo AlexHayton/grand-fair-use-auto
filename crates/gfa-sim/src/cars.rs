@@ -19,34 +19,37 @@ use gfa_formats::style::CarInfo;
 pub const REACH: i32 = 48;
 /// How close the walker may come to a car's body, in px.
 pub const PED_CAR_MARGIN: i32 = 3;
-/// Get-in steps and ticks per step: ped frames 26 26 26 25 25 29..33.
-pub const ENTER_SEQ: [u16; 10] = [26, 26, 26, 25, 25, 29, 30, 31, 32, 33];
+/// Get-in steps and ticks per step: ped frames 26 26 27 27 25 29..33.
+pub const ENTER_SEQ: [u16; 10] = [26, 26, 27, 27, 25, 29, 30, 31, 32, 33];
 pub const ENTER_TICKS: i32 = 4;
-/// Get-out: ped frames 16..24, four ticks each.
+/// Get-out: ped frames 16..23, four ticks each.
 pub const EXIT_FIRST: u16 = 16;
-pub const EXIT_FRAMES: i32 = 9;
+pub const EXIT_FRAMES: i32 = 8;
 pub const EXIT_TICKS: i32 = 4;
-/// A bike: mount 80..83, ride 84, dismount 85..88.
-pub const BIKE_ENTER_FIRST: u16 = 80;
+/// A bike: mount 81..83, ride 84, dismount 86..88.
+pub const BIKE_ENTER_FIRST: u16 = 81;
 pub const BIKE_SIT: u16 = 84;
 /// A driver seen in a convertible.
 pub const SIT_IN_CAR: u16 = 97;
-pub const BIKE_EXIT_FIRST: u16 = 85;
-pub const BIKE_FRAMES: i32 = 4;
-/// Along and across offsets from the hinge through the nine exit steps.
-const EXIT_ALONG: [i64; 9] = [0, 0, 0, 0, 0, -2, -2, -2, -2];
-const EXIT_LAT: [i64; 9] = [-2, -2, -2, -1, 1, 0, 0, 0, 1];
+pub const BIKE_EXIT_FIRST: u16 = 86;
+pub const BIKE_FRAMES: i32 = 3;
+/// Along and across offsets from the hinge through the eight exit steps.
+const EXIT_ALONG: [i64; 8] = [0, 0, -1, -1, -1, -2, -2, -2];
+const EXIT_LAT: [i64; 8] = [1, 2, 2, 2, 3, 3, 3, 3];
 /// The jump: lift and gravity a tick, and the height cap (five blocks).
 const LIFT: i64 = 1 << 16;
 const GRAVITY: i64 = 1 << 16;
 const Z_MAX: i64 = 160 << 16;
 /// The vault: a state lasts four ticks (the get-in's clock), he may spend
-/// at most 15 states on a roof before he is put down, and a vehicle must
-/// stand lower than 20 (the car table's `vert`: 10 for a saloon, 24 for a
-/// bus) to be vaulted rather than slid under.
+/// at most 30 states on a roof (enough for a bus lengthways) before he is
+/// put down, and a vehicle must stand lower than 20 (the car table's
+/// `vert`: 10 for a saloon, 24 for a bus) to be vaulted rather than slid
+/// under.
 pub const VAULT_TICKS: i32 = 4;
-pub const VAULT_HOLD_MAX: i32 = 15;
+pub const VAULT_HOLD_MAX: i32 = 30;
 pub const VAULT_MAX_VERT: i16 = 20;
+/// Maximum ticks spent sliding under a tall vehicle.
+pub const SLIDE_MAX_TICKS: i32 = 80;
 /// Damage at which a car is a write-off, and how long it then burns.
 pub const WRECKED: i32 = 100;
 pub const FUSE: i32 = 120;
@@ -63,8 +66,8 @@ pub const DELTA_WINDSCREEN: u32 = 10;
 pub const DAMAGE_MASK: u32 = 0x3f | (1 << DELTA_WINDSCREEN);
 /// The door's four opening deltas start here.
 pub const DELTA_DOOR: u32 = 6;
-/// The door's frame through the nine exit steps (0 shut, 1..4 opening).
-const EXIT_DOOR: [u32; 9] = [2, 3, 4, 4, 4, 3, 2, 1, 0];
+/// The door's frame through the eight exit steps (0 shut, 1..4 opening).
+const EXIT_DOOR: [u32; 8] = [1, 2, 3, 4, 4, 4, 3, 2];
 /// How long the door takes to open and close on the way in, in ticks.
 pub const DOOR_TICKS: i32 = 40;
 /// The get-in tick at which the door is fully open: a driver is pulled
@@ -72,20 +75,30 @@ pub const DOOR_TICKS: i32 = 40;
 pub const DOOR_OPEN: i32 = 20;
 
 /// The door delta `tick` ticks into the get-in, if it is open: four frames
-/// opening and three closing, five ticks each (AmiGTA1 `door_delta`). It is
-/// still closing for a moment after the player is seated.
+/// opening (`d1..d3` 4 ticks each, `d4` 12 ticks) and three closing (4 ticks
+/// each), matching `GTA8.EXE`. Still closing briefly after sitting down.
 pub fn door_delta(tick: i32) -> Option<u32> {
-    let f = tick / 5;
-    if f <= 0 || f >= 8 {
-        return None;
-    }
-    let f = if f > 4 { 8 - f } else { f } as u32;
+    let f = match tick {
+        2..6 => 1,
+        6..10 => 2,
+        10..14 => 3,
+        14..26 => 4,
+        26..30 => 3,
+        30..34 => 2,
+        34..38 => 1,
+        _ => return None,
+    };
     Some(DELTA_DOOR + f - 1)
 }
 
-/// The door delta at exit step `step`, if it is open.
-pub fn exit_door_delta(step: i32) -> Option<u32> {
-    match EXIT_DOOR[step.clamp(0, 8) as usize] {
+/// The door delta at exit `step` and within-step `tick`, if open.
+pub fn exit_door_delta(step: i32, tick: i32) -> Option<u32> {
+    let f = if step == 7 && tick >= EXIT_TICKS / 2 {
+        1
+    } else {
+        EXIT_DOOR[step.clamp(0, 7) as usize]
+    };
+    match f {
         0 => None,
         f => Some(DELTA_DOOR + f - 1),
     }
@@ -253,27 +266,84 @@ pub fn far_side(
     Some((point, head))
 }
 
+/// Getting into a tall (non-vaultable) vehicle from the far flank: return
+/// two-waypoint routes round the nose and round the tail, each paired with
+/// its longitudinal travel cost in world px, or `None` when the player is
+/// already on the door side or past the car's ends.
+#[allow(clippy::type_complexity)]
+pub fn far_side_around(
+    ci: &CarInfo,
+    car: (i64, i64, i32),
+    player: (i64, i64),
+    door: (i64, i64),
+) -> Option<([(i64, i64); 2], i64, [(i64, i64); 2], i64)> {
+    let (cx, cy, face) = car;
+    let (fx, fy) = (i64::from(sin(face)), -i64::from(cos(face)));
+    let (rx, ry) = (i64::from(cos(face)), i64::from(sin(face)));
+    let local = |x: i64, y: i64| {
+        let (dx, dy) = ((x - cx) >> 16, (y - cy) >> 16);
+        ((dx * fx + dy * fy) >> 14, (dx * rx + dy * ry) >> 14)
+    };
+    let (along_p, across_p) = local(player.0, player.1);
+    let (along_d, across_d) = local(door.0, door.1);
+    let (hl, hw) = half_size(ci);
+    let (hl, hw) = (i64::from(hl), i64::from(hw));
+    let opposite = (across_p < 0) != (across_d < 0);
+    if !opposite || along_p.abs() > hl + 4 {
+        return None;
+    }
+    let end_along = hl + i64::from(PED_CAR_MARGIN) + 3;
+    let near_across = if across_p < 0 { -(hw + 4) } else { hw + 4 };
+    let door_across = door_side(ci) * (hw + 4);
+    let to_world = |al: i64, ac: i64| {
+        (
+            cx + (fx * al + rx * ac) * 4,
+            cy + (fy * al + ry * ac) * 4,
+        )
+    };
+    let nose = [
+        to_world(end_along, near_across),
+        to_world(end_along, door_across),
+    ];
+    let nose_cost = (end_along - along_p).abs() + (end_along - along_d).abs();
+    let tail = [
+        to_world(-end_along, near_across),
+        to_world(-end_along, door_across),
+    ];
+    let tail_cost = (-end_along - along_p).abs() + (-end_along - along_d).abs();
+    Some((nose, nose_cost, tail, tail_cost))
+}
+
 /// Where the player stands to get in: level with the hinge along the body
-/// (the door record's `rpx`, halved), half a body width plus 5 px out on the
-/// door side (AmiGTA1 `car_door_point`).
+/// (the door record's `rpy`, halved, which is longitudinal on disk) and
+/// outside the doorway on the door flank (`|rpx| / 2`, or width/2 + offset
+/// when `rpx` is zero or on a bike).
 pub fn door_point(ci: &CarInfo, cx: i64, cy: i64, face: i32) -> (i64, i64) {
     let (fx, fy) = (i64::from(sin(face)), -i64::from(cos(face)));
     let (rx, ry) = (i64::from(cos(face)), i64::from(sin(face)));
-    let along = ci.doors.first().map_or(0, |d| i64::from(d.rpx) / 2);
-    let out = i64::from(ci.width >> 1) / 2 + 5;
-    let across = if ci.doors.is_empty() { out } else { -out };
+    let along = ci.doors.first().map_or(0, |d| i64::from(d.rpy) / 2);
+    let out = match ci
+        .doors
+        .first()
+        .filter(|d| d.rpx != 0 && ci.vtype != CLASS_BIKE)
+    {
+        Some(d) => i64::from(d.rpx.abs()) / 2,
+        None => i64::from(ci.width >> 1) / 2 + if ci.vtype == CLASS_BIKE { 3 } else { 4 },
+    };
+    let across = door_side(ci) * out;
     (
         cx + (fx * along + rx * across) * 4,
         cy + (fy * along + ry * across) * 4,
     )
 }
 
-/// A point near the door: `along` px from the hinge along the body, `lat`
-/// px outside the body's edge on the door side (AmiGTA1 `car_door_pos`).
+/// A point near the door: `along` px from the hinge along the body
+/// (`d.rpy / 2` longitudinal), `lat` px outside the body's edge on the
+/// door side (AmiGTA1 `car_door_pos`).
 pub fn door_pos(ci: &CarInfo, cx: i64, cy: i64, face: i32, along: i64, lat: i64) -> (i64, i64) {
     let (fx, fy) = (i64::from(sin(face)), -i64::from(cos(face)));
     let (rx, ry) = (i64::from(cos(face)), i64::from(sin(face)));
-    let along = ci.doors.first().map_or(0, |d| i64::from(d.rpx) / 2) + along;
+    let along = ci.doors.first().map_or(0, |d| i64::from(d.rpy) / 2) + along;
     let across = door_side(ci) * (i64::from(ci.width >> 1) / 2 + lat);
     (
         cx + (fx * along + rx * across) * 4,

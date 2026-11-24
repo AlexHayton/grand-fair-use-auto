@@ -85,9 +85,9 @@ fn saloon() -> CarInfo {
         fast_change: 0,
         doors: vec![CarDoor {
             rpy: -6,
-            rpx: 0,
-            object: 0,
-            delta: 6,
+            rpx: 24,
+            object: 9,
+            delta: 7,
         }],
     }
 }
@@ -95,9 +95,16 @@ fn saloon() -> CarInfo {
 /// A bus: as tall as the table's buses (24), too tall to vault.
 fn bus() -> CarInfo {
     CarInfo {
+        width: 40,
         length: 120,
         vert: 24,
         model: 1,
+        doors: vec![CarDoor {
+            rpy: 50,
+            rpx: 27,
+            object: 9,
+            delta: 7,
+        }],
         ..saloon()
     }
 }
@@ -406,11 +413,11 @@ fn a_blocked_door_puts_him_out_over_the_roof() {
     w.put_in_car(0, 15, 15, 128);
     // Another car hard against the door (east) flank.
     w.park(0, 16, 0, 128);
-    let x = i64::from(w.player.x);
+    let (x, y) = (i64::from(w.player.x), i64::from(w.player.y));
     w.step(press(Buttons::ENTER));
     assert!(log_has(
         &mut w,
-        "car: door blocked by a car - over the roof, heading 192"
+        "car: door blocked by a car - over the roof, heading 128"
     ));
     assert!(matches!(w.doing, Doing::Vaulting(_)));
     assert_eq!(w.traffic.standing().count(), 2, "his car is parked first");
@@ -419,13 +426,13 @@ fn a_blocked_door_puts_him_out_over_the_roof() {
     assert_eq!(w.doing, Doing::OnFoot);
     assert!(log_has(&mut w, "player: landed after state"));
     assert!(
-        i64::from(w.player.x) < x - (10 << 16),
-        "down on the west side, clear of the car"
+        i64::from(w.player.y) > y + (15 << 16),
+        "down ahead of the front bumper, clear of the car"
     );
     // Back on his feet with the controls.
-    let y = w.player.y;
+    let y0 = w.player.y;
     run(&mut w, Buttons::UP, 20);
-    assert!(w.player.x != x as i32 || w.player.y != y);
+    assert!(w.player.x != x as i32 || w.player.y != y0);
 }
 
 #[test]
@@ -1356,4 +1363,319 @@ fn weapon_fire_rates_projectile_speed_and_splat_lifetime_match_original() {
         (9..=13).contains(&splat_ticks),
         "splat visible for {splat_ticks} sim ticks (expected ~10-11 = 5 @ 23.333 Hz)"
     );
+}
+
+#[test]
+fn door_geometry_and_enter_exit_sequences() {
+    use gfa_sim::cars::{ENTER_SEQ, PED_CAR_MARGIN, door_point};
+    use gfa_sim::vehicle::CLASS_BIKE;
+
+    let sal = saloon();
+    let coach = bus();
+    // Coach SOUTH (128): front cab door is +25 world px south (`d.rpy / 2`),
+    // +13 east (`d.rpx / 2`).
+    let (dx, dy) = door_point(&coach, 0, 0, 128);
+    assert_eq!((dx >> 16, dy >> 16), (13, 25));
+    let (sx, sy) = door_point(&sal, 0, 0, 128);
+    assert_eq!((sx >> 16, sy >> 16), (12, -3));
+
+    // Car enter & exit on Coach: cab station, ENTER_SEQ with 27, face - 32 turn,
+    // player drawn under car, exit 16..=23 clear of body.
+    let mut b = CmpBuilder::new(1);
+    street(&mut b, 5..25, 5..25);
+    let mut w = world(&b, south(15, 15));
+    w.peds.clear();
+    w.park(1, -20, -25, 128);
+    let coach_y = standing(&w, 0).y;
+    let cab_y = coach_y + (25 << 16);
+    w.step(press(Buttons::ENTER));
+    let mut frames = Vec::new();
+    let mut saw_under = false;
+    let mut saw_pull_angle = false;
+    for _ in 0..100 {
+        w.step(press(Buttons::NONE));
+        if w.doing == Doing::Driving {
+            break;
+        }
+        if let Doing::Entering(e) = w.doing
+            && e.walk_t >= e.walk_len
+        {
+            saw_under |= w.player_under_car();
+            let f = w.player_frame().unwrap();
+            if frames.last() != Some(&f) {
+                frames.push(f);
+            }
+            // Must stay by the front cab doorway rather than sliding back to cy.
+            assert!(
+                (i64::from(w.player.y) - cab_y).abs() <= (3 << 16),
+                "player dragged along Coach body: y={}, cab={cab_y}",
+                w.player.y >> 16
+            );
+            if f == 27 {
+                saw_pull_angle |= w.player.angle == 96;
+            }
+        } else {
+            assert!(!w.player_under_car());
+        }
+    }
+    assert_eq!(w.doing, Doing::Driving);
+    assert!(saw_under, "car must draw over entering player");
+    assert!(saw_pull_angle, "angle turns face - 32 at door pull (27)");
+    assert_eq!(frames, vec![26, 27, 25, 29, 30, 31, 32, 33]);
+    assert!(ENTER_SEQ.contains(&27));
+
+    w.step(press(Buttons::ENTER));
+    let mut exit_frames = Vec::new();
+    let mut exit_under = false;
+    for _ in 0..50 {
+        w.step(press(Buttons::NONE));
+        if w.doing == Doing::OnFoot {
+            break;
+        }
+        exit_under |= w.player_under_car();
+        let f = w.player_frame().unwrap();
+        if exit_frames.last() != Some(&f) {
+            exit_frames.push(f);
+        }
+    }
+    assert_eq!(w.doing, Doing::OnFoot);
+    assert!(exit_under);
+    assert_eq!(exit_frames, vec![16, 17, 18, 19, 20, 21, 22, 23]);
+    assert_eq!(w.player.angle, 96);
+    assert!(
+        w.traffic
+            .car_at(
+                &w.cars,
+                w.player.x.into(),
+                w.player.y.into(),
+                w.player.layer,
+                PED_CAR_MARGIN,
+            )
+            .is_none(),
+        "exited clear of car margin"
+    );
+
+    // Bike mount (81..=83) and dismount (86..=88 facing face - 64 immediately),
+    // never drawn under the bike.
+    let bike = CarInfo {
+        width: 16,
+        length: 38,
+        vert: 14,
+        vtype: CLASS_BIKE,
+        model: 2,
+        doors: vec![CarDoor {
+            rpy: 2,
+            rpx: 8,
+            object: 0,
+            delta: 0,
+        }],
+        ..saloon()
+    };
+    let cmp = Cmp::parse(&b.build()).unwrap();
+    let mut bw = World::new(
+        SimMap::new(cmp, WallTiles::gta(1)),
+        vec![sal, coach, bike],
+        SimView::GAME,
+        south(15, 15),
+    );
+    bw.drain_log();
+    bw.peds.clear();
+    bw.park(2, 0, 12, 64);
+    bw.step(press(Buttons::ENTER));
+    let mut b_in = Vec::new();
+    for _ in 0..50 {
+        bw.step(press(Buttons::NONE));
+        if bw.doing == Doing::Driving {
+            break;
+        }
+        assert!(!bw.player_under_car());
+        if let Doing::Entering(e) = bw.doing
+            && e.walk_t >= e.walk_len
+        {
+            let f = bw.player_frame().unwrap();
+            if b_in.last() != Some(&f) {
+                b_in.push(f);
+            }
+        }
+    }
+    assert_eq!(b_in, vec![81, 82, 83]);
+    assert_eq!(bw.player_frame(), Some(84));
+
+    bw.step(press(Buttons::ENTER));
+    let mut b_out = Vec::new();
+    for _ in 0..30 {
+        bw.step(press(Buttons::NONE));
+        if bw.doing == Doing::OnFoot {
+            break;
+        }
+        assert!(!bw.player_under_car());
+        assert_eq!(bw.player.angle, 0, "bike dismount faces face - 64");
+        let f = bw.player_frame().unwrap();
+        if b_out.last() != Some(&f) {
+            b_out.push(f);
+        }
+    }
+    assert_eq!(bw.doing, Doing::OnFoot);
+    assert_eq!(b_out, vec![86, 87, 88]);
+    assert_eq!(bw.player.angle, 0);
+}
+
+#[test]
+fn far_side_enter_on_bus_walks_around_body() {
+    let mut b = CmpBuilder::new(1);
+    street(&mut b, 5..25, 5..25);
+    let mut w = world(&b, south(15, 15));
+    w.peds.clear();
+    // Coach facing SOUTH 20 px east: player is on the non-door (west) flank.
+    w.park(1, 20, 0, 128);
+    w.step(press(Buttons::ENTER));
+    assert!(matches!(w.doing, Doing::Entering(e) if e.over.is_none() && e.via_n == 2));
+    for _ in 0..160 {
+        w.step(press(Buttons::NONE));
+        if w.doing == Doing::Driving {
+            break;
+        }
+        if let Doing::Entering(e) = w.doing {
+            let ci = &w.cars[e.car.model];
+            let (hl, hw) = gfa_sim::cars::half_size(ci);
+            assert!(
+                !gfa_sim::cars::body_hit(
+                    e.car.x.into(),
+                    e.car.y.into(),
+                    e.car.face,
+                    hl,
+                    hw,
+                    w.player.x.into(),
+                    w.player.y.into(),
+                    0,
+                ),
+                "player clipped through Coach body while walking round"
+            );
+        }
+    }
+    assert_eq!(w.doing, Doing::Driving);
+}
+
+#[test]
+fn jump_at_bus_from_outside_slides_under() {
+    let mut b = CmpBuilder::new(1);
+    street(&mut b, 5..25, 5..25);
+    let mut w = world(&b, south(15, 15));
+    w.peds.clear();
+    w.player.angle = 64;
+    // Coach facing SOUTH, west flank 26 px east of him (center +26, hw=10 -> flank at +16).
+    w.park(1, 26, 0, 128);
+    let bus = standing(&w, 0);
+    run(&mut w, Buttons::UP, 20);
+    assert!(i64::from(w.player.x) < bus.x - (10 << 16), "held outside west flank");
+    w.step(press(Buttons::UP.with(Buttons::HANDBRAKE, true)));
+    assert!(matches!(w.doing, Doing::Sliding(_)));
+    assert_eq!(w.player_frame(), Some(41));
+    assert!(w.player_under_car());
+    run(&mut w, Buttons::NONE, 80);
+    assert_eq!(w.doing, Doing::OnFoot);
+    assert!(log_has(&mut w, "player: out from under"));
+    assert!(
+        i64::from(w.player.x) > bus.x + (10 << 16),
+        "slid all the way out onto the east flank"
+    );
+}
+
+#[test]
+fn flush_wall_enter_refused_and_vault_turns_off_roof() {
+    let mut b = CmpBuilder::new(1);
+    street(&mut b, 5..25, 5..25);
+    for y in 5..25 {
+        b.set(16, y, 2, block(BUILDING));
+    }
+    let mut w = world(&b, south(15, 15));
+    w.peds.clear();
+    // Flush east against block 16 (wall at x = 512 px); saloon hw = 7 -> center at +9 px = 505 px.
+    w.park(0, 9, 0, 128);
+    let car_y = standing(&w, 0).y;
+    w.step(press(Buttons::ENTER));
+    assert_eq!(w.doing, Doing::OnFoot);
+    assert!(log_has(&mut w, "door blocked by a building - cannot get in"));
+    assert_eq!(w.traffic.standing().count(), 1);
+
+    // Run east from the clear west side and press SPACE: vault turns off north onto clear road.
+    w.player.x = 488 << 16;
+    w.player.angle = 64;
+    run(&mut w, Buttons::UP, 10);
+    w.step(press(Buttons::UP.with(Buttons::HANDBRAKE, true)));
+    assert!(matches!(w.doing, Doing::Vaulting(_)));
+    run(&mut w, Buttons::NONE, 80);
+    assert_eq!(w.doing, Doing::OnFoot);
+    let (bx, by) = w.player.block();
+    assert!(bx < 16, "never dropped into east building column {bx}");
+    assert_ne!(w.map.nav_ground(bx, by, w.player.layer), BUILDING as u8 >> 4);
+    assert!(
+        i64::from(w.player.y) < car_y - (10 << 16),
+        "turned north along roof off the wall edge"
+    );
+}
+
+#[test]
+fn blocked_door_exit_forward_on_north_car_bus_and_l_corner() {
+    // 1. NORTH saloon (face = 0): door on west flank blocked -> vaults straight NORTH (heading 0).
+    let mut b = CmpBuilder::new(1);
+    street(&mut b, 5..25, 5..25);
+    let mut w = world(&b, south(15, 15));
+    w.peds.clear();
+    w.put_in_car(0, 15, 15, 0);
+    w.park(0, -16, 0, 0);
+    let y0 = i64::from(w.player.y);
+    w.step(press(Buttons::ENTER));
+    assert!(log_has(
+        &mut w,
+        "car: door blocked by a car - over the roof, heading 0"
+    ));
+    run(&mut w, Buttons::NONE, 80);
+    assert_eq!(w.doing, Doing::OnFoot);
+    assert!(i64::from(w.player.y) < y0 - (15 << 16));
+
+    // 2. SOUTH Coach (model 1, length = 120): door blocked -> clears full roof along heading 128.
+    let mut bw = world(&b, south(15, 15));
+    bw.peds.clear();
+    bw.put_in_car(1, 15, 15, 128);
+    bw.park(0, 17, 0, 128);
+    let by0 = i64::from(bw.player.y);
+    bw.step(press(Buttons::ENTER));
+    assert!(log_has(
+        &mut bw,
+        "car: door blocked by a car - over the roof, heading 128"
+    ));
+    run(&mut bw, Buttons::NONE, 100);
+    assert_eq!(bw.doing, Doing::OnFoot);
+    assert!(
+        i64::from(bw.player.y) > by0 + (28 << 16),
+        "cleared front bumper of 120-px Coach instead of stopping mid-roof"
+    );
+
+    // 3. SOUTH saloon pinned flush in an L-corner (walls at x = 16 and y = 16).
+    let mut lb = CmpBuilder::new(1);
+    street(&mut lb, 5..25, 5..25);
+    for y in 5..25 {
+        lb.set(16, y, 2, block(BUILDING));
+    }
+    for x in 5..25 {
+        lb.set(x, 16, 2, block(BUILDING));
+    }
+    let mut lw = world(&lb, south(15, 15));
+    lw.peds.clear();
+    lw.put_in_car(0, 15, 15, 128);
+    {
+        let v = &mut lw.driven.as_mut().unwrap().veh;
+        v.x = 505 << 16;
+        v.ox = 505 << 16;
+        v.y = 497 << 16;
+        v.oy = 497 << 16;
+    }
+    lw.step(press(Buttons::ENTER));
+    assert!(matches!(lw.doing, Doing::Vaulting(_)));
+    run(&mut lw, Buttons::NONE, 100);
+    assert_eq!(lw.doing, Doing::OnFoot);
+    let (bx, by) = lw.player.block();
+    assert!(bx < 16 && by < 16, "exited onto clear road at ({bx},{by})");
+    assert_ne!(lw.map.nav_ground(bx, by, lw.player.layer), BUILDING as u8 >> 4);
 }

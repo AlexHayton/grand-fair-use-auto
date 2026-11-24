@@ -1,26 +1,19 @@
-# Coach blocked-door exit test on vault overlay:
-# Enter Coach (west at 124,128 facing SOUTH), reverse slightly NORTH to clear Bulldog #1,
-# turn SOUTH-EAST and pull flush along x=130 building wall facing SOUTH, stop, tap Enter.
+# Coach blocked-door exit test on blocked_exit overlay:
+# Player starts at (126,127) facing WEST beside Coach's open front-east cab door,
+# enters Coach, drives dead straight SOUTH (zero steering) alongside the x=126
+# building wall (y=128..135), stops completely, and presses Enter to test exit.
 3500 tap esc 80
 +2000 tap enter 80
 +3000 tap enter 80
 +1500 tap enter 80
 
-17000 down left
-+512 up left
-+100 down up
-+1700 up up
-+300 burst _skip_warm 1 0
+17000 shot start_bus
 +50 tap enter 70
-+1700 down down
-+700 up down
-+100 down up
-+50 down left
-+450 up left
-+200 down right
-+500 up right
-+900 up up
-+600 shot pinned_bus
++2100 down up
++1200 up up
++50 down down
++300 up down
++1000 shot pinned_bus
 +100 burst blocked_bus_exit 140 0
 +30 tap enter 70
 +2100 shot after_blocked_bus

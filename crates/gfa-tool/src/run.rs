@@ -224,6 +224,11 @@ pub fn world_sprites(
             ));
         }
     }
+    let player_under = world.player_under_car();
+    if player_under && let Some(frame) = world.player_frame() {
+        let p = &world.player;
+        out.extend(scene.ped_sprite(frame, 0, world.player_pos(), p.draw_angle()));
+    }
     for c in world.standing_cars() {
         scene.push_car(&mut out, c.model, c.remap, c.pos, c.face + 128, c.deltas);
     }
@@ -287,7 +292,7 @@ pub fn world_sprites(
             .ground_z(c.body.0 as i32, c.body.1 as i32, c.layer);
         scene.push_carriage(&mut out, &c, z);
     }
-    if let Some(frame) = world.player_frame() {
+    if !player_under && let Some(frame) = world.player_frame() {
         let p = &world.player;
         out.extend(scene.ped_sprite(frame, 0, world.player_pos(), p.draw_angle()));
     }

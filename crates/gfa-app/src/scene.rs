@@ -154,6 +154,10 @@ impl Scene {
                 out.extend(flames(style, &self.atlas, f, pos));
             }
         }
+        let player_under = world.player_under_car();
+        if player_under && let Some((pose, f)) = frame.player {
+            out.extend(self.ped_sprite(f, pose.pos.to_array(), pose.draw_angle));
+        }
         for c in world.standing_cars() {
             let angle = sim_angle(c.face + 128);
             push_car(
@@ -252,7 +256,7 @@ impl Scene {
                 c.last,
             );
         }
-        if let Some((pose, f)) = frame.player {
+        if !player_under && let Some((pose, f)) = frame.player {
             out.extend(self.ped_sprite(f, pose.pos.to_array(), pose.draw_angle));
         }
         // In the air, over everything: the shots, the fires and the

@@ -259,14 +259,73 @@ fn build_vault() -> Result<GeneratedOverlay> {
     })
 }
 
+fn build_blocked_exit() -> Result<GeneratedOverlay> {
+    let mut b = fill_arena(|x, y| {
+        if ((x == 130 || x == 126) && (128..=135).contains(&y))
+            || (x == 129 && y == 132)
+            || (x == 122 && (123..=127).contains(&y))
+        {
+            Cell::Building
+        } else if ((123..=125).contains(&x) || (127..=129).contains(&x)) && (123..=135).contains(&y)
+        {
+            Cell::Road
+        } else {
+            Cell::Pavement
+        }
+    });
+    b.object(StartupObject {
+        x: 130 * 64 - 19,
+        y: 126 * 64 + 32,
+        z: 255,
+        kind: 31,
+        remap: 129,
+        rotation: 0,
+        pitch: 0,
+        roll: 0,
+    })
+    .object(StartupObject {
+        x: 126 * 64 - 22,
+        y: 126 * 64 + 16,
+        z: 255,
+        kind: 9,
+        remap: 129,
+        rotation: 0,
+        pitch: 0,
+        roll: 0,
+    })
+    .object(StartupObject {
+        x: 123 * 64 + 19,
+        y: 128 * 64 + 32,
+        z: 255,
+        kind: 31,
+        remap: 129,
+        rotation: 512,
+        pitch: 0,
+        roll: 0,
+    });
+
+    let (cmp_bytes, cmp) = finish_cmp(&mut b, "Probe Blocked Exit")?;
+    let ini_bytes = build_mission_ini(
+        "Probe Blocked Exit",
+        &["1 1 (126,127,4) PLAYER 1 768"],
+    )?;
+
+    Ok(GeneratedOverlay {
+        cmp_bytes,
+        ini_bytes,
+        cmp,
+    })
+}
+
 pub fn probe_overlay(preset: &str, out: &Path) -> Result<()> {
     let generated = match preset {
         "arena" => build_arena()?,
         "shooting" => build_shooting()?,
         "getin" => build_getin()?,
         "vault" => build_vault()?,
+        "blocked_exit" => build_blocked_exit()?,
         _ => bail!(
-            "unknown probe overlay preset {preset:?} (available: arena, shooting, getin, vault)"
+            "unknown probe overlay preset {preset:?} (available: arena, shooting, getin, vault, blocked_exit)"
         ),
     };
 
@@ -362,5 +421,19 @@ mod tests {
         assert_eq!(start.bx, 127);
         assert_eq!(start.by, 128);
         assert_eq!(start.angle, Some(64));
+    }
+
+    #[test]
+    fn blocked_exit_preset_is_valid_and_compact() {
+        let g = build_blocked_exit().unwrap();
+        let sections = mission::parse(&g.ini_bytes).unwrap();
+        assert!(g.cmp.blocks.len() < 20, "blocks: {}", g.cmp.blocks.len());
+        assert_eq!(sections.len(), 1);
+        assert_eq!(sections[0].map().as_deref(), Some("test.cmp"));
+        assert_eq!(g.cmp.objects.len(), 3);
+        let start = Start::from_section(&sections[0]).unwrap();
+        assert_eq!(start.bx, 126);
+        assert_eq!(start.by, 127);
+        assert_eq!(start.angle, Some(192));
     }
 }
