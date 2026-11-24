@@ -1,0 +1,19 @@
+# Test 2a (re-timed): run east into flush-wall Bulldog #1 (contact occurs ~18444 ms),
+# hold up against its flank while tapping space at 18550, then test if walking/backing out works.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+17000 shot start
++100 down up
++1200 burst vault_jump 120 0
++250 tap space 90
++500 up up
++200 shot landed
++100 down up
++400 up up
++150 down down
++400 up down
++100 shot after_walk_attempt
++100 quit

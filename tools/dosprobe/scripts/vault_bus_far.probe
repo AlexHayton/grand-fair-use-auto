@@ -1,0 +1,41 @@
+# Test 2b extra:
+# 1) Walk right up against Bus east flank and press Space WHILE touching it (slide under vs 0x92).
+# 2) Walk around the north end of the Bus to its WEST (far) flank and press Enter.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+# Turn 180 west, walk 1700 ms until touching Bus east flank
+17000 down left
++512 up left
++100 down up
++1700 up up
++150 shot flush_at_bus_east
+# Press Space while pushing up into Bus east flank
++100 down up
++100 burst bus_space_touch 80 0
++50 tap space 90
++500 up up
++200 shot after_bus_space
+
+# Walk around north of Bus to its WEST flank: turn N, go 2.5 blk, turn W, go 1.5 blk, turn S, go 2.5 blk, turn E
++100 down right
++256 up right
++100 down up
++1350 up up
++100 down left
++256 up left
++100 down up
++950 up up
++100 down left
++256 up left
++100 down up
++1350 up up
++100 down left
++256 up left
++150 shot at_bus_west
++100 burst bus_far_enter 150 0
++30 tap enter 70
++2300 shot after_bus_far
++100 quit

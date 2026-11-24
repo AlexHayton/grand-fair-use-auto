@@ -554,8 +554,19 @@ fn style(src: &dyn AssetSource, path: &str, cars: bool) -> Result<()> {
     }
     if cars {
         for (i, c) in s.cars.iter().enumerate() {
+            let door_desc = if c.doors.is_empty() {
+                String::new()
+            } else {
+                let items = c
+                    .doors
+                    .iter()
+                    .map(|d| format!("({},{},{},{})", d.rpx, d.rpy, d.object, d.delta))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                format!(" [{items}]")
+            };
             println!(
-                "  car {i:2}: model {:3} {:<10} sprite {:4} {}x{}x{} max {:3} mass {:#x} thrust {:#x} doors {}",
+                "  car {i:2}: model {:3} {:<10} sprite {:4} {}x{}x{} max {:3} mass {:#x} thrust {:#x} doors {}{door_desc}",
                 c.model,
                 c.class().map_or("?", |k| k.name()),
                 s.car_sprite(c).map_or(-1, |i| i as i64),

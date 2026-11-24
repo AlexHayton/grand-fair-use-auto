@@ -1,0 +1,16 @@
+# Measure near-side car get-in and get-out frame-by-frame against Bulldog (31)
+# facing NORTH at (128,128) from player start (127,128) facing EAST.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+17000 shot start
++100 burst enter_near 140 0
++30 tap enter 70
+
+# Wait until burst finishes (~2000 ms) and door closes, then capture exit_near.
+19400 burst exit_near 110 0
++30 tap enter 70
++1800 shot after_exit_near
++100 quit

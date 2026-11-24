@@ -1,0 +1,18 @@
+# Test 2b: turn west toward Bus (model 9 at (124,128)), run at it and press Space (slide/shove),
+# then press Enter beside the Bus to observe tall-vehicle entry.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+17000 down left
++512 up left
++100 down up
++1050 burst slide_bus 120 0
++250 tap space 80
++450 up up
++200 shot after_slide
++200 burst bus_enter 140 0
++30 tap enter 70
++2100 shot after_bus_enter
++100 quit

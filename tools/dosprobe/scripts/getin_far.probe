@@ -1,0 +1,20 @@
+# Near-side get-in test on Bulldog #2 (PARKED 31 0 at (125,128)) from its EAST flank,
+# followed by driving forward briefly to confirm PARKED heading in GTA8.EXE.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+17000 down left
++512 up left
++100 shot facing_west
++100 down up
++720 up up
++150 shot at_b2_east
++100 burst enter_east 100 0
++30 tap enter 70
++1800 shot seated_east
++100 down up
++350 up up
++150 shot after_drive_b2
++100 quit

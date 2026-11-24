@@ -11,6 +11,8 @@ Cut install, containing `GTADATA/`.
 Status: early. See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for the
 roadmap, decision log and progress log.
 
+<a href="https://www.buymeacoffee.com/alexhaytong"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy me a coffee?" height="50"></a>
+
 ## Setup
 
 1. Install Rust (stable) with `rustup`. The `rust-toolchain.toml` adds the

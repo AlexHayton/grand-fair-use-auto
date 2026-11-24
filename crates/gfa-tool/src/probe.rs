@@ -3,17 +3,70 @@
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use gfa_formats::cmp::{Block, BlockPos, Cmp, CmpBuilder, District};
+use gfa_formats::cmp::{Block, BlockPos, Cmp, CmpBuilder, District, StartupObject};
 use gfa_formats::mission;
 
 const ROAD: u16 = 0x20;
 const PAVEMENT: u16 = 0x30;
 const BUILDING: u16 = 0x50;
 
+#[derive(Clone, Copy)]
+enum Cell {
+    Pavement,
+    Road,
+    Building,
+}
+
 struct GeneratedOverlay {
     cmp_bytes: Vec<u8>,
     ini_bytes: Vec<u8>,
     cmp: Cmp,
+}
+
+fn fill_arena(cell: impl Fn(u8, u8) -> Cell) -> CmpBuilder {
+    let mut b = CmpBuilder::new(1);
+    b.sample_number(0);
+
+    let floor_empty = Block::default();
+    let road_floor = Block {
+        faces: [0, 0, 0, 0, 1],
+        ..Block::default()
+    };
+    let pavement_floor = Block {
+        faces: [0, 0, 0, 0, 7],
+        ..Block::default()
+    };
+    let road = Block {
+        type_map: ROAD,
+        ..Block::default()
+    };
+    let pavement = Block {
+        type_map: PAVEMENT,
+        ..Block::default()
+    };
+    let building = Block {
+        type_map: BUILDING,
+        faces: [7, 7, 7, 7, 7],
+        ..Block::default()
+    };
+
+    for x in 104u8..152 {
+        for y in 104u8..152 {
+            let perimeter = x == 104 || x == 151 || y == 104 || y == 151;
+            let kind = if perimeter {
+                Cell::Building
+            } else {
+                cell(x, y)
+            };
+            b.set(x, y, 0, floor_empty);
+            match kind {
+                Cell::Building => b.set(x, y, 1, pavement_floor).set(x, y, 2, building),
+                Cell::Road => b.set(x, y, 1, road_floor).set(x, y, 2, road),
+                Cell::Pavement => b.set(x, y, 1, pavement_floor).set(x, y, 2, pavement),
+            };
+        }
+    }
+    b
 }
 
 fn finish_cmp(b: &mut CmpBuilder, district_name: &str) -> Result<(Vec<u8>, Cmp)> {
@@ -71,47 +124,17 @@ fn build_mission_ini(title: &str, decls: &[&str]) -> Result<Vec<u8>> {
 
 /// Built synthetic overlay files in memory.
 fn build_arena() -> Result<GeneratedOverlay> {
-    let mut b = CmpBuilder::new(1);
-    b.sample_number(0);
-
-    let floor_empty = Block::default();
-    let road_floor = Block {
-        faces: [0, 0, 0, 0, 1],
-        ..Block::default()
-    };
-    let pavement_floor = Block {
-        faces: [0, 0, 0, 0, 7],
-        ..Block::default()
-    };
-    let road = Block {
-        type_map: ROAD,
-        ..Block::default()
-    };
-    let pavement = Block {
-        type_map: PAVEMENT,
-        ..Block::default()
-    };
-    let building = Block {
-        type_map: BUILDING,
-        faces: [7, 7, 7, 7, 7],
-        ..Block::default()
-    };
-
-    for x in 104u8..152 {
-        for y in 104u8..152 {
-            let perimeter = x == 104 || x == 151 || y == 104 || y == 151;
-            let landmark = (132..134).contains(&x) && (124..126).contains(&y);
-            let on_road = (126..131).contains(&x) || (126..131).contains(&y);
-            b.set(x, y, 0, floor_empty);
-            if perimeter || landmark {
-                b.set(x, y, 1, pavement_floor).set(x, y, 2, building);
-            } else if on_road {
-                b.set(x, y, 1, road_floor).set(x, y, 2, road);
-            } else {
-                b.set(x, y, 1, pavement_floor).set(x, y, 2, pavement);
-            }
+    let mut b = fill_arena(|x, y| {
+        let landmark = (132..134).contains(&x) && (124..126).contains(&y);
+        let on_road = (126..131).contains(&x) || (126..131).contains(&y);
+        if landmark {
+            Cell::Building
+        } else if on_road {
+            Cell::Road
+        } else {
+            Cell::Pavement
         }
-    }
+    });
 
     let (cmp_bytes, cmp) = finish_cmp(&mut b, "Probe Arena")?;
     let ini_bytes = build_mission_ini(
@@ -130,47 +153,17 @@ fn build_arena() -> Result<GeneratedOverlay> {
 }
 
 fn build_shooting() -> Result<GeneratedOverlay> {
-    let mut b = CmpBuilder::new(1);
-    b.sample_number(0);
-
-    let floor_empty = Block::default();
-    let road_floor = Block {
-        faces: [0, 0, 0, 0, 1],
-        ..Block::default()
-    };
-    let pavement_floor = Block {
-        faces: [0, 0, 0, 0, 7],
-        ..Block::default()
-    };
-    let road = Block {
-        type_map: ROAD,
-        ..Block::default()
-    };
-    let pavement = Block {
-        type_map: PAVEMENT,
-        ..Block::default()
-    };
-    let building = Block {
-        type_map: BUILDING,
-        faces: [7, 7, 7, 7, 7],
-        ..Block::default()
-    };
-
-    for x in 104u8..152 {
-        for y in 104u8..152 {
-            let perimeter = x == 104 || x == 151 || y == 104 || y == 151;
-            let target_wall = x == 130 && (127..130).contains(&y);
-            let ruler_even = y == 126 && (120..132).contains(&x) && x.is_multiple_of(2);
-            b.set(x, y, 0, floor_empty);
-            if perimeter || target_wall {
-                b.set(x, y, 1, pavement_floor).set(x, y, 2, building);
-            } else if ruler_even {
-                b.set(x, y, 1, road_floor).set(x, y, 2, road);
-            } else {
-                b.set(x, y, 1, pavement_floor).set(x, y, 2, pavement);
-            }
+    let mut b = fill_arena(|x, y| {
+        let target_wall = x == 130 && (127..130).contains(&y);
+        let ruler_even = y == 126 && (120..132).contains(&x) && x.is_multiple_of(2);
+        if target_wall {
+            Cell::Building
+        } else if ruler_even {
+            Cell::Road
+        } else {
+            Cell::Pavement
         }
-    }
+    });
 
     let (cmp_bytes, cmp) = finish_cmp(&mut b, "Probe Shooting")?;
     let ini_bytes = build_mission_ini(
@@ -191,11 +184,90 @@ fn build_shooting() -> Result<GeneratedOverlay> {
     })
 }
 
+fn build_getin() -> Result<GeneratedOverlay> {
+    let mut b = fill_arena(|x, y| {
+        if (124..=130).contains(&x) && (124..=132).contains(&y) {
+            Cell::Road
+        } else {
+            Cell::Pavement
+        }
+    });
+
+    let (cmp_bytes, cmp) = finish_cmp(&mut b, "Probe Get-In")?;
+    let ini_bytes = build_mission_ini(
+        "Probe Get-In",
+        &[
+            "1 1 (128,128,4) PARKED 31 0",
+            "2 1 (125,128,4) PARKED 31 0",
+            "3 1 (127,125,4) PARKED 4 256",
+            "4 1 (127,131,4) PARKED 3 256",
+            "5 1 (127,128,4) PLAYER 1 256",
+        ],
+    )?;
+
+    Ok(GeneratedOverlay {
+        cmp_bytes,
+        ini_bytes,
+        cmp,
+    })
+}
+
+fn build_vault() -> Result<GeneratedOverlay> {
+    let mut b = fill_arena(|x, y| {
+        if x == 130 && (123..=133).contains(&y) {
+            Cell::Building
+        } else if (123..=129).contains(&x) && (125..=132).contains(&y) {
+            Cell::Road
+        } else {
+            Cell::Pavement
+        }
+    });
+    b.object(StartupObject {
+        x: 130 * 64 - 18,
+        y: 128 * 64 + 32,
+        z: 255,
+        kind: 31,
+        remap: 129,
+        rotation: 0,
+        pitch: 0,
+        roll: 0,
+    })
+    .object(StartupObject {
+        x: 130 * 64 - 18,
+        y: 131 * 64 + 32,
+        z: 255,
+        kind: 31,
+        remap: 129,
+        rotation: 512,
+        pitch: 0,
+        roll: 0,
+    });
+
+    let (cmp_bytes, cmp) = finish_cmp(&mut b, "Probe Vault")?;
+    let ini_bytes = build_mission_ini(
+        "Probe Vault",
+        &[
+            "1 1 (124,128,4) PARKED 9 0",
+            "2 1 (127,128,4) PLAYER 1 256",
+        ],
+    )?;
+
+    Ok(GeneratedOverlay {
+        cmp_bytes,
+        ini_bytes,
+        cmp,
+    })
+}
+
 pub fn probe_overlay(preset: &str, out: &Path) -> Result<()> {
     let generated = match preset {
         "arena" => build_arena()?,
         "shooting" => build_shooting()?,
-        _ => bail!("unknown probe overlay preset {preset:?} (available: arena, shooting)"),
+        "getin" => build_getin()?,
+        "vault" => build_vault()?,
+        _ => bail!(
+            "unknown probe overlay preset {preset:?} (available: arena, shooting, getin, vault)"
+        ),
     };
 
     let gtadata = out.join("GTADATA");
@@ -251,6 +323,41 @@ mod tests {
                 .count(),
             4
         );
+        let start = Start::from_section(&sections[0]).unwrap();
+        assert_eq!(start.bx, 127);
+        assert_eq!(start.by, 128);
+        assert_eq!(start.angle, Some(64));
+    }
+
+    #[test]
+    fn getin_preset_is_valid_and_compact() {
+        let g = build_getin().unwrap();
+        let sections = mission::parse(&g.ini_bytes).unwrap();
+        assert!(g.cmp.blocks.len() < 20, "blocks: {}", g.cmp.blocks.len());
+        assert_eq!(sections.len(), 1);
+        assert_eq!(sections[0].map().as_deref(), Some("test.cmp"));
+        assert_eq!(
+            sections[0]
+                .decls
+                .iter()
+                .filter(|d| d.kind == "PARKED")
+                .count(),
+            4
+        );
+        let start = Start::from_section(&sections[0]).unwrap();
+        assert_eq!(start.bx, 127);
+        assert_eq!(start.by, 128);
+        assert_eq!(start.angle, Some(64));
+    }
+
+    #[test]
+    fn vault_preset_is_valid_and_compact() {
+        let g = build_vault().unwrap();
+        let sections = mission::parse(&g.ini_bytes).unwrap();
+        assert!(g.cmp.blocks.len() < 20, "blocks: {}", g.cmp.blocks.len());
+        assert_eq!(sections.len(), 1);
+        assert_eq!(sections[0].map().as_deref(), Some("test.cmp"));
+        assert_eq!(g.cmp.objects.len(), 2);
         let start = Start::from_section(&sections[0]).unwrap();
         assert_eq!(start.bx, 127);
         assert_eq!(start.by, 128);
