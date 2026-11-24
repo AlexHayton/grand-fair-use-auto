@@ -15,6 +15,7 @@ enum Cell {
     Pavement,
     Road,
     Building,
+    Water,
 }
 
 struct GeneratedOverlay {
@@ -34,6 +35,14 @@ fn fill_arena(cell: impl Fn(u8, u8) -> Cell) -> CmpBuilder {
     };
     let pavement_floor = Block {
         faces: [0, 0, 0, 0, 7],
+        ..Block::default()
+    };
+    let water_floor = Block {
+        faces: [0, 0, 0, 0, 41],
+        ..Block::default()
+    };
+    let water = Block {
+        type_map: 0x10,
         ..Block::default()
     };
     let road = Block {
@@ -58,28 +67,54 @@ fn fill_arena(cell: impl Fn(u8, u8) -> Cell) -> CmpBuilder {
             } else {
                 cell(x, y)
             };
-            b.set(x, y, 0, floor_empty);
             match kind {
-                Cell::Building => b.set(x, y, 1, pavement_floor).set(x, y, 2, building),
-                Cell::Road => b.set(x, y, 1, road_floor).set(x, y, 2, road),
-                Cell::Pavement => b.set(x, y, 1, pavement_floor).set(x, y, 2, pavement),
-            };
+                Cell::Building => {
+                    b.set(x, y, 0, floor_empty)
+                        .set(x, y, 1, pavement_floor)
+                        .set(x, y, 2, building);
+                }
+                Cell::Road => {
+                    b.set(x, y, 0, floor_empty)
+                        .set(x, y, 1, road_floor)
+                        .set(x, y, 2, road);
+                }
+                Cell::Pavement => {
+                    b.set(x, y, 0, floor_empty)
+                        .set(x, y, 1, pavement_floor)
+                        .set(x, y, 2, pavement);
+                }
+                Cell::Water => {
+                    b.set(x, y, 0, water_floor).set(x, y, 1, water);
+                }
+            }
         }
     }
     b
 }
 
 fn finish_cmp(b: &mut CmpBuilder, district_name: &str) -> Result<(Vec<u8>, Cmp)> {
+    finish_cmp_with_hospital(
+        b,
+        district_name,
+        BlockPos {
+            x: 136,
+            y: 120,
+            z: 4,
+        },
+    )
+}
+
+fn finish_cmp_with_hospital(
+    b: &mut CmpBuilder,
+    district_name: &str,
+    hospital: BlockPos,
+) -> Result<(Vec<u8>, Cmp)> {
     b.police_station(BlockPos {
         x: 120,
         y: 120,
         z: 4,
     })
-    .hospital(BlockPos {
-        x: 136,
-        y: 120,
-        z: 4,
-    })
+    .hospital(hospital)
     .fire_station(BlockPos {
         x: 120,
         y: 136,
@@ -99,6 +134,10 @@ fn finish_cmp(b: &mut CmpBuilder, district_name: &str) -> Result<(Vec<u8>, Cmp)>
 }
 
 fn build_mission_ini(title: &str, decls: &[&str]) -> Result<Vec<u8>> {
+    build_mission_ini_with_cmds(title, decls, &["0 DONOWT 0 0 0 0 0"])
+}
+
+fn build_mission_ini_with_cmds(title: &str, decls: &[&str], cmds: &[&str]) -> Result<Vec<u8>> {
     let mut lines = vec![
         "[1]".to_string(),
         String::new(),
@@ -113,10 +152,9 @@ fn build_mission_ini(title: &str, decls: &[&str]) -> Result<Vec<u8>> {
         "12 1 (0,0,0) MISSION_TOTAL 11 0".to_string(),
         "13 1 (0,0,0) TARGET_SCORE 1000000 0".to_string(),
         "-1".to_string(),
-        "0 DONOWT 0 0 0 0 0".to_string(),
-        "-1".to_string(),
-        "\x1a".to_string(),
     ]);
+    lines.extend(cmds.iter().map(|s| (*s).to_string()));
+    lines.extend(["-1".to_string(), "\x1a".to_string()]);
     let ini_bytes = lines.join("\r\n").into_bytes();
     mission::parse(&ini_bytes).context("validating generated MISSION.INI")?;
     Ok(ini_bytes)
@@ -311,6 +349,327 @@ fn build_blocked_exit() -> Result<GeneratedOverlay> {
     })
 }
 
+fn build_combat_water() -> Result<GeneratedOverlay> {
+    let mut b = fill_arena(|x, y| {
+        if (123..=132).contains(&x) && (130..=135).contains(&y) {
+            Cell::Water
+        } else if x == 130 && (126..=129).contains(&y) {
+            Cell::Building
+        } else {
+            Cell::Pavement
+        }
+    });
+    let road_floor = Block {
+        faces: [0, 0, 0, 0, 1],
+        ..Block::default()
+    };
+    let hospital_building = Block {
+        type_map: BUILDING,
+        faces: [7, 7, 7, 7, 7],
+        ..Block::default()
+    };
+    let road_down = Block {
+        type_map: ROAD | 0x02,
+        ..Block::default()
+    };
+    let field_right = Block {
+        type_map: 0x48,
+        ..Block::default()
+    };
+    b.set(126, 124, 2, hospital_building)
+        .set(127, 124, 1, road_floor)
+        .set(127, 124, 2, road_down)
+        .set(127, 124, 3, field_right)
+        .set(128, 124, 1, road_floor)
+        .set(128, 124, 2, road_down);
+
+    let (cmp_bytes, cmp) = finish_cmp_with_hospital(
+        &mut b,
+        "Probe Combat Water",
+        BlockPos {
+            x: 127,
+            y: 124,
+            z: 3,
+        },
+    )?;
+    let ini_bytes = build_mission_ini(
+        "Probe Combat Water",
+        &[
+            "1 1 (125,128,4) PARKED 31 0",
+            "2 1 (127,128,4) PLAYER 0 0",
+            "3 (128,128,4) POWERUP 3 5",
+            "4 (126,128,4) POWERUP 1 20",
+        ],
+    )?;
+
+    Ok(GeneratedOverlay {
+        cmp_bytes,
+        ini_bytes,
+        cmp,
+    })
+}
+
+fn build_combat_score() -> Result<GeneratedOverlay> {
+    let mut b = fill_arena(|x, y| {
+        if (120..=136).contains(&x) && (120..=136).contains(&y) {
+            Cell::Road
+        } else {
+            Cell::Pavement
+        }
+    });
+    // Two Bulldogs west of player: #2 at (125.5, 128.5) and #3 22 wpx south at (125.5, 129.1875).
+    b.object(StartupObject {
+        x: 125 * 64 + 32,
+        y: 128 * 64 + 32,
+        z: 255,
+        kind: 31,
+        remap: 129,
+        rotation: 256,
+        pitch: 0,
+        roll: 0,
+    })
+    .object(StartupObject {
+        x: 125 * 64 + 32,
+        y: 128 * 64 + 32 + 44,
+        z: 255,
+        kind: 31,
+        remap: 129,
+        rotation: 256,
+        pitch: 0,
+        roll: 0,
+    });
+
+    let (cmp_bytes, cmp) = finish_cmp(&mut b, "Probe Combat Score")?;
+    let ini_bytes = build_mission_ini_with_cmds(
+        "Probe Combat Score",
+        &[
+            "2 1 (127,128,4) PLAYER 0 256",
+            "3 1 (129,128,4) PARKED 31 0",
+            "6 1 (123,128,4) PARKED 9 0",
+            "20 (127,125,4) FUTURECAR 31 256",
+            "21 (110,110,4) FUTURECAR 31 256",
+            "22 (132,134,4) FUTURECAR 31 0",
+            "23 1 (8352,8608,256) FUTUREPED 0 256",
+            "30 (127,126,4) TRIGGER 200 0",
+            "31 (127,130,4) TRIGGER 210 0",
+            "32 (129,132,4) TRIGGER 220 0",
+        ],
+        &[
+            "0 DONOWT 0 0 0 0 0",
+            "200 DISABLE 30 0 0 0 0",
+            "201 PARKED_ON 20 0 -1 0 0",
+            "202 SURVIVE 0 0 0 30 0",
+            "203 EXPLODE_CAR 20 0 -1 0 0",
+            "204 DONOWT 0 0 0 0 0",
+            "210 DISABLE 31 0 0 0 0",
+            "211 PARKED_ON 21 0 -1 0 0",
+            "212 SURVIVE 0 0 0 30 0",
+            "213 EXPLODE_CAR 21 0 -1 0 0",
+            "214 DONOWT 0 0 0 0 0",
+            "220 DISABLE 32 0 0 0 0",
+            "221 PARKED_ON 22 0 -1 0 0",
+            "222 PED_ON 23 0 -1 136 0",
+            "223 PED_WEAPON 23 0 0 2 0",
+            "224 CHANGE_PED_TYPE 23 0 -1 12 22",
+            "225 DONOWT 0 0 0 0 0",
+        ],
+    )?;
+
+    Ok(GeneratedOverlay {
+        cmp_bytes,
+        ini_bytes,
+        cmp,
+    })
+}
+
+fn build_combat_score_nonplayer() -> Result<GeneratedOverlay> {
+    let mut b = fill_arena(|x, y| {
+        if (x == 130 && y == 129) || (x == 111 && y == 110) {
+            Cell::Building
+        } else if (120..=136).contains(&x) && (120..=136).contains(&y) {
+            Cell::Road
+        } else {
+            Cell::Pavement
+        }
+    });
+    let (cmp_bytes, cmp) = finish_cmp(&mut b, "Probe Combat Score Nonplayer")?;
+    let ini_bytes = build_mission_ini_with_cmds(
+        "Probe Combat Score Nonplayer",
+        &[
+            "2 1 (127,129,4) PLAYER 1 512",
+            "9 (127,129,4) TRIGGER 100 0",
+            "20 (129,129,4) FUTURECAR 31 0",
+            "21 (110,110,4) FUTURECAR 31 0",
+            "22 (127,127,4) FUTURECAR 31 256",
+            "23 1 (8152,8048,256) FUTUREPED 0 0",
+            "24 1 (8168,8048,256) FUTUREPED 0 0",
+            "30 (130,129,3) DUMMY 0 0",
+            "31 (111,110,3) DUMMY 0 0",
+        ],
+        &[
+            "0 DONOWT 0 0 0 0 0",
+            "100 DISABLE 9 0 0 0 0",
+            "101 PARKED_ON 20 0 -1 0 0",
+            "102 SURVIVE 0 0 0 110 0",
+            "103 EXPLODE 30 0 0 0 0",
+            "104 SURVIVE 0 0 0 90 0",
+            "105 PARKED_ON 21 0 -1 0 0",
+            "106 SURVIVE 0 0 0 15 0",
+            "107 EXPLODE 31 0 0 0 0",
+            "108 SURVIVE 0 0 0 90 0",
+            "109 PARKED_ON 22 0 -1 0 0",
+            "110 PED_ON 23 0 0 147 0",
+            "111 PED_ON 24 0 0 147 0",
+            "112 PED_WEAPON 23 0 0 3 0",
+            "113 PED_WEAPON 24 0 0 1 0",
+            "114 CHANGE_PED_TYPE 23 0 -1 21 2",
+            "115 CHANGE_PED_TYPE 24 0 -1 21 2",
+            "116 DONOWT 0 0 0 0 0",
+        ],
+    )?;
+
+    Ok(GeneratedOverlay {
+        cmp_bytes,
+        ini_bytes,
+        cmp,
+    })
+}
+
+fn build_combat_punch() -> Result<GeneratedOverlay> {
+    let mut b = fill_arena(|x, y| {
+        if ((x == 119 || x == 122) && (127..=129).contains(&y))
+            || ((119..=122).contains(&x) && (y == 127 || y == 129))
+        {
+            Cell::Building
+        } else {
+            Cell::Pavement
+        }
+    });
+    let (cmp_bytes, cmp) = finish_cmp(&mut b, "Probe Combat Punch")?;
+
+    let ini_bytes = build_mission_ini_with_cmds(
+        "Probe Combat Punch",
+        &[
+            "2 1 (120,128,4) PLAYER 1 256",
+            "9 (120,128,4) TRIGGER 100 1",
+            "20 1 (7732,8224,256) FUTUREPED 0 768",
+        ],
+        &[
+            "0 DONOWT 0 0 0 0 0",
+            "100 DISABLE 9 0 0 0 0",
+            "101 PED_ON 20 0 0 136 0",
+            "102 CHANGE_PED_TYPE 20 0 -1 4 0",
+            "103 DONOWT 0 0 0 0 0",
+        ],
+    )?;
+
+    Ok(GeneratedOverlay {
+        cmp_bytes,
+        ini_bytes,
+        cmp,
+    })
+}
+
+fn build_combat_tanker() -> Result<GeneratedOverlay> {
+    let mut b = fill_arena(|x, y| {
+        if x == 138 && (122..=134).contains(&y) {
+            Cell::Building
+        } else if (120..=137).contains(&x) && (122..=134).contains(&y) {
+            Cell::Road
+        } else {
+            Cell::Pavement
+        }
+    });
+    let (cmp_bytes, cmp) = finish_cmp(&mut b, "Probe Combat Tanker")?;
+    let ini_bytes = build_mission_ini_with_cmds(
+        "Probe Combat Tanker",
+        &[
+            "2 1 (127,128,4) PLAYER 0 256",
+            "9 (127,128,4) TRIGGER 100 0",
+            "20 (129,128,4) FUTURECAR 44 256",
+            "21 (129,125,4) FUTURECAR 44 256",
+            "22 (129,131,4) FUTURECAR 31 256",
+            "23 (124,128,4) FUTURECAR 44 256",
+            "24 (127,126,4) POWERUP 1 50",
+        ],
+        &[
+            "0 DONOWT 0 0 0 0 0",
+            "100 DISABLE 9 0 0 0 0",
+            "101 PARKED_ON 20 0 -1 0 0",
+            "102 PARKED_ON 21 0 -1 0 0",
+            "103 PARKED_ON 22 0 -1 0 0",
+            "104 PARKED_ON 23 0 -1 0 0",
+            "105 SETBOMB 20 0 0 4 0",
+            "106 SETBOMB 22 0 0 4 0",
+            "107 KICKSTART 200 0 -1 0 0",
+            "108 DONOWT 0 0 0 0 0",
+            "200 STEAL 21 0 -1 0 0",
+            "201 SETBOMB 21 0 0 4 0",
+            "202 DONOWT 0 0 0 0 0",
+        ],
+    )?;
+
+    Ok(GeneratedOverlay {
+        cmp_bytes,
+        ini_bytes,
+        cmp,
+    })
+}
+
+fn build_combat_tanker_drive() -> Result<GeneratedOverlay> {
+    let mut b = fill_arena(|x, y| {
+        if x == 135 && (122..=134).contains(&y) {
+            Cell::Building
+        } else if (120..=134).contains(&x) && (122..=134).contains(&y) {
+            Cell::Road
+        } else {
+            Cell::Pavement
+        }
+    });
+    // Plain unbombed StartupObject Tanker A at (129.5, 125.5) facing EAST.
+    b.object(StartupObject {
+        x: 129 * 64 + 32,
+        y: 125 * 64 + 32,
+        z: 255,
+        kind: 44,
+        remap: 129,
+        rotation: 256,
+        pitch: 0,
+        roll: 0,
+    });
+    let (cmp_bytes, cmp) = finish_cmp(&mut b, "Probe Combat Tanker Drive")?;
+    let ini_bytes = build_mission_ini_with_cmds(
+        "Probe Combat Tanker Drive",
+        &[
+            "2 1 (130,130,4) PLAYER 1 512",
+            "9 (130,130,4) TRIGGER 100 0",
+            "21 (129,129,4) FUTURECAR 44 256",
+            "22 (129,132,4) FUTURECAR 31 256",
+        ],
+        &[
+            "0 DONOWT 0 0 0 0 0",
+            "100 DISABLE 9 0 0 0 0",
+            "101 PARKED_ON 21 0 0 0 0",
+            "102 PARKED_ON 22 0 0 0 0",
+            "103 KICKSTART 200 0 -1 0 0",
+            "104 KICKSTART 210 0 -1 0 0",
+            "105 DONOWT 0 0 0 0 0",
+            "200 STEAL 21 0 0 0 5000",
+            "201 SETBOMB 21 0 0 4 0",
+            "202 DONOWT 0 0 0 0 0",
+            "210 STEAL 22 0 0 0 5000",
+            "211 SETBOMB 22 0 0 4 0",
+            "212 DONOWT 0 0 0 0 0",
+        ],
+    )?;
+
+    Ok(GeneratedOverlay {
+        cmp_bytes,
+        ini_bytes,
+        cmp,
+    })
+}
+
 pub fn probe_overlay(preset: &str, out: &Path) -> Result<()> {
     let generated = match preset {
         "arena" => build_arena()?,
@@ -318,8 +677,14 @@ pub fn probe_overlay(preset: &str, out: &Path) -> Result<()> {
         "getin" => build_getin()?,
         "vault" => build_vault()?,
         "blocked_exit" => build_blocked_exit()?,
+        "combat_water" => build_combat_water()?,
+        "combat_score" => build_combat_score()?,
+        "combat_score_nonplayer" => build_combat_score_nonplayer()?,
+        "combat_punch" => build_combat_punch()?,
+        "combat_tanker" => build_combat_tanker()?,
+        "combat_tanker_drive" => build_combat_tanker_drive()?,
         _ => bail!(
-            "unknown probe overlay preset {preset:?} (available: arena, shooting, getin, vault, blocked_exit)"
+            "unknown probe overlay preset {preset:?} (available: arena, shooting, getin, vault, blocked_exit, combat_water, combat_score, combat_score_nonplayer, combat_punch, combat_tanker, combat_tanker_drive)"
         ),
     };
 
@@ -429,5 +794,111 @@ mod tests {
         assert_eq!(start.bx, 126);
         assert_eq!(start.by, 127);
         assert_eq!(start.angle, Some(192));
+    }
+
+    #[test]
+    fn combat_water_preset_is_valid_and_compact() {
+        let g = build_combat_water().unwrap();
+        let sections = mission::parse(&g.ini_bytes).unwrap();
+        assert!(g.cmp.blocks.len() < 20, "blocks: {}", g.cmp.blocks.len());
+        assert_eq!(sections.len(), 1);
+        assert_eq!(g.cmp.column_height(127, 130), 2);
+        assert_eq!(
+            g.cmp.block(127, 130, 1).unwrap().ground_type(),
+            gfa_formats::cmp::GroundType::Water
+        );
+        assert_eq!(
+            g.cmp.locations[1][0],
+            BlockPos {
+                x: 127,
+                y: 124,
+                z: 3
+            }
+        );
+        assert!(g.cmp.block(127, 124, 3).unwrap().right());
+        let start = Start::from_section(&sections[0]).unwrap();
+        assert_eq!((start.bx, start.by, start.angle), (127, 128, Some(0)));
+    }
+
+    #[test]
+    fn combat_score_preset_is_valid_and_compact() {
+        let g = build_combat_score().unwrap();
+        let sections = mission::parse(&g.ini_bytes).unwrap();
+        assert!(g.cmp.blocks.len() < 20, "blocks: {}", g.cmp.blocks.len());
+        assert_eq!(sections.len(), 1);
+        assert_eq!(g.cmp.objects.len(), 2);
+        assert!(sections[0].cmds.len() >= 15);
+        let start = Start::from_section(&sections[0]).unwrap();
+        assert_eq!((start.bx, start.by, start.angle), (127, 128, Some(64)));
+    }
+
+    #[test]
+    fn combat_score_nonplayer_preset_is_valid_and_compact() {
+        let g = build_combat_score_nonplayer().unwrap();
+        let sections = mission::parse(&g.ini_bytes).unwrap();
+        assert!(g.cmp.blocks.len() < 20, "blocks: {}", g.cmp.blocks.len());
+        assert_eq!(sections.len(), 1);
+        assert!(sections[0].cmds.len() >= 17);
+        let start = Start::from_section(&sections[0]).unwrap();
+        assert_eq!((start.bx, start.by, start.angle), (127, 129, Some(128)));
+    }
+
+    #[test]
+    fn combat_punch_preset_is_valid_and_compact() {
+        let g = build_combat_punch().unwrap();
+        let sections = mission::parse(&g.ini_bytes).unwrap();
+        assert!(g.cmp.blocks.len() < 20, "blocks: {}", g.cmp.blocks.len());
+        assert_eq!(sections.len(), 1);
+        assert_eq!(
+            g.cmp.block(120, 127, 2).unwrap().ground_type(),
+            gfa_formats::cmp::GroundType::Building
+        );
+        assert_eq!(
+            sections[0]
+                .decls
+                .iter()
+                .filter(|d| d.kind == "FUTUREPED")
+                .count(),
+            1
+        );
+        let start = Start::from_section(&sections[0]).unwrap();
+        assert_eq!((start.bx, start.by, start.angle), (120, 128, Some(64)));
+    }
+
+    #[test]
+    fn combat_tanker_preset_is_valid_and_compact() {
+        let g = build_combat_tanker().unwrap();
+        let sections = mission::parse(&g.ini_bytes).unwrap();
+        assert!(g.cmp.blocks.len() < 20, "blocks: {}", g.cmp.blocks.len());
+        assert_eq!(sections.len(), 1);
+        assert_eq!(
+            sections[0]
+                .decls
+                .iter()
+                .filter(|d| d.kind == "FUTURECAR")
+                .count(),
+            4
+        );
+        let start = Start::from_section(&sections[0]).unwrap();
+        assert_eq!((start.bx, start.by, start.angle), (127, 128, Some(64)));
+    }
+
+    #[test]
+    fn combat_tanker_drive_preset_is_valid_and_compact() {
+        let g = build_combat_tanker_drive().unwrap();
+        let sections = mission::parse(&g.ini_bytes).unwrap();
+        assert!(g.cmp.blocks.len() < 20, "blocks: {}", g.cmp.blocks.len());
+        assert_eq!(sections.len(), 1);
+        assert_eq!(g.cmp.objects.len(), 1);
+        assert_eq!(
+            sections[0]
+                .decls
+                .iter()
+                .filter(|d| d.kind == "FUTURECAR")
+                .count(),
+            2
+        );
+        let start = Start::from_section(&sections[0]).unwrap();
+        assert_eq!((start.bx, start.by, start.angle), (130, 130, Some(128)));
     }
 }

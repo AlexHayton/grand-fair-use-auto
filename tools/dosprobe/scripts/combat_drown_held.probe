@@ -1,0 +1,40 @@
+# Sub-test 1b: hold lctrl firing Machine Gun continuously while running SOUTH into water.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap delete 60
++300 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap s 50
++120 tap u 50
++120 tap c 50
++120 tap k 50
++120 tap m 50
++120 tap y 50
++120 tap r 50
++120 tap o 50
++120 tap c 50
++120 tap k 50
++120 tap e 50
++120 tap t 50
++150 tap enter 80
++500 tap enter 80
++1200 tap enter 80
+
+20000 shot before_drown_held
+20200 tap x 60
++250 tap x 60
++250 shot mg_ready
+
+21000 down lctrl
++200 down up
++0 burst drown_mg_held 220 0
++2000 up up
++1200 up lctrl
++4500 shot after_drown_held
++100 quit

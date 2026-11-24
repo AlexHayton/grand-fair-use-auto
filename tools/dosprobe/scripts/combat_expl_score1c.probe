@@ -1,0 +1,69 @@
+# Explosion score attribution 1c: 1 Rocket vs PARKED #1, then 16 Pistol shots vs StartupObject #2 (combat_score overlay).
+3500 tap esc 80
++2000 tap enter 80
++3000 tap delete 60
++300 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap s 50
++120 tap u 50
++120 tap c 50
++120 tap k 50
++120 tap m 50
++120 tap y 50
++120 tap r 50
++120 tap o 50
++120 tap c 50
++120 tap k 50
++120 tap e 50
++120 tap t 50
++150 tap enter 80
++500 tap enter 80
++1200 tap enter 80
+
+# Select Rocket (x*3 from Fist) facing EAST toward PARKED Bulldog #1.
+20000 tap x 60
++250 tap x 60
++250 tap x 60
++250 shot start_rocket
++100 tap lctrl 50
++0 burst r1_parked 90 0
++2500 shot after_r1_parked
+
+# Turn 180 deg WEST (toward StartupObject Bulldog #2) and select Pistol (x*3 from Rocket -> Flame -> Fist -> Pistol).
++100 down left
++512 up left
++150 tap x 60
++250 tap x 60
++250 tap x 60
++250 shot before_startup_pistol
+
+# 14 spaced Pistol shots (>560ms apart, outside 13-frame streak window).
++100 tap lctrl 50
++650 tap lctrl 50
++650 tap lctrl 50
++650 tap lctrl 50
++650 tap lctrl 50
++650 tap lctrl 50
++650 tap lctrl 50
++650 tap lctrl 50
++650 tap lctrl 50
++650 tap lctrl 50
++650 tap lctrl 50
++650 tap lctrl 50
++650 tap lctrl 50
++650 tap lctrl 50
++700 shot startup_after_14
+
++100 tap lctrl 50
++700 shot startup_after_15
+
++100 tap lctrl 50
++0 burst startup_p16 180 0
++3000 shot startup_after_16
++100 quit

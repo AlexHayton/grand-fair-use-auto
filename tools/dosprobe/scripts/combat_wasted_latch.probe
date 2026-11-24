@@ -1,0 +1,19 @@
+# Hold lctrl continuously from before WASTED through hospital respawn (walking SOUTH into water).
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+17000 shot start
+17200 down up
++1650 up up
+18900 down lctrl
++0 burst drown_start 150 0
+
+21100 burst respawn_held 420 0
+27300 up lctrl
+27600 shot before_repress
+27700 down lctrl
++0 burst repress_punch 70 0
++1100 up lctrl
++100 quit

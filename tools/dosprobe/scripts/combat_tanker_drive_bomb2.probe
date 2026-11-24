@@ -1,0 +1,30 @@
+# Driven Tanker B with STEAL (+5000) -> SETBOMB 4: board from adjacent (130,130), light nudge vs hard crash (combat_tanker_drive).
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+17000 shot start
++50 tap enter 70
++2000 shot boarded_b
++50 memdump bomb4_armed
+
+# Gentle approach + light wall nudge against x=135 building wall.
++100 down up
++700 up up
++500 shot near_wall
++100 down up
++250 up up
++0 burst nudge_b 90 0
++1400 shot after_nudge
+
+# Reverse and hit wall at full throttle.
++100 down down
++900 up down
++400 shot backed_up
++100 down up
++0 burst crash_b 160 0
++2400 up up
++1500 shot after_crash
++50 memdump bomb4_after
++100 quit

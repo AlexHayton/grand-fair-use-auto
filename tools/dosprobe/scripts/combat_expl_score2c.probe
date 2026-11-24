@@ -1,0 +1,15 @@
+# Explosion score attribution 2c: script EXPLODE (on-screen & off-screen) + NPC Rocket/MG car kill (combat_score_nonplayer).
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+15500 shot before_onscreen
+16800 burst onscreen_expl 220 0
+20500 shot after_onscreen
+24500 shot after_offscreen
+25500 shot before_npc
+26000 burst npc_fight 280 0
+31000 shot npc_mid
+35000 shot npc_after
+35500 quit

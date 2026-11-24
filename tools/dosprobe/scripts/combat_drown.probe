@@ -1,0 +1,42 @@
+# Sub-test 1a: walk SOUTH (PLAYER angle 0) into water while armed with Rocket, then press lctrl AFTER submerged.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap delete 60
++300 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap s 50
++120 tap u 50
++120 tap c 50
++120 tap k 50
++120 tap m 50
++120 tap y 50
++120 tap r 50
++120 tap o 50
++120 tap c 50
++120 tap k 50
++120 tap e 50
++120 tap t 50
++150 tap enter 80
++500 tap enter 80
++1200 tap enter 80
+
+20000 shot before_drown
+20200 tap x 60
++250 tap x 60
++250 tap x 60
++250 shot rocket_ready
+
+21200 down up
++0 burst enter_water 140 0
++1600 up up
++50 down lctrl
++0 burst drown_rocket 140 0
++2000 up lctrl
++4500 shot after_wasted
++100 quit

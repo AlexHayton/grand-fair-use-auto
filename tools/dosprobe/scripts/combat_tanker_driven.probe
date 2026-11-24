@@ -1,0 +1,36 @@
+# Driven Tanker #2 with STEAL -> SETBOMB 4: gentle nudge vs harder wall hit.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+17000 shot start
+17100 down left
++256 up left
++100 down up
++1850 up up
++100 down right
++256 up right
++100 down up
++1550 up up
++200 shot before_board_t2
++50 tap enter 70
++2500 shot boarded_t2
+
+# Gently tap up toward wall at x=138, stop short, then nudge wall slowly.
++100 down up
++1200 up up
++800 shot near_wall
++100 down up
++400 up up
++1200 shot after_nudge
+
+# Back up and hit wall at higher speed.
++100 down down
++1000 up down
++500 shot backed_up
++100 down up
++1600 burst tanker_crash 160 0
++600 up up
++2500 shot after_crash
++100 quit

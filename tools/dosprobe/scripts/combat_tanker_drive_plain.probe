@@ -1,0 +1,14 @@
+# Plain StartupObject Tanker A driving check (combat_tanker_drive overlay).
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+17000 shot start
++50 tap enter 70
++1800 shot boarded_a
++100 down up
++0 burst drive_a 180 0
++2600 up up
++1000 shot after_a
++100 quit

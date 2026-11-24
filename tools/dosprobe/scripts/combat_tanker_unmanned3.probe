@@ -1,0 +1,71 @@
+# Tanker type-4 bomb (unmanned) 3: direct y=128 Rockets vs SETBOMB-4 Tanker #20 (East) then plain Tanker #23 (West).
+3500 tap esc 80
++2000 tap enter 80
++3000 tap delete 60
++300 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap s 50
++120 tap u 50
++120 tap c 50
++120 tap k 50
++120 tap m 50
++120 tap y 50
++120 tap r 50
++120 tap o 50
++120 tap c 50
++120 tap k 50
++120 tap e 50
++120 tap t 50
++150 tap enter 80
++500 tap enter 80
++1200 tap enter 80
+
+# Select Rocket (x*3 from Fist) facing EAST toward SETBOMB-4 Tanker #20 at (129,128).
+20000 tap x 60
++250 tap x 60
++250 tap x 60
++250 shot start_t20
+
++100 tap lctrl 50
++0 burst t20_r1 90 0
++1300 shot t20_after_1
++100 tap lctrl 50
++0 burst t20_r2 90 0
++1300 shot t20_after_2
++100 tap lctrl 50
++0 burst t20_r3 90 0
++1300 shot t20_after_3
++100 tap lctrl 50
++0 burst t20_r4 90 0
++1300 shot t20_after_4
++100 tap lctrl 50
++0 burst t20_r5 90 0
++2500 shot t20_after_5
+
+# Turn 180 deg WEST (same y=128) toward unbombed Tanker #23 at (124,128).
++100 down left
++512 up left
++200 shot before_t23
+
++100 tap lctrl 50
++0 burst t23_r1 90 0
++1300 shot t23_after_1
++100 tap lctrl 50
++0 burst t23_r2 90 0
++1300 shot t23_after_2
++100 tap lctrl 50
++0 burst t23_r3 90 0
++1300 shot t23_after_3
++100 tap lctrl 50
++0 burst t23_r4 90 0
++1300 shot t23_after_4
++100 tap lctrl 50
++0 burst t23_r5 90 0
++2500 shot t23_after_5
++100 quit

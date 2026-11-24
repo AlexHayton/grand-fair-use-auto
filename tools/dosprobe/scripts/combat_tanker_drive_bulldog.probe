@@ -1,0 +1,35 @@
+# Driven Bulldog C with STEAL (+5000) -> SETBOMB 4: turn south from (130,130) to (129,132), light nudge vs hard crash (combat_tanker_drive).
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+17000 shot start
+# Turn 180 deg South from North (512 -> 0) and walk south to Bulldog C door side.
+17100 down left
++512 up left
++100 down up
++900 up up
++200 shot before_board_c
+
++50 tap enter 70
++2000 shot boarded_c
+
+# Gentle approach + light nudge against x=135 building wall.
++100 down up
++700 up up
++500 shot near_wall_c
++100 down up
++250 up up
++0 burst nudge_c 90 0
++1400 shot after_nudge_c
+
+# Reverse and hit wall at full throttle.
++100 down down
++900 up down
++400 shot backed_up_c
++100 down up
++0 burst crash_c 160 0
++2400 up up
++1500 shot after_crash_c
++100 quit

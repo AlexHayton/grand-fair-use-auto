@@ -1,0 +1,62 @@
+# Explosion score attribution part 1: player pistol kill + rocket & chain kill.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap delete 60
++300 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap s 50
++120 tap u 50
++120 tap c 50
++120 tap k 50
++120 tap m 50
++120 tap y 50
++120 tap r 50
++120 tap o 50
++120 tap c 50
++120 tap k 50
++120 tap e 50
++120 tap t 50
++150 tap enter 80
++500 tap enter 80
++1200 tap enter 80
+
+20000 shot start_score
+20200 tap x 60
++250 shot pistol_ready
+
+# 1. Shoot Bulldog #1 east with pistol (hold ~5.8s -> ~13-14 shots, then step-by-step).
+20600 down lctrl
++5800 up lctrl
++500 shot after_14_pistol
+
++200 tap lctrl 50
++500 shot p_step1
++200 tap lctrl 50
++500 shot p_step2
++200 tap lctrl 50
++500 shot p_step3
++200 tap lctrl 50
++500 shot p_step4
++200 tap lctrl 50
++500 shot p_step5
++200 tap lctrl 50
++500 shot p_step6
++3000 shot after_pistol_explode
+
+# 2. Switch to Rocket (Pistol -> MG -> Rocket), turn 180 deg west, shoot Bulldog #2 + chain #3.
++200 tap x 60
++250 tap x 60
++100 down left
++512 up left
++200 shot before_rocket
++100 tap lctrl 60
++0 burst rocket_hit 90 0
++1400 shot mid_chain
++3000 shot after_chain
++100 quit

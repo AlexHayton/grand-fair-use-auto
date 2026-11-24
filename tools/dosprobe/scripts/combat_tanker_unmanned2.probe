@@ -1,0 +1,91 @@
+# Tanker type-4 bomb (unmanned) 2: MG vs SETBOMB-4 Tanker #1, Pistol vs SETBOMB-4 Bulldog #3, 4 Rockets vs unbombed Tanker #4.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap delete 60
++300 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap s 50
++120 tap u 50
++120 tap c 50
++120 tap k 50
++120 tap m 50
++120 tap y 50
++120 tap r 50
++120 tap o 50
++120 tap c 50
++120 tap k 50
++120 tap e 50
++120 tap t 50
++150 tap enter 80
++500 tap enter 80
++1200 tap enter 80
+
+# Select MG (x twice from Fist -> Pistol -> MG) and shoot SETBOMB-4 Tanker #1.
+20000 tap x 60
++250 tap x 60
++300 shot start_t1
+
++200 down lctrl
++0 burst t1_mg 180 0
++1500 up lctrl
++2000 shot t1_after_mg1
+
++200 down lctrl
++0 burst t1_mg2 180 0
++1500 up lctrl
++2500 shot t1_after_mg2
+
+# Switch back to Pistol (MG -> Rocket -> Flame -> Fist -> Pistol) via x, turn SOUTH, walk 1100ms, turn EAST toward Bulldog #3.
++200 tap x 60
++250 tap x 60
++250 tap x 60
++250 tap x 60
++200 down right
++256 up right
++100 down up
++1100 up up
++100 down left
++256 up left
++200 shot before_b3
+
++100 tap lctrl 50
++700 shot b3_01
++200 tap lctrl 50
++700 shot b3_02
++200 tap lctrl 50
++0 burst b3_s3 90 0
++1400 shot b3_03
++200 tap lctrl 50
++0 burst b3_s4 90 0
++1400 shot b3_04
++200 down lctrl
++6000 up lctrl
++1500 shot b3_after
+
+# Walk back NORTH to y=128 (left 256, up 1100, left 256 facing WEST), select Rocket (x twice from Pistol -> MG -> Rocket).
++200 down left
++256 up left
++100 down up
++1100 up up
++100 down left
++256 up left
++200 tap x 60
++250 tap x 60
++200 shot before_t4
+
++100 tap lctrl 50
++0 burst t4_r1 90 0
++1100 tap lctrl 50
++0 burst t4_r2 90 0
++1100 tap lctrl 50
++0 burst t4_r3 90 0
++1100 tap lctrl 50
++0 burst t4_r4 90 0
++2500 shot t4_after
++100 quit

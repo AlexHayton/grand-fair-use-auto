@@ -1,0 +1,83 @@
+# Tanker type-4 bomb (unmanned) + unbombed Tanker blast count.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap delete 60
++300 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap s 50
++120 tap u 50
++120 tap c 50
++120 tap k 50
++120 tap m 50
++120 tap y 50
++120 tap r 50
++120 tap o 50
++120 tap c 50
++120 tap k 50
++120 tap e 50
++120 tap t 50
++150 tap enter 80
++500 tap enter 80
++1200 tap enter 80
+
+20000 tap x 60
++300 shot start_t1
+
+# Shoot Tanker #1 (type-4 rigged at start) shot-by-shot (2 dmg/bullet).
++200 tap lctrl 50
++700 shot t1_01
++200 tap lctrl 50
++700 shot t1_02
++200 tap lctrl 50
++700 shot t1_03
++200 tap lctrl 50
++700 shot t1_04
++200 tap lctrl 50
++0 burst t1_s5 60 0
++900 shot t1_05
++200 tap lctrl 50
++0 burst t1_s6 90 0
++1400 shot t1_06
++200 tap lctrl 50
++700 shot t1_07
++2000 shot t1_after
+
+# Walk 3 blocks south to (127,131), face east toward Bulldog #3 (type-4 rigged at start).
++200 down right
++256 up right
++100 down up
++1450 up up
++100 down left
++256 up left
++200 shot before_b3
++100 tap lctrl 50
++700 shot b3_01
++200 tap lctrl 50
++0 burst b3_s2 90 0
++1400 shot b3_02
++200 tap lctrl 50
++0 burst b3_s3 90 0
++1400 shot b3_03
++2000 shot b3_after
+
+# Walk 3 blocks north to (127,128), turn west toward unbombed Tanker #4, shoot 1 rocket.
++200 down left
++256 up left
++100 down up
++1450 up up
++100 down left
++256 up left
++100 tap x 60
++250 tap x 60
++200 shot before_t4
++100 tap lctrl 50
++0 burst t4_rocket 150 0
++2200 burst t4_fuse 160 0
++2500 shot t4_after
++100 quit

@@ -1,0 +1,43 @@
+# Driven Tanker B with STEAL (+5000) -> SETBOMB 4: light wall nudge vs harder wall hit (combat_tanker_drive overlay).
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+17000 shot start
+# Walk west clear of Tanker A, south to y=128.7, east to Tanker B cab door.
+17100 down right
++256 up right
++100 down up
++1000 up up
++100 down left
++256 up left
++100 down up
++2100 up up
++100 down left
++256 up left
++100 down up
++1200 up up
++200 shot before_board_b
+
++50 tap enter 70
++2000 shot boarded_b
+
+# Gentle approach + light wall nudge against x=135 building wall.
++100 down up
++800 up up
++500 shot near_wall
++100 down up
++350 up up
++0 burst nudge_b 90 0
++1400 shot after_nudge
+
+# Reverse and hit wall at full throttle.
++100 down down
++900 up down
++400 shot backed_up
++100 down up
++0 burst crash_b 160 0
++2200 up up
++1500 shot after_crash
++100 quit

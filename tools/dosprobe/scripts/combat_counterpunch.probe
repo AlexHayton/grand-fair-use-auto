@@ -1,0 +1,103 @@
+# Ped counter-punch probe: punch 15 stationary waiting FUTUREPEDs in sequence.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+17000 shot before_punch
+17050 memdump before_cp
+
+17200 down up
++120 up up
+
++100 down lctrl
++0 burst cp_p00 42 0
++620 up lctrl
++60 down up
++245 up up
+
++100 down lctrl
++0 burst cp_p01 42 0
++620 up lctrl
++60 down up
++245 up up
+
++100 down lctrl
++0 burst cp_p02 42 0
++620 up lctrl
++60 down up
++245 up up
+
++100 down lctrl
++0 burst cp_p03 42 0
++620 up lctrl
++60 down up
++245 up up
+
++100 down lctrl
++0 burst cp_p04 42 0
++620 up lctrl
++60 down up
++245 up up
+
++100 down lctrl
++0 burst cp_p05 42 0
++620 up lctrl
++60 down up
++245 up up
+
++100 down lctrl
++0 burst cp_p06 42 0
++620 up lctrl
++60 down up
++245 up up
+
++100 down lctrl
++0 burst cp_p07 42 0
++620 up lctrl
++60 down up
++245 up up
+
++100 down lctrl
++0 burst cp_p08 42 0
++620 up lctrl
++60 down up
++245 up up
+
++100 down lctrl
++0 burst cp_p09 42 0
++620 up lctrl
++60 down up
++245 up up
+
++100 down lctrl
++0 burst cp_p10 42 0
++620 up lctrl
++60 down up
++245 up up
+
++100 down lctrl
++0 burst cp_p11 42 0
++620 up lctrl
++60 down up
++245 up up
+
++100 down lctrl
++0 burst cp_p12 42 0
++620 up lctrl
++60 down up
++245 up up
+
++100 down lctrl
++0 burst cp_p13 42 0
++620 up lctrl
++60 down up
++245 up up
+
++100 down lctrl
++0 burst cp_p14 42 0
++620 up lctrl
+
++300 shot after_punches
++50 memdump after_cp
++100 quit
