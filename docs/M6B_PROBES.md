@@ -153,27 +153,27 @@ Because `tools/dosprobe/run.py` mounts the owner's game folder under DOSBox-X wi
 
 - [ ] **Horn / siren pull-over (`Traffic::pull_over`)**
   - Measure lateral look width (provisional half-block in `crates/gfa-sim/src/traffic/mod.rs`), forward reach (`5` blocks?), pull-over speed (provisional `2` speed units), kerb offset (offsets `7` and `0x37` of `0x40`), whether the car stops completely and for how long (provisional `3` s), and whether an active (un-held) siren also triggers pull-over (`IMPLEMENTATION_PLAN.md`, `docs/PARITY.md`, `docs/REFERENCE_MAP.md`).
-  - **Probe script:** —
-  - **Measured:** —
-  - **Follow-up / status:** Pending.
+  - **Probe script:** `tools/dosprobe/scripts/traffic_pull_over.probe`; no-siren control: `traffic_pull_over_control.probe`. Both use `tools/dosprobe/overlays/traffic/GTADATA/MISSION.INI`.
+  - **Measured:** The treatment/control scripts run the same timed approach with and without Tab, but captures do not confirm that the player is seated in the cop car; no pull-over response can be attributed.
+  - **Follow-up / status:** **Pending.** Confirm car entry and isolate a target before measuring pull-over geometry, stop duration, or held-vs-toggled siren behavior.
 
 - [ ] **Unlisted hotkeys (police toggle & three zoom levels)**
   - Identify the DOS key bindings for the police toggle and the three zoom levels present in the FXT strings but missing from the 1997 README (`IMPLEMENTATION_PLAN.md` M6b & decision log).
-  - **Probe script:** —
-  - **Measured:** —
-  - **Follow-up / status:** Pending.
+  - **Probe script:** `tools/dosprobe/scripts/traffic_controls.probe` on the traffic overlay.
+  - **Measured:** The sweep captures F1–F12, keypad/main-row zoom candidates, and `p`/`1`–`3`/`l`; F6 pauses. Car entry is not confirmed, and no tested key has yet been confirmed as the police toggle or zoom binding.
+  - **Follow-up / status:** **Pending.** Confirm the vehicle state, then extend the key/chord sweep until each mode’s on-screen confirmation is captured; do not infer a binding from the FXT message names alone.
 
 - [ ] **Camera speed-zoom & lead-ahead**
   - Measure the original's speed-based zoom-out curve and easing (provisional up to `1.5×` at `10 px/tick` in `SimCamera`), and check whether/how far the camera leads a moving car (provisional Carnage3D `0.35 s` capped at 1/3 view) (`docs/PARITY.md`, `IMPLEMENTATION_PLAN.md`).
-  - **Probe script:** —
-  - **Measured:** —
-  - **Follow-up / status:** Pending.
+  - **Probe script:** `tools/dosprobe/scripts/traffic_camera.probe`; attempts the south-flank get-in sequence and captures at start and 700 ms intervals through 5.2 s.
+  - **Measured:** No speed/zoom ratio or lead distance is recorded; captures show the player is still on foot.
+  - **Follow-up / status:** **Pending.** Verify seating, then repeat on a long straight road segment.
 
 - [ ] **Traffic light cycle**
   - Measure exact green, amber, and red durations (provisional AmiGTA1 `5 s` green / `0.6 s` amber) (`docs/PARITY.md`).
-  - **Probe script:** —
-  - **Measured:** —
-  - **Follow-up / status:** Pending.
+  - **Probe script:** `tools/dosprobe/scripts/traffic_lights.probe` with `tools/dosprobe/overlays/traffic_lights/GTADATA/MISSION.INI`; captures one frame per second for 20 s.
+  - **Measured:** The sampling run completes, but the current fixed view does not yet provide a reliable, unobstructed signal-state sequence.
+  - **Follow-up / status:** **Pending.** Reposition the player/camera until the signal is clearly visible, then time phase transitions at frame-level resolution.
 
 ---
 
