@@ -1075,6 +1075,66 @@ fn wasted_card_respawns_at_hospital_and_last_life_is_game_over() {
 }
 
 #[test]
+fn fire_key_latch_clears_across_wasted_until_released() {
+    use gfa_formats::cmp::BlockPos;
+    use gfa_sim::world::{BUST_TICKS, Card};
+
+    // Live-city WASTED card + hospital respawn: holding FIRE continuously
+    // through death and respawn stays disarmed until released and re-pressed.
+    let mut b = CmpBuilder::new(1);
+    street(&mut b, 5..35, 5..35);
+    let mut cmp = Cmp::parse(&b.build()).unwrap();
+    cmp.locations[1][0] = BlockPos { x: 25, y: 25, z: 2 };
+    let mut w = World::new(
+        SimMap::new(cmp, WallTiles::gta(1)),
+        vec![saloon()],
+        SimView::GAME,
+        south(10, 10),
+    );
+    w.step(press(Buttons::FIRE));
+    assert!(w.arms.fire_held);
+    w.hurt(100);
+    w.step(press(Buttons::FIRE));
+    assert_eq!(w.card, Card::Wasted);
+    assert!(!w.arms.fire_held);
+    run(&mut w, Buttons::FIRE, BUST_TICKS as u32 + 5);
+    assert_eq!(w.card, Card::None);
+    assert_eq!(w.player.block(), (25, 25));
+    assert!(!w.arms.fire_held);
+    assert_eq!(w.arms.punch_left, 0);
+
+    w.step(press(Buttons::NONE));
+    w.step(press(Buttons::FIRE));
+    assert!(w.arms.fire_held);
+    assert!(w.arms.punch_left > 0);
+
+    // Immediate (!live_city) respawn: same latch clearing until release.
+    let mut b2 = CmpBuilder::new(1);
+    street(&mut b2, 5..35, 5..35);
+    let cmp2 = Cmp::parse(&b2.build()).unwrap();
+    let mut w = World::with_map_cars(
+        SimMap::new(cmp2, WallTiles::gta(1)),
+        vec![saloon()],
+        SimView::GAME,
+        south(10, 10),
+        false,
+    );
+    w.arms.give(1, 5);
+    w.step(press(Buttons::FIRE));
+    assert!(w.arms.fire_held);
+    w.hurt(100);
+    run(&mut w, Buttons::FIRE, 5);
+    assert_eq!(w.player.block(), (10, 10));
+    assert!(!w.arms.fire_held);
+    assert_eq!(w.arms.punch_left, 0);
+
+    w.step(press(Buttons::NONE));
+    w.step(press(Buttons::FIRE));
+    assert!(w.arms.fire_held);
+    assert!(w.arms.punch_left > 0);
+}
+
+#[test]
 fn ambulance_dispatches_and_medic_revives_dead_ped() {
     let mut b = CmpBuilder::new(1);
     let floor = Block {

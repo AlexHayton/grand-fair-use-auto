@@ -296,6 +296,8 @@ pub struct World {
     start: Start,
     /// Last tick's buttons, to find presses.
     prev: Buttons,
+    /// Raw unmasked fire button from the previous tick, for the event-style latch.
+    prev_fire: bool,
     log: Vec<LogLine>,
 }
 
@@ -374,6 +376,7 @@ impl World {
             explode_proc: None,
             start,
             prev: Buttons::NONE,
+            prev_fire: false,
             log: Vec::new(),
         };
         let p = &world.player;
@@ -442,6 +445,7 @@ impl World {
 
     /// Advance one tick.
     pub fn step(&mut self, input: TickInput) {
+        let raw_fire = input.buttons.contains(Buttons::FIRE);
         let b = if self.bust_timer > 0 || self.foot_arrest > 0 || self.game_over {
             Buttons::NONE
         } else {
@@ -461,7 +465,11 @@ impl World {
                 self.say(format!("player: weapon {w} (ammo {})", self.arms.ammo[w]));
             }
         }
-        self.arms.fire_held = b.contains(Buttons::FIRE);
+        if !b.contains(Buttons::FIRE) {
+            self.arms.fire_held = false;
+        } else if !self.prev_fire {
+            self.arms.fire_held = true;
+        }
         if self.doing == Doing::Driving
             && b.contains(Buttons::FIRE)
             && let Some(d) = &self.driven
@@ -583,6 +591,7 @@ impl World {
         self.harm();
         self.run_over();
         self.prev = b;
+        self.prev_fire = raw_fire;
         self.tick += 1;
     }
 
@@ -3088,6 +3097,7 @@ impl World {
         h.u32(self.tick);
         self.player.sim_hash(&mut h);
         h.bytes(&self.prev.0.to_le_bytes());
+        h.bool(self.prev_fire);
         match self.doing {
             Doing::OnFoot => h.u8(0),
             Doing::Driving => h.u8(2),

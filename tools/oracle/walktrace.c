@@ -269,6 +269,7 @@ int main(int argc, char **argv)
                 health = 100;
                 burning = 0;
                 fire_queued = 0;
+                fire_held = 0;
                 for (a = 1; a < GTA_WEAPON_COUNT; a++)
                     ammo[a] = 0;
                 weapon = 0;

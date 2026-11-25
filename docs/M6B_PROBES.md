@@ -75,11 +75,11 @@ Because `tools/dosprobe/run.py` mounts the owner's game folder under DOSBox-X wi
     - **Non-player explosions (`GTA8.EXE` read-only inspection; DOSBox-X visual confirmation still pending):** Both explosion-hit scoring (`0x7d85e` in `0x7d514`) and car-wreck scoring (`0x547cf` in `0x547b0..0x5490d`) guard score/heat with `cmp attacker, -1; jle skip` and propagate `owner_id` through `car+0x132` for chain blasts, so non-player explosions (`attacker == -1`) pay `0`. In `combat_expl_score2c`, `EXPLODE 30` detonated building `(130,129)` on-screen with score `0`, but Bulldog `#20` survived intact (z-layer mismatch) and hostile peds `#23/#24` spawned off-screen.
   - **Follow-up / status:** In progress. Run 1 clean `combat_score_nonplayer` confirmation (`EXPLODE_CAR`, z=2 `EXPLODE`, and on-screen Pavement Rocket ped shooting through Bulldog `#22`) confirming an actual on-screen non-player car blast leaves HUD score `0`, then implement sim/oracle parity + tests.
 
-- [ ] **Fire-key latch across `WASTED`**
-  - Verify whether holding Ctrl continuously through `WASTED` and hospital respawn immediately fires/punches on respawn or requires releasing and re-pressing Ctrl (AmiGTA1 latches on key events and clears on `WASTED`; `gfa-sim` currently reads held `Buttons`; `IMPLEMENTATION_PLAN.md` decision log).
-  - **Probe script:** `tools/dosprobe/scripts/combat_wasted_latch.probe` (`combat_water` overlay, `--cycles 150000`)
-  - **Measured (WIP):** Blocked on synthetic `combat_water` — `combat_wasted_latch3` exited at respawn (`t=22767`, `respawn_held_0123.png`) with `Error 174.219: No available hospital release location : 0` despite adding an NYC-like hospital column at `(127,124,3)`. Inspected `NYC.CMP` and located unobstructed flat waterfront pavement at `(111,147)` (`z=1`, `gt=3`, `slope=0`) directly north of deep water `(111,148)`/`(111,149)`.
-  - **Follow-up / status:** In progress. Add a `MISSION.INI`-only overlay preset (`combat_wasted_nyc`) referencing unmodified `nyc.cmp` (so real NYC hospitals handle respawn), walk south from `(111,147,3)` into `(111,148)` while holding `lctrl` across `WASTED!` and respawn, then release + re-press `lctrl`.
+- [x] **Fire-key latch across `WASTED`**
+  - Verify whether holding Ctrl continuously through `WASTED` and hospital respawn immediately fires/punches on respawn or requires releasing and re-pressing Ctrl (AmiGTA1 latches on key events and clears on `WASTED`; `gfa-sim` previously read held `Buttons`; `IMPLEMENTATION_PLAN.md` decision log).
+  - **Probe script:** `tools/dosprobe/scripts/combat_wasted_latch.probe` (`combat_water` overlay, `--cycles 150000`; partial synthetic run only)
+  - **Measured (not pursued for DOS parity):** Synthetic `combat_wasted_latch3` exited at respawn (`t=22767`, `respawn_held_0123.png`) with `Error 174.219: No available hospital release location : 0`. Per owner decision, original DOS parity is intentionally not sought for this item (planned `combat_wasted_nyc` probe dropped), adopting AmiGTA1's key-event latch clearing on `WASTED`.
+  - **Follow-up / status:** Done. Event-latched `arms.fire_held` via `World::prev_fire` in `crates/gfa-sim/src/world.rs` so `WASTED` clears `fire_held` and a continuously held `Buttons::FIRE` stays disarmed across hospital and immediate respawns until released and re-pressed; cleared `fire_held = 0` on `WASTED` in `tools/oracle/walktrace.c` (`rocket_close.txt` parity); covered by `fire_key_latch_clears_across_wasted_until_released` in `crates/gfa-sim/tests/synthetic.rs`.
 
 - [ ] **Firing while drowning**
   - Verify whether a drowning player in water can fire a weapon or punch (`gfa-sim` forbids it; AmiGTA1's test allows it; `IMPLEMENTATION_PLAN.md` decision log).
@@ -171,11 +171,11 @@ Because `tools/dosprobe/run.py` mounts the owner's game folder under DOSBox-X wi
   - **Measured:** The treatment/control scripts run the same timed approach with and without Tab, but captures do not confirm that the player is seated in the cop car; no pull-over response can be attributed.
   - **Follow-up / status:** **Pending.** Confirm car entry and isolate a target before measuring pull-over geometry, stop duration, or held-vs-toggled siren behavior.
 
-- [ ] **Unlisted hotkeys (police toggle & three zoom levels)**
+- [x] **Unlisted hotkeys (police toggle & three zoom levels)**
   - Identify the DOS key bindings for the police toggle and the three zoom levels present in the FXT strings but missing from the 1997 README (`IMPLEMENTATION_PLAN.md` M6b & decision log).
-  - **Probe script:** `tools/dosprobe/scripts/traffic_controls.probe` on the traffic overlay.
-  - **Measured:** The sweep captures F1–F12, keypad/main-row zoom candidates, and `p`/`1`–`3`/`l`; F6 pauses. Car entry is not confirmed, and no tested key has yet been confirmed as the police toggle or zoom binding.
-  - **Follow-up / status:** **Pending.** Confirm the vehicle state, then extend the key/chord sweep until each mode’s on-screen confirmation is captured; do not infer a binding from the FXT message names alone.
+  - **Probe script:** `tools/dosprobe/scripts/traffic_controls.probe` on the traffic overlay (initial sweep only).
+  - **Measured (not pursued):** The initial sweep checked F1–F12, keypad/main-row zoom candidates, and `p`/`1`–`3`/`l` (F6 pauses; no tested key confirmed the police toggle or zoom bindings). Per owner decision, discovering/emulating these unlisted FXT hotkeys is intentionally not pursued (`IMPLEMENTATION_PLAN.md` decision log).
+  - **Follow-up / status:** Done (dropped). Keep the 1997 README key layout and GFA's existing zoom/debug bindings (`docs/PARITY.md`).
 
 - [ ] **Camera speed-zoom & lead-ahead**
   - Measure the original's speed-based zoom-out curve and easing (provisional up to `1.5×` at `10 px/tick` in `SimCamera`), and check whether/how far the camera leads a moving car (provisional Carnage3D `0.35 s` capped at 1/3 view) (`docs/PARITY.md`, `IMPLEMENTATION_PLAN.md`).

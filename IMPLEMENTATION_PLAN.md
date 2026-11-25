@@ -344,8 +344,8 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
 - [ ] The counter-punch: what the victim's punch back does to the player (AmiGTA1 has only the 13-step counter whose last two are it). For M6.
 - [ ] Gang roles: the state machine of the original's gang AI types (`gta_peds.c:1111`: AmiGTA1 has read the police ones only). For M7.
 - [ ] Special ped groups: where Hare Krishnas and Elvises appear, in which cities, how often and how they walk. For M6.
-- [ ] The weapons where AmiGTA1 chose for itself: weapon fire rates/cooldowns and projectile speeds (the owner notes guns fire too fast at 50 Hz); how long the original's bullet splat stays on the map; whether every car blowing up pays the player 100, whoever wrote it off; whether a held fire key fires again after WASTED; whether a drowning man can fire.
-- [ ] The pull-over: how far to the side the look reaches, how slowly the car moves over, whether it stops and for how long, whether the siren left on does it too. And the keys for the game's police and zoom toggles, which its README does not list.
+- [ ] The weapons where AmiGTA1 chose for itself: weapon fire rates/cooldowns and projectile speeds (the owner notes guns fire too fast at 50 Hz); how long the original's bullet splat stays on the map; whether every car blowing up pays the player 100, whoever wrote it off; whether a drowning man can fire (fire-key latch across `WASTED` settled in AmiGTA1's favour without DOS probe, 2026-11-25).
+- [ ] The pull-over: how far to the side the look reaches, how slowly the car moves over, whether it stops and for how long, whether the siren left on does it too. (Unlisted FXT police-toggle and three-zoom-level hotkeys dropped per owner decision, 2026-11-25.)
 - [x] Getting into a car, frame by frame against the original. The owner reports that ours looks as if he goes in through the wrong side of the door (2026-11-21). Check the door point, the walk-in path, the sprite frames and the door's opening delta (`docs/M6B_PROBES.md` Section 2; also settled slide-under from outside, far-side tall-vehicle detour, flush-wall vault turn & entry refusal, and forward blocked-door exit).
 - Exit: each drives as measured; the numbers and the probe scripts that produced them are in the decision log.
 
@@ -521,6 +521,12 @@ Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.m
 ## Decision log
 
 Newest first. Each entry: date, decision, why.
+
+- **2026-11-25. Unlisted FXT hotkeys (police toggle & three zoom levels) are not pursued.** Per owner decision after the initial `traffic_controls.probe` sweep (`docs/M6B_PROBES.md`), original DOS key-binding discovery for these unlisted FXT toggles is skipped; GFA keeps the 1997 README key layout and its existing zoom and debug bindings (`docs/PARITY.md`).
+
+- **2026-11-25. Original DOS parity for the fire-key latch across `WASTED` is not pursued; GFA adopts AmiGTA1's latch-clearing behaviour.** Agreed with the owner after synthetic probe `combat_wasted_latch3` hit `Error 174.219` at respawn and before running the NYC-overlay follow-up.
+  - `World::step` (`crates/gfa-sim/src/world.rs`) event-latches `arms.fire_held` against raw unmasked `Buttons::FIRE` (`prev_fire`, included in `World::hash`), so `arms.disarm()` on `WASTED` keeps `fire_held` cleared across both 150-tick hospital respawns and immediate `!live_city` respawns until `FIRE` is released and pressed again.
+  - `tools/oracle/walktrace.c` clears `fire_held = 0` on `WASTED` (`health <= 0`) to match `gta_main.c` and `gfa-sim` on `rocket_close.txt`, covered by `fire_key_latch_clears_across_wasted_until_released` in `crates/gfa-sim/tests/synthetic.rs`.
 
 - **2026-11-24. Car door axes (`rpy` longitudinal, `rpx` lateral), car-over-ped layering, forward blocked-door exit, flush-wall vault turn, and outside slide-under match `GTA8.EXE`.**
   - Under DOSBox-X (`docs/M6B_PROBES.md` Section 2: `getin_door`, `getin_far`, `getin_cop`, `getin_bike`, `vault_wall`, `vault_bus`, `vault_enter_wall`, `vault_bus_far2`, `vault_blocked_{car,bus,north,corner}`):
