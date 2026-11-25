@@ -23,6 +23,7 @@ Because `tools/dosprobe/run.py` mounts the owner's game folder under DOSBox-X wi
   - **Probe script:** `tools/dosprobe/build.sh`
   - **Measured:** Compiled cleanly (`DOSBox-X version 2026.10.01 SDL2`).
   - **Follow-up / status:** Done.
+  - **Windows continuation:** Built the pinned source with MSYS2 MinGW and the probe hooks. `windows_smoke3` completed four frame captures and a 1 MiB RAM dump with clean scripted exit. Windows builds use `dosbox-x.exe`; the original macOS determinism results above have not yet been rechecked on Windows.
 
 - [x] **Headless `GTADOS/GTA8.EXE` boot & capture check**
   - Verify `SDL_VIDEODRIVER=dummy` + `output=surface` boots `GTA8.EXE` via overlay mount, writes `.ppm`/`.png` captures with correct RGB channel order, and dumps guest physical RAM without mutating `GFA_DATA`.
@@ -73,6 +74,7 @@ Because `tools/dosprobe/run.py` mounts the owner's game folder under DOSBox-X wi
       - Adjacent car chain-exploding within the 13-frame streak window pays **`+200`** (`streak 2`, confirmed in `combat_expl_score1` `rocket_hit_0054` `500 -> 700` popup `200`, and `combat_expl_score1c` `startup_p16_0065` popup `200`).
       - `16` Pistol shots to wreck + explode a Bulldog: shots `1..15` pay `+10` each (`+150`; `1b` `after_15 = 150`, `1c` `startup_after_15 = 250`); lethal shot `16` awards **`+150`** (`startup_p16_0023` popup `150`), followed `1` game frame later by **`+100`** (`startup_p16_0026` explosion popup `100`) = **`+250`** single car (`150 -> 400` in `1b`) or **`+450`** with an adjacent chain (`250 -> 700` in `1c`).
     - **Non-player explosions (`GTA8.EXE` read-only inspection; DOSBox-X visual confirmation still pending):** Both explosion-hit scoring (`0x7d85e` in `0x7d514`) and car-wreck scoring (`0x547cf` in `0x547b0..0x5490d`) guard score/heat with `cmp attacker, -1; jle skip` and propagate `owner_id` through `car+0x132` for chain blasts, so non-player explosions (`attacker == -1`) pay `0`. In `combat_expl_score2c`, `EXPLODE 30` detonated building `(130,129)` on-screen with score `0`, but Bulldog `#20` survived intact (z-layer mismatch) and hostile peds `#23/#24` spawned off-screen.
+    - **Windows scripted-car attempt:** `combat_expl_score_script.probe` with the new `combat_score_script` overlay ran to completion, but the first run showed an intact car before and after; a revised approach did not visibly spawn the car. A longer stationary run produced identical captures at 15.5, 22, 26, 30, 35 and 40 seconds. None confirms a car explosion or its attribution. The trigger and timing need further work.
   - **Follow-up / status:** In progress. Run 1 clean `combat_score_nonplayer` confirmation (`EXPLODE_CAR`, z=2 `EXPLODE`, and on-screen Pavement Rocket ped shooting through Bulldog `#22`) confirming an actual on-screen non-player car blast leaves HUD score `0`, then implement sim/oracle parity + tests.
 
 - [x] **Fire-key latch across `WASTED`**

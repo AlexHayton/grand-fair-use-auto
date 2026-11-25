@@ -726,7 +726,7 @@ impl World {
     /// (`gun_step`). On his feet, a punch is thrown or a shot fired, and the
     /// shot frightens the people around (AmiGTA1's main loop).
     fn trigger(&mut self, gun_step: bool) {
-        let can = self.doing == Doing::OnFoot;
+        let can = matches!(self.doing, Doing::OnFoot | Doing::Drowning(_));
         let p = &self.player;
         let (x, y, layer, angle) = (i64::from(p.x), i64::from(p.y), p.layer, p.angle);
         match self.arms.tick(can, gun_step) {

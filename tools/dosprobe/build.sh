@@ -30,7 +30,9 @@ git -C "$src" checkout -- \
     src/dosbox.cpp \
     src/hardware/cmos.cpp \
     src/gui/sdlmain.cpp \
-    src/dos/dos_files.cpp
+    src/dos/dos_files.cpp \
+    src/output/output_tools.cpp \
+    src/output/direct3d/direct3d.cpp
 perl "$here/probe_patch.pl" "$src"
 
 cd "$src"
@@ -40,6 +42,9 @@ if [ ! -x ./configure ] || ! grep -q "mkdir_p\.cpp gfa_probe\.cpp" src/misc/Make
 fi
 
 CONFIG_FLAGS="--enable-sdl2 --disable-x11 --disable-opengl --disable-freetype --disable-printer --disable-mt32 --disable-libslirp --disable-libfluidsynth --disable-avcodec --disable-sdlnet --disable-xbrz"
+case "$(uname -s)" in
+    MSYS*|MINGW*) CONFIG_FLAGS="--host=x86_64-w64-mingw32 --enable-d3d9 $CONFIG_FLAGS" ;;
+esac
 STAMP="$build/.configure-flags"
 NEED_CFG=0
 if [ ! -f Makefile ] || [ ! -f "$STAMP" ] || [ "$(cat "$STAMP")" != "$CONFIG_FLAGS" ]; then
@@ -53,6 +58,10 @@ fi
 
 jobs=$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
 make -j"$jobs"
-cp "$src/src/dosbox-x" "$build/dosbox-x"
-chmod +x "$build/dosbox-x"
+if [ -f "$src/src/dosbox-x.exe" ]; then
+    cp "$src/src/dosbox-x.exe" "$build/dosbox-x.exe"
+else
+    cp "$src/src/dosbox-x" "$build/dosbox-x"
+    chmod +x "$build/dosbox-x"
+fi
 echo "built $build/dosbox-x (upstream $(git -C "$src" rev-parse --short HEAD 2>/dev/null || echo unknown))"
