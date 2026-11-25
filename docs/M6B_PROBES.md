@@ -66,33 +66,47 @@ Because `tools/dosprobe/run.py` mounts the owner's game folder under DOSBox-X wi
 
 - [ ] **Explosion score attribution**
   - Verify whether *every* car blowing up pays the player `100` points regardless of who caused it, or only player-caused / nearby blasts (`IMPLEMENTATION_PLAN.md` M6b & decision log).
-  - **Probe script:** —
-  - **Measured:** —
-  - **Follow-up / status:** Pending.
+  - **Probe script:** `tools/dosprobe/scripts/combat_expl_score1.probe`, `tools/dosprobe/scripts/combat_expl_score1b.probe`, `tools/dosprobe/scripts/combat_expl_score1c.probe` (`combat_score` overlay); `tools/dosprobe/scripts/combat_expl_score2.probe`, `tools/dosprobe/scripts/combat_expl_score2c.probe` (`combat_score_nonplayer` overlay, `--cycles 150000`)
+  - **Measured (WIP):**
+    - **Player-caused car kills & chain explosions (settled in DOSBox-X, consistent across `PARKED` & `StartupObject` Bulldogs `model 31`, `dmg=100`):**
+      - `1` Rocket kill pays **`+100`** only (`combat_expl_score1c` `after_r1_parked`: `0 -> 100`; `combat_expl_score1` `rocket_hit_0024`: `400 -> 500`, popup `100`).
+      - Adjacent car chain-exploding within the 13-frame streak window pays **`+200`** (`streak 2`, confirmed in `combat_expl_score1` `rocket_hit_0054` `500 -> 700` popup `200`, and `combat_expl_score1c` `startup_p16_0065` popup `200`).
+      - `16` Pistol shots to wreck + explode a Bulldog: shots `1..15` pay `+10` each (`+150`; `1b` `after_15 = 150`, `1c` `startup_after_15 = 250`); lethal shot `16` awards **`+150`** (`startup_p16_0023` popup `150`), followed `1` game frame later by **`+100`** (`startup_p16_0026` explosion popup `100`) = **`+250`** single car (`150 -> 400` in `1b`) or **`+450`** with an adjacent chain (`250 -> 700` in `1c`).
+    - **Non-player explosions (`GTA8.EXE` read-only inspection; DOSBox-X visual confirmation still pending):** Both explosion-hit scoring (`0x7d85e` in `0x7d514`) and car-wreck scoring (`0x547cf` in `0x547b0..0x5490d`) guard score/heat with `cmp attacker, -1; jle skip` and propagate `owner_id` through `car+0x132` for chain blasts, so non-player explosions (`attacker == -1`) pay `0`. In `combat_expl_score2c`, `EXPLODE 30` detonated building `(130,129)` on-screen with score `0`, but Bulldog `#20` survived intact (z-layer mismatch) and hostile peds `#23/#24` spawned off-screen.
+  - **Follow-up / status:** In progress. Run 1 clean `combat_score_nonplayer` confirmation (`EXPLODE_CAR`, z=2 `EXPLODE`, and on-screen Pavement Rocket ped shooting through Bulldog `#22`) confirming an actual on-screen non-player car blast leaves HUD score `0`, then implement sim/oracle parity + tests.
 
 - [ ] **Fire-key latch across `WASTED`**
   - Verify whether holding Ctrl continuously through `WASTED` and hospital respawn immediately fires/punches on respawn or requires releasing and re-pressing Ctrl (AmiGTA1 latches on key events and clears on `WASTED`; `gfa-sim` currently reads held `Buttons`; `IMPLEMENTATION_PLAN.md` decision log).
-  - **Probe script:** —
-  - **Measured:** —
-  - **Follow-up / status:** Pending.
+  - **Probe script:** `tools/dosprobe/scripts/combat_wasted_latch.probe` (`combat_water` overlay, `--cycles 150000`)
+  - **Measured (WIP):** Blocked on synthetic `combat_water` — `combat_wasted_latch3` exited at respawn (`t=22767`, `respawn_held_0123.png`) with `Error 174.219: No available hospital release location : 0` despite adding an NYC-like hospital column at `(127,124,3)`. Inspected `NYC.CMP` and located unobstructed flat waterfront pavement at `(111,147)` (`z=1`, `gt=3`, `slope=0`) directly north of deep water `(111,148)`/`(111,149)`.
+  - **Follow-up / status:** In progress. Add a `MISSION.INI`-only overlay preset (`combat_wasted_nyc`) referencing unmodified `nyc.cmp` (so real NYC hospitals handle respawn), walk south from `(111,147,3)` into `(111,148)` while holding `lctrl` across `WASTED!` and respawn, then release + re-press `lctrl`.
 
 - [ ] **Firing while drowning**
   - Verify whether a drowning player in water can fire a weapon or punch (`gfa-sim` forbids it; AmiGTA1's test allows it; `IMPLEMENTATION_PLAN.md` decision log).
-  - **Probe script:** —
-  - **Measured:** —
-  - **Follow-up / status:** Pending.
+  - **Probe script:** `tools/dosprobe/scripts/combat_drown.probe` (`combat_drown2`), `tools/dosprobe/scripts/combat_drown_held.probe` (`combat_drown_held2`, `combat_water` overlay, `--cycles 150000`)
+  - **Measured:** **Allowed while drowning underwater.** `combat_drown2` fired Rocket `99 -> 98` while submerged (`t=22858`); `combat_drown_held2` fired continuous MG bullets southward underwater (`drown_mg_held_0057..0129`) right up until `WASTED!` appeared at `drown_mg_held_0133` (`t=23101`), stopping new projectile spawns once `WASTED!` began (`0135..0150` only show in-flight bullets clearing).
+  - **Follow-up / status:** Measurement settled; `gfa-sim` currently blocks firing during `Doing::Drowning` and needs to be updated + tested + mirrored in `docs/PARITY.md`.
 
 - [ ] **Ped counter-punch**
   - Measure what a punched ped's counter-punch (last two steps of AmiGTA1's 13-step counter in `gta_peds.c:1675`) does to the player: damage, knockdown/stun, and animation (`crates/gfa-sim/src/peds.rs`, `docs/PARITY.md`).
-  - **Probe script:** —
-  - **Measured:** —
-  - **Follow-up / status:** Pending.
+  - **Probe script:** `tools/dosprobe/scripts/combat_counterpunch.probe`, `tools/dosprobe/scripts/combat_counterpunch2.probe`, `tools/dosprobe/scripts/combat_counterpunch3.probe`, `tools/dosprobe/scripts/combat_counterpunch3_armor.probe` (`combat_punch` overlay, `--cycles 150000`)
+  - **Measured (WIP):**
+    - `combat_counterpunch3` & `_armor` (1×2 pen) missed Ped 20 during bursts because Ped 20 walked east out of the player's punch box (note: earlier `0x38c44c` `100 -> 56` RAM diff in `cp2` proved to be an SOS audio mixer channel volume, not player HP; real player struct `0x3ba494`/`0x65a1e4` stayed `100`).
+    - **`GTA8.EXE` read-only inspection (`0xf82ec..0xf84b6`; DOSBox-X visual + duration confirmation still pending):** Global `punch_wheel` (`0x28a43d`) increments per punch check (`0xf8306`) and wraps `> 12 -> 0` on contact (`0xf839a`). Punch box is `6×6` at `8` units ahead (`0x9ccb4`/`0x9dc94`). Steps `0..9`: target ped knocked down (`anim = 0xaf`, `speed = 0`, punch sfx `0x10`). Step `10`: unconditional counter-punch — target ped turns `(player.angle + 512) & 1023`, plays punch anim `0xa9` (`state 0x14`), knocks the player down with `anim = 0xaf`, `speed = 0`, `player+0x41 = 0`, plays sfx `0x10`, and resets `punch_wheel = 0` immediately; **zero HP damage, zero armor loss, zero lives lost**. Steps `11..12` (reachable via whiffed swings advancing `punch_wheel` past `10`) whiff on normal peds.
+  - **Follow-up / status:** In progress. Tighten `combat_punch` to a 1×1 pen with `SET_PED_SPEED 0` peds placed `+8` wpx east of the player and run bare + armored (`suckmyrocket`) DOSBox-X captures to visually confirm counter-punch (`0xa9`/`0xaf`), measure exact knockdown duration in game frames, and confirm `0` HP / `3 -> 3` armor pips, then implement in `gfa-sim`.
 
 - [ ] **Type-4 tanker bomb global**
   - Verify behaviour of the tanker's type-4 damage bomb global (`gta_main.c:4272`, `IMPLEMENTATION_PLAN.md`).
-  - **Probe script:** —
-  - **Measured:** —
-  - **Follow-up / status:** Pending.
+  - **Probe script:** `tools/dosprobe/scripts/combat_tanker_unmanned.probe`, `combat_tanker_unmanned2.probe`, `combat_tanker_unmanned3.probe` (`combat_tanker` overlay); `combat_tanker_drive_plain.probe`, `combat_tanker_drive_bomb.probe`, `combat_tanker_drive_bomb2.probe`, `combat_tanker_drive_bulldog.probe` (`combat_tanker_drive` overlay, `--cycles 150000`)
+  - **Measured (WIP):**
+    - **DOSBox-X observations so far:** Plain `StartupObject` Tanker A (`model 44`, `vtype 0`, `dmg=100`, `len=124`, `doors=[(55,32)]`) boarded cleanly from the north cab door and rebounded off the `x=135` wall without exploding (`combat_tanker_drive_plain`). Driven `SETBOMB 4` Bulldog C (`STEAL` `+5000` -> `SETBOMB 22 0 0 4 0`) survived a gentle nudge + 1 head-on wall crash (`combat_tanker_drive_bulldog`). Unmanned `SETBOMB 4` Tanker survived `53` MG hits (`combat_tanker_unmanned2`) and end-on Rocket 1 (`combat_tanker_unmanned3`; plain Tanker `#23` also survived end-on Rockets 2–3). `combat_tanker_drive_bomb2` spawned south of Tanker B and walked around the tail, missing boarding in time.
+    - **`GTA8.EXE` read-only inspection (`0x52012`, `0x570e8..0x57231`, `0x7cad4`, `0x5490d..0x549ed`, `0x7d81d`; DOSBox-X visual confirmation still pending):**
+      - Global `0x54e96` is initialized **once** to **`10`** (`0x0a`) at `0x52012` and never written elsewhere.
+      - Car bomb switch (`0x5715f`, `car+0x9a` cases `2..6`) runs only inside the active/driven car loop (`car+0x6 == 1` at `0x570e8`); unmanned parked cars never trigger `type 4`. For `type 4`, `car->damage (+0xf7) > 10` (`>= 11`, `0x571bc`) calls `0x7cad4` and clears `car+0x9a = 0`.
+      - `0x7cad4` (shared by bomb types `2`, `4`, and `6` on **any** model) spawns **5 blasts**: center + 4 corners via `0x9ccb4`.
+      - Normal car wreck (`0x5490d..0x549ed`) spawns `1` center blast (`vtype 3/4`) or `3` blasts (center + front + rear for other `vtype`), PLUS `2` quarter-length blasts (`±len/4`) if `model == 44` (`0x2c`, Tanker) **or** `bomb_type == 4` — giving **5 blasts** for any Tanker (plain or `SETBOMB 4`) and **3 blasts** for an unmanned `SETBOMB 4` Car/Bulldog.
+      - Explosion car-hit radius (`0x7d81d`) is `|dx| <= 64, |dy| <= 64` wpx from car center (explaining why end-on rockets hitting a 124-wpx Tanker bumper at `~65` wpx missed; broadside hits are `~23 <= 64` wpx), and minor wall collisions increment `car+0xf7` by `+1` (`0x52eb4`), explaining why 1 wall hit left Bulldog C at `damage <= 10`.
+  - **Follow-up / status:** In progress. Run 3 targeted DOSBox-X confirmations: (1) broadside unmanned MG (`damage > 10`, no bomb trigger) + Rocket blast-count pass (`SETBOMB 4` Tanker = 5, `SETBOMB 4` Bulldog = 3, plain Tanker = 5), (2) driven `SETBOMB 4` Tanker B boarding from north + light nudge vs `damage > 10` detonation (5 blasts), (3) driven `SETBOMB 4` Bulldog C light nudge vs `damage > 10` detonation (5 blasts), then update `gfa-sim` + tests.
 
 ---
 
