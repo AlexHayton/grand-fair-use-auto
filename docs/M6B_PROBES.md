@@ -181,9 +181,10 @@ Because `tools/dosprobe/run.py` mounts the owner's game folder under DOSBox-X wi
 
 - [ ] **Special ped groups & bonuses (Hare Krishnas / Elvises)**
   - Verify which cities/levels spawn Hare Krishna lines and Elvis impersonators, spawn frequency/rules, walking formation, and exact bonus triggers/points (`GOURANGA!`, Elvis, cop kills) (`IMPLEMENTATION_PLAN.md`, `docs/PARITY.md`).
-  - **Probe script:** `tools/dosprobe/scripts/special_groups.probe` (Director's Cut) and `tools/dosprobe/scripts/special_groups_london.probe` (London)
-  - **Measured:** Captured the default Liberty City campaign at `19,006`, `49,012` and `79,003` DOSBox-X PIC ticks, plus London 1969/1961 first missions at `22,509`, `52,501` and `82,507`; no Hare Krishna/Elvis formation was identifiable, so no spawn frequency or bonus trigger can be concluded.
-  - **Follow-up / status:** Keep pending. Repeat in San Andreas and Vice City with a reliable group-identification method.
+  - **Probe scripts:** `tools/dosprobe/scripts/special_groups.probe` and `special_groups_walk.probe` (Director's Cut); `special_groups_london.probe` (London). The walking run records one frame per second for 100 seconds.
+  - **Measured:** The walking run on the original Liberty City map shows a seven-person orange-robed line, visually matching the Hare Krishna group, in frames `0054`–`0067` (`73,112`–`86,110` DOSBox-X PIC ticks; about 13 seconds). The clearest frame (`0065`) shows seven members in a single-file sidewalk formation. The earlier stationary Liberty City and London captures did not identify special groups.
+  - **Follow-up / status:** Partial. Repeat to estimate spawn frequency and verify the group's actor type; check Vice City for Elvises and measure the bonus trigger/points separately.
+  - **Bonus-trigger introspection:** `ENGLISH.FXT` key `8787` is `GOURANGA!`. The GFA port's `World::run_over` currently awards a multiplier-scaled `500` points when a generic civilian run-over streak reaches four; its synthetic test verifies that port behavior, not the original game. Original mission `[1]` separately declares seven `FUTUREPED`s (`382`–`388`), enables them at command labels `1281`–`1293`, then checks their deaths; text key `1049` says `You were meant to kill 'em all`. No explicit `GOURANGA` command appears in this mission script. A DOSBox drive attempt entered a Bulldog but got stuck against a building without hitting pedestrians, so the original bonus trigger remains unverified.
 
 - [ ] **Gang roles state machine (for M7)**
   - Document the original state machine for script-spawned gang AI types (`gta_peds.c:1111`; AmiGTA1 only decoded police roles) (`IMPLEMENTATION_PLAN.md`, `docs/PARITY.md`).
