@@ -537,9 +537,7 @@ fn build_combat_score_nonplayer() -> Result<GeneratedOverlay> {
 
 fn build_combat_punch() -> Result<GeneratedOverlay> {
     let mut b = fill_arena(|x, y| {
-        if ((x == 119 || x == 122) && (127..=129).contains(&y))
-            || ((119..=122).contains(&x) && (y == 127 || y == 129))
-        {
+        if (118..=122).contains(&x) && (126..=130).contains(&y) && (x, y) != (120, 128) {
             Cell::Building
         } else {
             Cell::Pavement
@@ -557,9 +555,10 @@ fn build_combat_punch() -> Result<GeneratedOverlay> {
         &[
             "0 DONOWT 0 0 0 0 0",
             "100 DISABLE 9 0 0 0 0",
-            "101 PED_ON 20 0 0 136 0",
+            "101 PED_ON 20 0 -1 136 0",
             "102 CHANGE_PED_TYPE 20 0 -1 4 0",
-            "103 DONOWT 0 0 0 0 0",
+            "103 SET_PED_SPEED 20 0 0 0 0",
+            "104 DONOWT 0 0 0 0 0",
         ],
     )?;
 
@@ -852,6 +851,10 @@ mod tests {
         assert_eq!(
             g.cmp.block(120, 127, 2).unwrap().ground_type(),
             gfa_formats::cmp::GroundType::Building
+        );
+        assert_eq!(
+            g.cmp.block(120, 128, 2).unwrap().ground_type(),
+            gfa_formats::cmp::GroundType::Pavement
         );
         assert_eq!(
             sections[0]

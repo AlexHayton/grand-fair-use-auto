@@ -1,4 +1,4 @@
-# Ped counter-punch 3 with HUD armor (suckmyrocket keeps Fist selected; combat_punch overlay).
+# Ped counter-punch with HUD armor and one type-4 target (combat_punch overlay).
 3500 tap esc 80
 +2000 tap enter 80
 +3000 tap delete 60
@@ -27,20 +27,15 @@
 +1200 tap enter 80
 
 20000 shot before_punch_armor
-20200 down up
-+140 up up
-+80 down lctrl
-+0 burst cp3a_b0 180 0
-+3200 up lctrl
-+50 down up
-+100 up up
-+100 down lctrl
-+0 burst cp3a_b1 180 0
-+3200 up lctrl
-+50 down up
-+100 up up
-+100 down lctrl
-+0 burst cp3a_b2 180 0
-+3200 up lctrl
-+300 shot after_cp3_armor
-+100 quit
+20050 memdump before_cp3a 65a1d4 100
+20200 down lctrl
++0 burst cp3a_lead 180 100
++18000 burst cp3a_hit 150 14
++2100 shot candidate_20s_cp3a
++0 memdump at20s_cp3a 65a1d4 100
++5000 shot candidate_25s_cp3a
++0 memdump at25s_cp3a 65a1d4 100
++5000 shot candidate_30s_cp3a
++0 memdump at30s_cp3a 65a1d4 100
++100 up lctrl
++500 quit
