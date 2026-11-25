@@ -36,6 +36,16 @@ roadmap, decision log and progress log.
    split into parts are not read; `cargo run -p gfa-tool -- archive <file>`
    says whether an archive will do.
 
+### Windows native builds
+
+If `rustup show active-toolchain` reports `x86_64-pc-windows-gnu`, install
+MinGW-w64 binutils (for example, `pacman -S mingw-w64-x86_64-binutils` in the
+MSYS2 MINGW64 shell) and add MSYS2's `mingw64\bin` directory to `PATH`.
+Cargo's GNU Windows linker needs `dlltool.exe` from that directory; `cargo
+check` may pass without it, but `cargo build` will fail while linking
+dependencies. Alternatively, use the `x86_64-pc-windows-msvc` Rust toolchain
+with Visual Studio C++ Build Tools installed.
+
 ## Running
 
 ```sh
