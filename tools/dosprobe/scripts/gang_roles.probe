@@ -1,0 +1,12 @@
+# Frame gang-role behavior and AI transitions in GTA8.EXE on the city campaign.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
++9000 shot gang_start
++5000 shot gang_idle
++5000 shot gang_hunt
++5000 shot gang_burst
++5000 shot gang_cooldown
++100 memdump gang_ped_ram 0x100000 0x100000
++100 quit

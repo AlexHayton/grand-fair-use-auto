@@ -1,0 +1,55 @@
+# Walk the default Liberty City campaign while recording a frame every second.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+19000 shot group_walk_start
++100 down up
++0 burst group_walk_frames 100 1000
++8000 up up
++100 down right
++256 up right
++100 down up
++8000 up up
++100 down right
++256 up right
++100 down up
++8000 up up
++100 down right
++256 up right
++100 down up
++8000 up up
++100 down right
++256 up right
++100 down up
++8000 up up
++100 down right
++256 up right
++100 down up
++8000 up up
++100 down right
++256 up right
++100 down up
++8000 up up
++100 down right
++256 up right
++100 down up
++8000 up up
++100 down right
++256 up right
++100 down up
++8000 up up
++100 down right
++256 up right
++100 down up
++8000 up up
++100 down right
++256 up right
++100 down up
++8000 up up
++100 down right
++256 up right
++100 down up
++8000 up up
++100 quit

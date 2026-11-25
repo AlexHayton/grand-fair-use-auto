@@ -1,0 +1,67 @@
+# Attempt the south-flank police-car entry, then scan control candidates.
+# Capture after each key to identify the police toggle and zoom-mode notices.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+17000 down left
++256 up left
++100 shot controls_facing_north
++100 down up
++1000 up up
++150 shot controls_at_cop
++100 burst enter_cop 140 0
++30 tap enter 70
++2200 shot controls_start
+
++500 tap f1 80
++100 shot controls_f1
++1400 tap f2 80
++100 shot controls_f2
++1400 tap f3 80
++100 shot controls_f3
++1400 tap f4 80
++100 shot controls_f4
++1400 tap f5 80
++100 shot controls_f5
++1400 tap f6 80
++100 shot controls_f6
++700 tap f6 80
++700 shot controls_f6_resume
++700 tap f7 80
++100 shot controls_f7
++1400 tap f8 80
++100 shot controls_f8
++1400 tap f9 80
++100 shot controls_f9
++1400 tap f10 80
++100 shot controls_f10
++1400 tap f11 80
++100 shot controls_f11
++1400 tap f12 80
++100 shot controls_f12
++1400 tap kpplus 80
++100 shot controls_kpplus
++1400 tap kpminus 80
++100 shot controls_kpminus
++1400 tap equals 80
++100 shot controls_equals
++1400 tap minus 80
++100 shot controls_minus
++1400 tap pageup 80
++100 shot controls_pageup
++1400 tap pagedown 80
++100 shot controls_pagedown
++1400 tap p 80
++100 shot controls_p
++1400 tap 1 80
++100 shot controls_1
++1400 tap 2 80
++100 shot controls_2
++1400 tap 3 80
++100 shot controls_3
++1400 tap l 80
++100 shot controls_l
++100 memdump controls_ram 0x100000 0x100000
++100 quit

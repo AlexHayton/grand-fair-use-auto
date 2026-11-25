@@ -1,0 +1,28 @@
+# Sample the Liberty City traffic-light cycle from a fixed player position.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+17000 shot lights_start
++1000 shot lights_01
++1000 shot lights_02
++1000 shot lights_03
++1000 shot lights_04
++1000 shot lights_05
++1000 shot lights_06
++1000 shot lights_07
++1000 shot lights_08
++1000 shot lights_09
++1000 shot lights_10
++1000 shot lights_11
++1000 shot lights_12
++1000 shot lights_13
++1000 shot lights_14
++1000 shot lights_15
++1000 shot lights_16
++1000 shot lights_17
++1000 shot lights_18
++1000 shot lights_19
++1000 shot lights_20
++100 quit

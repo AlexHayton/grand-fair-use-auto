@@ -167,27 +167,27 @@ Because `tools/dosprobe/run.py` mounts the owner's game folder under DOSBox-X wi
 
 - [ ] **Horn / siren pull-over (`Traffic::pull_over`)**
   - Measure lateral look width (provisional half-block in `crates/gfa-sim/src/traffic/mod.rs`), forward reach (`5` blocks?), pull-over speed (provisional `2` speed units), kerb offset (offsets `7` and `0x37` of `0x40`), whether the car stops completely and for how long (provisional `3` s), and whether an active (un-held) siren also triggers pull-over (`IMPLEMENTATION_PLAN.md`, `docs/PARITY.md`, `docs/REFERENCE_MAP.md`).
-  - **Probe script:** —
-  - **Measured:** —
-  - **Follow-up / status:** Pending.
+  - **Probe script:** `tools/dosprobe/scripts/traffic_pull_over.probe`; no-siren control: `traffic_pull_over_control.probe`. Both use `tools/dosprobe/overlays/traffic/GTADATA/MISSION.INI`.
+  - **Measured:** The treatment/control scripts run the same timed approach with and without Tab, but captures do not confirm that the player is seated in the cop car; no pull-over response can be attributed.
+  - **Follow-up / status:** **Pending.** Confirm car entry and isolate a target before measuring pull-over geometry, stop duration, or held-vs-toggled siren behavior.
 
 - [ ] **Unlisted hotkeys (police toggle & three zoom levels)**
   - Identify the DOS key bindings for the police toggle and the three zoom levels present in the FXT strings but missing from the 1997 README (`IMPLEMENTATION_PLAN.md` M6b & decision log).
-  - **Probe script:** —
-  - **Measured:** —
-  - **Follow-up / status:** Pending.
+  - **Probe script:** `tools/dosprobe/scripts/traffic_controls.probe` on the traffic overlay.
+  - **Measured:** The sweep captures F1–F12, keypad/main-row zoom candidates, and `p`/`1`–`3`/`l`; F6 pauses. Car entry is not confirmed, and no tested key has yet been confirmed as the police toggle or zoom binding.
+  - **Follow-up / status:** **Pending.** Confirm the vehicle state, then extend the key/chord sweep until each mode’s on-screen confirmation is captured; do not infer a binding from the FXT message names alone.
 
 - [ ] **Camera speed-zoom & lead-ahead**
   - Measure the original's speed-based zoom-out curve and easing (provisional up to `1.5×` at `10 px/tick` in `SimCamera`), and check whether/how far the camera leads a moving car (provisional Carnage3D `0.35 s` capped at 1/3 view) (`docs/PARITY.md`, `IMPLEMENTATION_PLAN.md`).
-  - **Probe script:** —
-  - **Measured:** —
-  - **Follow-up / status:** Pending.
+  - **Probe script:** `tools/dosprobe/scripts/traffic_camera.probe`; attempts the south-flank get-in sequence and captures at start and 700 ms intervals through 5.2 s.
+  - **Measured:** No speed/zoom ratio or lead distance is recorded; captures show the player is still on foot.
+  - **Follow-up / status:** **Pending.** Verify seating, then repeat on a long straight road segment.
 
 - [ ] **Traffic light cycle**
   - Measure exact green, amber, and red durations (provisional AmiGTA1 `5 s` green / `0.6 s` amber) (`docs/PARITY.md`).
-  - **Probe script:** —
-  - **Measured:** —
-  - **Follow-up / status:** Pending.
+  - **Probe script:** `tools/dosprobe/scripts/traffic_lights.probe` with `tools/dosprobe/overlays/traffic_lights/GTADATA/MISSION.INI`; captures one frame per second for 20 s.
+  - **Measured:** The sampling run completes, but the current fixed view does not yet provide a reliable, unobstructed signal-state sequence.
+  - **Follow-up / status:** **Pending.** Reposition the player/camera until the signal is clearly visible, then time phase transitions at frame-level resolution.
 
 ---
 
@@ -195,24 +195,25 @@ Because `tools/dosprobe/run.py` mounts the owner's game folder under DOSBox-X wi
 
 - [ ] **Special ped groups & bonuses (Hare Krishnas / Elvises)**
   - Verify which cities/levels spawn Hare Krishna lines and Elvis impersonators, spawn frequency/rules, walking formation, and exact bonus triggers/points (`GOURANGA!`, Elvis, cop kills) (`IMPLEMENTATION_PLAN.md`, `docs/PARITY.md`).
-  - **Probe script:** —
-  - **Measured:** —
-  - **Follow-up / status:** Pending.
+  - **Probe scripts:** `tools/dosprobe/scripts/special_groups.probe` and `special_groups_walk.probe` (Director's Cut); `special_groups_london.probe` (London). The walking run records one frame per second for 100 seconds.
+  - **Measured:** The walking run on the original Liberty City map shows a seven-person orange-robed line, visually matching the Hare Krishna group, in frames `0054`–`0067` (`73,112`–`86,110` DOSBox-X PIC ticks; about 13 seconds). The clearest frame (`0065`) shows seven members in a single-file sidewalk formation. The earlier stationary Liberty City and London captures did not identify special groups.
+  - **Follow-up / status:** Partial. Repeat to estimate spawn frequency and verify the group's actor type; check Vice City for Elvises and measure the bonus trigger/points separately.
+  - **Bonus-trigger introspection:** `ENGLISH.FXT` key `8787` is `GOURANGA!`. The GFA port's `World::run_over` currently awards a multiplier-scaled `500` points when a generic civilian run-over streak reaches four; its synthetic test verifies that port behavior, not the original game. Original mission `[1]` separately declares seven `FUTUREPED`s (`382`–`388`), enables them at command labels `1281`–`1293`, then checks their deaths; text key `1049` says `You were meant to kill 'em all`. No explicit `GOURANGA` command appears in this mission script. A DOSBox drive attempt entered a Bulldog but got stuck against a building without hitting pedestrians, so the original bonus trigger remains unverified.
 
 - [ ] **Gang roles state machine (for M7)**
   - Document the original state machine for script-spawned gang AI types (`gta_peds.c:1111`; AmiGTA1 only decoded police roles) (`IMPLEMENTATION_PLAN.md`, `docs/PARITY.md`).
-  - **Probe script:** —
-  - **Measured:** —
-  - **Follow-up / status:** Pending.
+  - **Probe script:** `tools/dosprobe/scripts/gang_roles.probe`
+  - **Measured:** Captured the default Liberty City campaign at `19,006`, `24,000`, `29,008`, `34,002` and `39,010` DOSBox-X PIC ticks, plus a 1 MiB RAM sample. No scripted gunman role or state transition was visible in the sampled frames.
+  - **Follow-up / status:** Keep pending. Drive a mission that spawns gang peds and decode the corresponding actor state from RAM.
 
 - [ ] **Ped anti-pileup departures comparison**
   - Compare AmiGTA1's four anti-bunching departures against `GTA8.EXE` street behaviour: spread corner targets across pavement, ped-ped separation/relax pass, no resting near corners, and per-ped coin flip at T-junctions (`IMPLEMENTATION_PLAN.md` decision log, `docs/PARITY.md`).
-  - **Probe script:** —
-  - **Measured:** —
-  - **Follow-up / status:** Pending.
+  - **Probe script:** `tools/dosprobe/scripts/ped_anti_pileup.probe` (run on the original city map, without a synthetic overlay)
+  - **Measured:** Walked the player through the default Liberty City area and captured frames at `19,006`, `28,808`, `39,010` and `44,003` DOSBox-X PIC ticks. The camera/player moved, but these captures do not isolate ped corner choices or separation.
+  - **Follow-up / status:** Keep pending. Need a reproducible busy intersection and tracked pedestrian positions across repeated runs.
 
 - [ ] **Cheats (for M8)**
   - Verify Director's Cut and London name-entry cheats against AmiGTA1's table (`gta_career.c:223`) (`IMPLEMENTATION_PLAN.md`).
-  - **Probe script:** —
-  - **Measured:** —
-  - **Follow-up / status:** Pending.
+  - **Probe script:** `tools/dosprobe/scripts/cheats.probe` (`buckfast`), `tools/dosprobe/scripts/cheats_control.probe` (Director's Cut default-name control), `tools/dosprobe/scripts/cheats_london.probe` (`buckfast`) and `tools/dosprobe/scripts/cheats_london_control.probe` (London default-name control)
+  - **Measured:** In the Director's Cut, entering `buckfast` then pressing keypad `*` changed the visible ammunition count to `99`; the default-name control did not. In London 1969 and 1961, the name was accepted and gameplay started, but keypad `*` did not show `99`; the corresponding no-name controls were also unchanged.
+  - **Follow-up / status:** Test remaining AmiGTA1 names and decode the London-specific cheat behavior. The probe runner mounts the edition's CD image automatically.

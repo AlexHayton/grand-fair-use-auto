@@ -43,6 +43,12 @@ gfa.local.toml
 *.[tT][iI][lL]
 *.[pP][aA][kK]
 *.[gG][fF][vV]
+
+# Self-authored mission-only overlays for DOSBox probes; no game assets.
+!tools/dosprobe/overlays/
+!tools/dosprobe/overlays/**/
+!tools/dosprobe/overlays/**/GTADATA/
+!tools/dosprobe/overlays/**/GTADATA/MISSION.INI
 *.[iI][sS][oO]
 # The archives the game comes in (the desktop program looks for one beside
 # itself, so one may well be dropped into a checkout).

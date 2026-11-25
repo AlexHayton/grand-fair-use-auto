@@ -1,0 +1,31 @@
+# Attempt the south-flank police-car entry, approach ambient traffic, and test
+# Tab both held and released. Compare with traffic_pull_over_control.probe.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+17000 down left
++256 up left
++100 shot pull_facing_north
++100 down up
++1000 up up
++150 shot pull_at_cop
++100 burst enter_cop 140 0
++30 tap enter 70
++2200 shot pull_start
++100 down up
++0 burst approach 160 0
++2400 shot approach
++100 tap tab 80
++100 shot siren_keypress
++6000 shot siren_after_release
++6000 shot siren_later
++100 tap tab 80
++100 shot siren_off
++100 down tab
++0 burst horn_hold 120 0
++2500 shot horn_held
++100 up tab
++100 shot horn_released
++100 quit

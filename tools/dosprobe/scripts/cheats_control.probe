@@ -1,0 +1,10 @@
+# Control for cheats.probe: leave the default player name and press keypad *.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
++9000 shot cheats_control_before
++100 tap kpmultiply 80
++1000 shot cheats_control_after
++100 memdump cheats_control_ram 0x100000 0x100000
++100 quit
