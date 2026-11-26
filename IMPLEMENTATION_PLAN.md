@@ -29,6 +29,7 @@ folder that contains `GTADATA/`. Alternatively set `GFA_DATA` or pass
 ## Reference projects and what they give us
 
 **Carnage3D** (sibling checkout `../carnage3d`, ~39k lines C++, MIT © 2019 jericho)
+
 - Strengths:
   - Data loaders: `src/GameMapManager.cpp` (CMP), `src/StyleData.cpp` (G24 only), `src/GameTextsManager.cpp` (FXT), `src/Font.cpp`, `src/AudioSampleArchive.cpp`. Structs are in `src/GameDefs.h`.
   - Palette-indexed renderer: `src/GameMapHelpers.cpp` (`BuildMapMesh`, slopes 1–44, lid rotation and flips), `src/MapRenderer.cpp` (22×22-block chunks), `gamedata/shaders/*.glsl`.
@@ -43,6 +44,7 @@ folder that contains `GTADATA/`. Alternatively set `GFA_DATA` or pass
 - Its `web/*.data` bundles demo game data. Do not copy it.
 
 **AmiGTA1** (sibling checkout `../AmiGTA1`, ~38k lines of portable game-logic C, MIT)
+
 - What it covers:
   - Behaviour derived from the original.
   - `.GRY` v325 only (`native/gta_style.c`).
@@ -76,6 +78,7 @@ folder that contains `GTADATA/`. Alternatively set `GFA_DATA` or pass
   - The 117 `tools/scripts/*.txt` input scripts are consumed one order per tick; each header lists the log lines it expects.
 
 **hdtex** (`../in_pursuit_of_greed/tools/hdtex`, the author's own project)
+
 - Real-ESRGAN 4× using the vendored `rrdbnet.py` (MPS on Mac).
 - `upscale.py` handles wrap-aware tiling: tiles are upscaled as a 3×3 mosaic and the centre is cropped back out.
 - Sprites: transparency is filled before upscaling, then remasked.
@@ -86,6 +89,7 @@ folder that contains `GTADATA/`. Alternatively set `GFA_DATA` or pass
 - Video uses NGX VSR (NVIDIA only), with ESRGAN as the macOS fallback.
 
 **Game data:** a Director's Cut install (complete). Its location is machine-local (`gfa.local.toml` / `GFA_DATA`).
+
 - `GTADATA/`:
   - Maps and styles: NYC, SANB and MIAMI `.CMP`; STYLE001-003 in both `.GRY` and `.G24`.
   - Script and text: `MISSION.INI` (sections [1],[2],[102],[103],[202],[203] plus multiplayer); FXTs; `.FON`.
@@ -95,11 +99,10 @@ folder that contains `GTADATA/`. Alternatively set `GFA_DATA` or pass
 - `GTADATA/UK/`: London (`UK.CMP`, `MC.CMP`, `uke.cmp`, `Style001.g24/.gry`, `MISSUK.INI`, `missuke.ini`/`misse8.ini`, FXTs, `UK.MAP`, `MC.MAP`, `AUDIO/*.PK`, `MOVIE.SMK`).
 - `MUSIC/GTA/Track02-11.ogg` and `MUSIC/LONDON/Track02-16.ogg`, each with a `CDAUDIO.DAT` cue sheet.
 
-
 Toolchain: Rust stable (1.100 at the start), the `wasm32-unknown-unknown` target, Trunk 0.22, Node 24 (for running wasm tests), Apple clang (for the AmiGTA1 oracle).
 
-
 ## Principles
+
 1. **Behaviour comes from AmiGTA1; data and geometry from Carnage3D.** On gameplay, AmiGTA1 wins.
 2. **The sim is pure and deterministic.** `gfa-sim` has no floats (`#![deny(clippy::float_arithmetic)]`), no I/O, no clock and no platform crates. It is a function `(state, tick inputs) -> state`. Rendering interpolates between ticks with floats.
 3. **Use AmiGTA1's sim units exactly**: 16.16 at 32 px/block, 256-step angles, the Q14 table, the 50 Hz base and its subsystem dividers.
@@ -120,7 +123,7 @@ Toolchain: Rust stable (1.100 at the start), the `wasm32-unknown-unknown` target
    - Replay hashes, native vs wasm.
    - Differential traces against AmiGTA1.
    - Mission opcode coverage.
-8. **AmiGTA1 is the floor, not the ceiling.** The target is the whole original game, so anything AmiGTA1 lacks or leaves partial is scheduled work (see *Gaps beyond AmiGTA1*). Where AmiGTA1 is silent, establish the original's behaviour before building it, and log the evidence in the decision log. Evidence sources, in order:
+8. **AmiGTA1 is the floor, not the ceiling.** The target is the whole original game, so anything AmiGTA1 lacks or leaves partial is scheduled work (see _Gaps beyond AmiGTA1_). Where AmiGTA1 is silent, establish the original's behaviour before building it, and log the evidence in the decision log. Evidence sources, in order:
    - the game's own data (FXT strings, MISSION.INI, style tables);
    - Carnage3D's docs;
    - community format and mission docs;
@@ -129,6 +132,7 @@ Toolchain: Rust stable (1.100 at the start), the `wasm32-unknown-unknown` target
    Never invent features. For example, AmiGTA1 notes that the original's police send no army or SWAT (`gta_traffic.h:2622`), so we add none unless evidence says otherwise.
 
 ## Workspace layout
+
 ```
 grand-fair-use-auto/
   Cargo.toml  rust-toolchain.toml  .cargo/config.toml
@@ -159,7 +163,9 @@ grand-fair-use-auto/
   docs/           REFERENCE_MAP.md, FORMATS.md, MISSION_OPCODES.md,
                   PARITY.md (feature ledger: original / AmiGTA1 / GFA status + evidence)
 ```
+
 Main crates:
+
 - wgpu, winit, glam (render side only), egui + egui-wgpu + egui-winit
 - kira (ogg playback)
 - web-time, wasm-bindgen(-futures), web-sys, pollster
@@ -168,18 +174,21 @@ Main crates:
 - image (tool only)
 
 ## Milestones
+
 Each milestone has tasks with checkboxes and an **exit criterion**. Named references are the files to read while porting.
 
 **M0: Scaffold and guardrails**
+
 - [x] git init. `.gitignore`: `target/`, data extensions (`*.cmp *.gry *.g24 *.fxt *.raw *.rat *.sdt *.smk *.rep *.fon *.ogg *.wav`, matched case-insensitively), `gfa.local.toml`, `hd/`, `tools/hdtex/.venv`, `*.pth`, `tools/oracle/build/`.
 - [x] LICENSE (MIT). THIRD-PARTY.md: the Carnage3D and AmiGTA1 MIT notices; Real-ESRGAN weights (BSD-3) are downloaded, never committed. README.
 - [x] Workspace and crate skeletons. Cargo aliases: `wasm-check`, `data-test`.
 - [x] Data path resolution: `--data` flag, then `GFA_DATA`, then `gfa.local.toml`.
-- [x] `docs/PARITY.md` seeded from *Gaps beyond AmiGTA1*.
+- [x] `docs/PARITY.md` seeded from _Gaps beyond AmiGTA1_.
 - [x] `gfa-native` opens a winit + wgpu window that clears the screen. `gfa-web` builds with Trunk.
 - Exit: `cargo build`, `cargo test` and `cargo wasm-check` are green; a window opens natively and in the browser.
 
 **M1: Formats** (`gfa-formats`, `gfa-tool`)
+
 - [x] CMP v331. Ref: Carnage3D `GameMapManager.cpp`, AmiGTA1 `gta_map.c`. (`gfa_formats::cmp`, notes in `docs/FORMATS.md`)
   - Header; base offsets and column-compressed blocks, validated on load; lookups by `(x, y, z)`.
   - Startup objects, routes (police patrols and roadblock lists, which Carnage3D skips), service bases, districts.
@@ -205,6 +214,7 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
 - Exit: the whole Director's Cut set parses, and the exported art looks right. GRY and G24 agree on structure (they do, except where `docs/FORMATS.md` records the differences).
 
 **M2: Static city renderer (native + web)**
+
 - [x] City mesh. Ref: Carnage3D `GameMapHelpers::BuildMapMesh`, `MapRenderer`. (`gfa_render::city_mesh`)
   - Faces, lid rotation and flips, slopes 1–44, flat/transparent faces.
   - 16×16-block chunks (256 / 16 divides evenly; Carnage3D uses 22×22) with frustum culling; neighbouring visible chunks merge into one draw.
@@ -230,6 +240,7 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
   - Met except Safari: native and Chrome render at 2560×1600; holecheck is 0 on all six maps (NYC, SANB, MIAMI, UK, MC, UKE).
 
 **M3: Deterministic sim foundation**
+
 - [x] `gfa-fixed` ports AmiGTA1's formats, trig and RNGs (`gta_trig.c`).
   - `trig`: the Q14 cosine table and the `dir16` arctangent, both generated from their formulas (a test rebuilds them with floats); `cos16`/`sin16` interpolate fractional angles.
   - `rng`: the traffic/train (Numerical Recipes), ped (ANSI C) and voice generators in 32-bit arithmetic; `fx`: 16.16 helpers at 32 px a block.
@@ -262,6 +273,7 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
     - The three walk scripts and 24 random walks (about 43,000 ticks over NYC, San Andreas and Vice City) match AmiGTA1 tick for tick: position, layer, angle, animation frame and blocked flags.
 
 **M4: Vehicles.** Ref: `gta_vehphys.c/.h` (essay in the header), `gta_car.c`, `gta_train.c`, `gta_main.c:790-805` and around line 8960 (jump arc).
+
 - [x] Two-tyre rigid body with the style's raw 16.16 values. Rear grip ×1.5; handbrake 0.6; road-snap assist.
   - `gfa_sim::vehicle`: AmiGTA1's `gta_vehphys.c` in `i64`, which is its 64-bit host build's arithmetic (the oracle's). G24 and GRY car tables are checked equal by a data test.
 - [x] Wall resolve with a 10-point outline and safe-position revert.
@@ -280,12 +292,13 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
   - Liberty City: 3 trains on a 662-block loop with 5 stations; Vice City: 2 trains, 3 stations; San Andreas: 6 trams. Drawn as AmiGTA1 does, three train sprites a carriage.
   - `tools/oracle/traintrace.c` runs AmiGTA1's own `gta_train.c`; `oracle_trains` matches 12,000 ticks of every city's trains. `tools/scripts/train_ride.txt` boards, rides, hijacks, hands back and gets off.
 - [ ] Use `tools/vehruler.c` as the measurement reference.
-- [ ] Close the M4 items in *Gaps beyond AmiGTA1*: trains; cars sinking and drowning. (Pull-over, the siren, bombs and chain explosions moved to M5 and M6; the tank, boats, helicopter and RC car to M6b.)
+- [ ] Close the M4 items in _Gaps beyond AmiGTA1_: trains; cars sinking and drowning. (Pull-over, the siren, bombs and chain explosions moved to M5 and M6; the tank, boats, helicopter and RC car to M6b.)
   - Water done on 2026-11-21. Trains wait on a comparison with the original's path table.
 - Exit: every class AmiGTA1 drives (cars, bikes, buses, trains) drives; the (91,105..108) jump lands; vehicle traces match the oracle.
   - So far: the jump lands; `tools/oracle/drivetrace.c` (AmiGTA1's physics, wall and layer code, with its main loop's glue restated) matches gfa-sim on `drive_oracle`, `drive_jump`, `drive_wall`, `drive_sink` and 24 random drives over the three cities with random vehicles (`oracle_drive_scripts`, `oracle_random_drives`).
 
 **M5: Living city.** Ref: `gta_traffic.c` (10.6k lines), `gta_route.c` (BFS: 48-block window, 700 nodes), `gta_nav.c`, `gta_peds.c`.
+
 - [x] Fleet spawn and despawn on the logical view.
   - Nothing may pop in or out where the player can see it. The camera's lead and any speed zoom become sim state (from position and speed only), the spawn and despawn rings follow them with AmiGTA1's margins (+2..+6 blocks spawn, +9 despawn), and in normal play the renderer never shows more ground than that view: zoom-out is capped and windows wider than 21:9 are pillarboxed. Free look, fly and extreme zoom are debug views where pop-in is accepted.
   - A pop-in check, like the holecheck: run traffic and fail if anything spawns or despawns inside the visible ground at the largest allowed zoom and aspect.
@@ -312,12 +325,13 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
   - Drawn in the app between ticks and in `gfa-tool` pictures, in his own dress (`PED_REMAP_TABLES`, measured).
   - The walk and drive oracles compare every living ped on every tick (`tools/oracle/fleet.h` runs AmiGTA1's crowd): all 71 runs match.
   - Not yet (M6/M7): shooting and punching people, panic at gunfire, fire, cops on foot, the script's own people.
-- [x] Close the M5 items in *Gaps beyond AmiGTA1*: junction fidelity, pull-over, the siren. (The counter-punch and special ped groups moved to M6, gang roles to M7, on 2026-11-21.)
+- [x] Close the M5 items in _Gaps beyond AmiGTA1_: junction fidelity, pull-over, the siren. (The counter-punch and special ped groups moved to M6, gang roles to M7, on 2026-11-21.)
   - 2026-11-21: the siren and the horn done; the pull-over built with provisional numbers, which M6b measures; junction fidelity measured and closed (decision log).
 - Exit: the `drive` traces from `fullgate`/`litegate` (4 sites × 3 seeds × 12,000 ticks) match the oracle, with no deadlocks.
   - Met for the traffic (2026-11-21): `oracle_traffic` runs `fullgate`'s twelve runs in `gtadump drive`'s setup and every trace matches AmiGTA1 (patched as `tools/oracle/build.sh` lists); `traffic_gate` passes all twelve on AmiGTA1's own checks (on the road, none inside another, none vanishing in view, the fleet moving) and ours (no car standing a minute). `litegate`'s lite mode is not in this AmiGTA1. AmiGTA1 unpatched passes 3 of the 12. The gap items below remain.
 
 **M6: Combat, police, services.** Ref: `gta_weapon.c`, `gta_pickup.c`, `gta_score.c` (heat thresholds such as LC 151/251/351/501), `gta_traffic.c:9681-10500` (cop dispatch, roadblocks), `gta_peds.c:1912-2066` (arrest, shooting), `gta_service.c`, `gta_marks.c`, plus the `gta_main.c` busted/wasted/siren code.
+
 - [x] Five weapons, rockets and flames, fires and explosions; crates.
   - Stage 1 (2026-11-21), the weapons: `gfa_sim::weapons`, AmiGTA1's `gta_weapon.c`. The fist (the standing punch, its blow on the third state, ten of thirteen landing), the pistol, the machine gun, the rocket launcher and the flamethrower; the shot pool of 40 with its muzzles, speeds, ranges and grace ticks; hits in the original's order (flat faces, then the player, people, cars, the block); bullet damage by body class; the panic a shot starts; explosions (kill, burn and write-off rings), the three fires a rocket leaves on a wall, the script's face explosion for M7, and cars blowing up in one, three or five blasts, which write off their neighbours: the chain. The player is a target too (bullets, his car's bodywork, blasts, burning) down to WASTED, which takes his guns and the heat.
   - The score with it: `gfa_sim::score`, AmiGTA1's `gta_score.c` (awards by type, reason and streak; the heat and each city's thresholds; the crime counters), wired to the run-over, the carjack, the shunt, touching a police car, the hijacked train and every hit above.
@@ -327,11 +341,12 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
 - [x] Wanted levels, chases and rams, roadblocks, arrest; BUSTED and WASTED, lives, hospital.
 - [x] Ambulance and fire engine. Spray and bomb shops.
 - [x] Tyre marks, blood and oil for all cars. AmiGTA1 only marks the player's car.
-- [x] Close the M6 items in *Gaps beyond AmiGTA1*: crates, armour, friendly fire, wall fires, power-ups, bonuses, police reasons, bust tally, bombs, chain explosions, blast damage. (The `(verify)` items — the counter-punch, special ped groups, and type-4 tanker bomb global — wait for M6b's DOSBox-X probe.)
+- [x] Close the M6 items in _Gaps beyond AmiGTA1_: crates, armour, friendly fire, wall fires, power-ups, bonuses, police reasons, bust tally, bombs, chain explosions, blast damage. (The `(verify)` items — the counter-punch, special ped groups, and type-4 tanker bomb global — wait for M6b's DOSBox-X probe.)
 - Exit: the bust, death and spray-escape loops work; the AmiGTA1 `car_*`, `bankblast` and `blood*` scripts pass.
   - Met (2026-11-22): all M6 synthetic tests (`synthetic.rs`) and scripts (`car_*`, `bankblast`, `blood`) pass.
 
 **M6b: Measured from the original.** The vehicles AmiGTA1 does not drive, measured from the DOS original running under DOSBox-X (Principle 8). After M6, because the tank's cannon uses its explosions.
+
 - [ ] Probe harness, `tools/dosprobe`. DOSBox-X runs `GTADOS/GTA8.EXE` from the owner's data folder with a generated config.
   - Key presses come from a script timed in emulated time, not wall-clock time, so a run repeats exactly.
   - Readouts are screenshots, with sprite position and angle measured from the pixels, and memory dumps once the player's vehicle is found in memory.
@@ -350,12 +365,13 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
 - Exit: each drives as measured; the numbers and the probe scripts that produced them are in the decision log.
 
 **M7: Mission VM, HUD, text.** Ref: `gta_script.c`, `gta_script_run.c` (`cmd_names[]` at lines 35-172; `step()` at 645; `gta_script_tick` at 2691), `gta_script.h:203-220` and `:459-663`, the `gta_main.c` callbacks (doors, cranes, bombs, the arrow), `gta_hud.c`, `gta_font.c`, `gta_text.c`, and `gta_main.c:2615-2830` (text displays).
+
 - [ ] Port the VM: declarations, the command table, 32 processes, triggers (TRIGGER/MPHONES/CARTRIGGER/DUM_MISSION_TRIG), phones, arrows, garages and doors, cranes, kill frenzies, bank robbery.
 - [ ] **Unknown commands log section and line and count toward coverage. They do not silently succeed.**
 - [ ] `docs/MISSION_OPCODES.md` lists every command used in GTA's `MISSION.INI` with its status. Sources: AmiGTA1's table, Carnage3D `docs/ped.txt`, community mission docs, and observed behaviour.
 - [ ] `gfa-tool mission coverage` produces the coverage report.
 - [ ] Original HUD: cop heads, weapon and ammo, armour, jail-free card, the pager scroll, the brief box, the big two-line card, score and multiplier fonts.
-- [ ] Close the M7 items in *Gaps beyond AmiGTA1*: every job, a playthrough script per job, mission-only vehicles, gang roles.
+- [ ] Close the M7 items in _Gaps beyond AmiGTA1_: every job, a playthrough script per job, mission-only vehicles, gang roles.
 - Exit, in order:
   1. LC jobs 1–2 pass AmiGTA1's `threejobs`/`phonering`/`lc2_job1` scripts.
   2. Each level's first job passes (`sa1`, `sa2`, `vc1`, `vc2`).
@@ -364,12 +380,13 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
   5. Every used opcode is implemented, or stubbed with a documented reason.
 
 **M8: Front end, audio, saves.** Ref: `gta_front.c`, `gta_career.c`, `gta_audio.c` (radio and engine-pitch logic), `gta_sfx.c`, `gta_snd.h`.
+
 - [ ] Title and menus in the original fonts; player and chapter select; high scores.
 - [ ] Briefing stills `CUT0-5` with `0-5.WAV`.
 - [ ] SFX banks with positional mix; engine pitch; VOCALCOM; MISBRIEF.
 - [ ] Radio: clock-based stations `(offset+elapsed) mod length` mapped to `Track02-11.ogg` through `CDAUDIO.DAT`; the police band only in police cars; on-foot ambience; a station key.
 - [ ] Web audio starts on the first gesture.
-- [ ] Close the M8 items in *Gaps beyond AmiGTA1*: cheats, language, high scores, pause and options, attract demos, complete speech and SFX.
+- [ ] Close the M8 items in _Gaps beyond AmiGTA1_: cheats, language, high scores, pause and options, attract demos, complete speech and SFX.
 - [ ] Saves: read and write the original `PLAYER_A.DAT` format behind a `SaveStore` trait.
   - Native: `~/Library/Application Support/GrandFairUseAuto`.
   - Web: IndexedDB.
@@ -377,10 +394,12 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
 - Exit: boot, title, chapter, play, complete, save, relaunch, resume.
 
 **M9: FMV**
+
 - [ ] SMK2 decoder in Rust, written from the public format description rather than LGPL FFmpeg or libsmacker code. Video and audio. Skippable. Same code on native and web. Covers `MOVIE.SMK` and `UK/MOVIE.SMK`.
 - Exit: the intro plays in sync on macOS and in the browser.
 
 **M10: HD remaster layer** (port of hdtex)
+
 - [ ] `gfa-tool export-art` writes PNG indices plus a JSON manifest per asset: class (tile/sprite/font/hud/frontend/cut), CLUT, wrap flag, semantic indices, sprite span masks.
 - [ ] `tools/hdtex`:
   - Reuse `rrdbnet.py`, `upscale.py`, `palette.py`, `pixelart.py`, `contact_sheet.py`, the `pack.py` split logic, `setup.sh` and `fetch_weights.py`.
@@ -411,6 +430,7 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
   - Contact sheets have been reviewed.
 
 **M11: London 1969 and 1961**
+
 - [ ] Detection: `MISSUK.INI` means 69, `missuke.ini` means 61.
 - [ ] `Style001`/`Sty001` styles; London FXT key; `Track02-16`.
 - [ ] Investigate `UK.MAP`, `MC.MAP` (CMP-like headers), `AUDIO/*.PK` and `misse8.ini`.
@@ -418,6 +438,7 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
 - Exit: London 69 is playable; London 61 loads and plays.
 
 **M12: Polish and release**
+
 - [ ] Settings: render scale, HD toggle, key rebinding, gamepad (gilrs).
 - [ ] macOS `.app` bundle.
 - [x] Static web deploy with no data in it. (2026-11-21: GitHub Pages, from `.github/workflows/pages.yml` and `tools/web/build.sh`; `vercel.json` also builds it on Vercel.)
@@ -425,7 +446,9 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
 - [ ] Docs.
 
 ## Gaps beyond AmiGTA1 (full-game parity)
+
 Sources for this list:
+
 - AmiGTA1's own status notes: the README "WHAT IS NOT IN v0.7.1" (`tools/bin/readme_gen.py:620`) and `gta_weapon.h:34` "Not built yet".
 - Its in-code `NOT PORTED` and `not yet` markers.
 - An audit of what it never models.
@@ -433,6 +456,7 @@ Sources for this list:
 Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.md`. **(verify)** means: settle the original's behaviour first (Principle 8), because AmiGTA1 gives no answer.
 
 **M4 Vehicles**
+
 - Moved on 2026-11-20 because they need later systems: the horn and pull-over and the siren toggle to M5 (traffic), dragging a driver out to M5 (peds); bombs, chain explosions and blast damage to M6 (weapons).
 
 - Moved on 2026-11-20 to M6b, to be measured from the original under DOSBox-X: the tank, boat handling, the helicopter and the RC car.
@@ -452,6 +476,7 @@ Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.m
   - 2026-11-20: AmiGTA1 has since replaced the chord with straights and quarter circles, which is ported; the original's nine-shape path table itself is still to compare against. Boarding, riding, getting off and driving work on Liberty City (`train_ride.txt`); IS_PLAYER_ON_TRAIN comes with M7.
 
 **M5 Living city**
+
 - [ ] **Horn and pull-over**: the original's look-ahead of up to five blocks for a car (`gta_main.c:3957`, NOT PORTED). The horn is done; the pull-over is built with provisional numbers, to measure in M6b.
 - [x] **Emergency vehicles the player drives**: the siren and light toggle in cop cars, ambulances and fire engines, and how traffic reacts to it (the pull-over, above). The siren's sound is M8's.
 - [x] **Dragging the driver out** when the player takes an occupied car (moved from M4: needs peds). The carjack's score is M6's.
@@ -459,6 +484,7 @@ Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.m
 - [x] Traffic fidelity issues AmiGTA1 lists as open: junction wobble (`gta_traffic.c:5871`) and corner landing error (`gta_traffic.c:5666`). Measured and closed (decision log, 2026-11-21).
 
 **M6 Combat, police, services**
+
 - [ ] The victim's ped counter-punch (`gta_peds.c:1675`; moved from M5 on 2026-11-21: needs the player's punch). What it does: **(verify)** in M6b.
 - [ ] **Special ped groups** that the bonuses need: Hare Krishna lines; Elvis impersonators **(verify which levels)** in M6b. Spawn rules come from the style and ped tables. (Moved from M5 on 2026-11-21: the bonuses are here.)
 - [x] **Bombs**: bomb shop rigs car for 5,000 points (`kind 1`), armed by fire key (`kind 2`, 250-tick fuse), plus trigger (`kind 3`), damage (`kind 4`), and speed (`kind 5`) bombs (`World::bombs_tick`). The type-4 tanker bomb global awaits **(verify)** in M6b.
@@ -477,6 +503,7 @@ Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.m
 - [x] Police escalation stays cop cars only (`gta_traffic.h:2622`) unless evidence says otherwise.
 
 **M6b Measured from the original**
+
 - [ ] **Tank** (model 0x25). AmiGTA1 has only its handling: the engine cut at top speed (`gta_vehphys.c:395`) and its turn rate. Add:
   - the rotating turret, aimed independently of the hull;
   - cannon shells on the fire key: projectile, explosion, wall and car damage;
@@ -489,6 +516,7 @@ Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.m
   - The RC car (model 47) has no doors either. Drivable or not, and how? **(verify)**
 
 **M7 Missions**
+
 - [ ] Settle the gang-role state machine (`gta_peds.c:1111`; moved from M5 on 2026-11-21: only the script makes gangs). The original's states: **(verify)** in M6b.
 - [ ] **Every job of every chapter.** AmiGTA1 played through only the first job of each level.
   - Add one `tools/scripts` playthrough per job as each job is finished.
@@ -496,6 +524,7 @@ Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.m
 - [ ] Mission-only vehicles and objects: tanker, escape helicopter, train jobs, boat jobs, crane and garage set pieces. They come from the opcode coverage report.
 
 **M8 Front end, audio, saves**
+
 - [ ] **Cheats**: port AmiGTA1's name-entry cheat table (`gta_career.c:223`; flags `GTA_CHEAT_*` in `gta_career.h:69-78`). Also check for Director's Cut and London cheats. **(verify)**
 - [ ] **Language select** across the four FXTs, plus the SPECIAL.FXT toggle (`GTA_CHEAT_LANG`).
 - [ ] **High-score table**: layout from the research notes in `gta_career.h`; display, entry and save.
@@ -506,6 +535,7 @@ Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.m
 **M11 London**: all of it is beyond AmiGTA1, whose level table covers sections [1],[2],[102],[103],[202],[203] only (`gta_main.c:167`).
 
 ## Cross-cutting
+
 - **Attribution:** `docs/REFERENCE_MAP.md` maps each module to its Carnage3D and AmiGTA1 sources, and module headers credit them, as AmiGTA1 credits Carnage3D.
 - **Testing layers** (`cargo test`, `cargo data-test`, `cargo oracle-test`, `cargo test-all`; see the README): unit tests; data tests gated on `GFA_DATA`; golden renders and holecheck; replay hashes, native vs wasm; oracle traces; script expectations; mission coverage. Stretch goal: decode the original `.REP` replays as a fidelity oracle.
 - **Risks and open questions** (answers go in the decision log):
