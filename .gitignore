@@ -68,6 +68,7 @@ tools/hdtex/work/
 tools/oracle/build/
 
 # DOSBox-X probe build, captures, memory dumps and savestates
+tools/dosprobe/__pycache__
 tools/dosprobe/build/
 tools/dosprobe/out/
 tools/dosprobe/states/

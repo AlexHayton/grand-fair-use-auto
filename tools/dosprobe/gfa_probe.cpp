@@ -12,6 +12,13 @@
 #include <string>
 #include <sys/stat.h>
 #include <vector>
+#ifdef _WIN32
+#include <direct.h>
+#include <windows.h>
+#include <propkeydef.h>
+#include <initguid.h>
+#include <functiondiscoverykeys_devpkey.h>
+#endif
 
 #include "hardware.h"
 #include "keyboard.h"
@@ -105,19 +112,28 @@ void fatal_probe(const char *msg) {
 
 bool mkdir_recursive(const std::string &dir) {
     if (dir.empty()) return true;
+    std::string path = dir;
+    std::replace(path.begin(), path.end(), '\\', '/');
     std::string cur;
     size_t i = 0;
-    if (dir[0] == '/') {
+    if (path.size() >= 2 && path[1] == ':') {
+        cur = path.substr(0, 2) + '/';
+        i = 2;
+    } else if (path[0] == '/') {
         cur = "/";
         i = 1;
     }
-    while (i <= dir.size()) {
-        size_t slash = dir.find('/', i);
-        std::string part = (slash == std::string::npos) ? dir.substr(i) : dir.substr(i, slash - i);
+    while (i <= path.size()) {
+        size_t slash = path.find('/', i);
+        std::string part = (slash == std::string::npos) ? path.substr(i) : path.substr(i, slash - i);
         if (!part.empty()) {
             if (!cur.empty() && cur.back() != '/') cur += '/';
             cur += part;
+#ifdef _WIN32
+            if (_mkdir(cur.c_str()) != 0 && errno != EEXIST) {
+#else
             if (mkdir(cur.c_str(), 0755) != 0 && errno != EEXIST) {
+#endif
                 return false;
             }
         }

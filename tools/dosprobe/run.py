@@ -12,7 +12,7 @@ import sys
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 DOSPROBE_DIR = pathlib.Path(__file__).resolve().parent
-DEFAULT_BIN = DOSPROBE_DIR / "build" / "dosbox-x"
+DEFAULT_BIN = DOSPROBE_DIR / "build" / ("dosbox-x.exe" if os.name == "nt" else "dosbox-x")
 DEFAULT_STATES = DOSPROBE_DIR / "states"
 PROBE_EPOCH = 883656000  # 1998-01-01 12:00:00 UTC (matches gfa_probe_init_time)
 

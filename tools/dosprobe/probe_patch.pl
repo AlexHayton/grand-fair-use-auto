@@ -26,6 +26,31 @@ sub patch_file {
 }
 
 patch_file(
+    'src/output/output_tools.cpp',
+    ['guard disabled D3D shader menu', qr{#if C_DIRECT3D\r?\n(    if \(sdl\.desktop\.want_type != SCREEN_DIRECT3D\) mainMenu\.get_item\("load_d3d_shader"\)[^\r\n]*)}, sub { "#if C_D3DSHADERS\n$1" }],
+    ['guard D3D shader menu refresh', qr{#ifdef C_DIRECT3D\r?\n(        mainMenu\.get_item\("load_d3d_shader"\)[^\r\n]*)}, sub { "#if C_D3DSHADERS\n$1" }],
+);
+
+patch_file(
+    'src/output/direct3d/direct3d.cpp',
+    [
+        'portable projection matrix multiplication',
+        qr{m_matProj \*= x;},
+        sub { 'multiply_probe_matrix(m_matProj, x);' },
+    ],
+    [
+        'portable world matrix multiplication',
+        qr{m_matWorld \*= t;},
+        sub { 'multiply_probe_matrix(m_matWorld, t);' },
+    ],
+    [
+        'add portable matrix multiplication',
+        qr{void CDirect3D::SetupSceneScaled\(void\)},
+        sub { "static void multiply_probe_matrix(D3DXMATRIX &a, const D3DXMATRIX &b) {\n    D3DXMATRIX result = {};\n    for (int i = 0; i < 4; ++i) for (int j = 0; j < 4; ++j)\n        for (int k = 0; k < 4; ++k) result.m[i][j] += a.m[i][k] * b.m[k][j];\n    a = result;\n}\n\n$_[0]" },
+    ],
+);
+
+patch_file(
     'src/misc/Makefile.am',
     [
         'add gfa_probe.cpp to libmisc_a_SOURCES',
@@ -121,6 +146,7 @@ patch_file(
         qr{srand\(time\(NULL\)\);},
         sub { 'srand((unsigned int)gfa_probe_init_time());' },
     ],
+    ['guard D3D shader menu', qr{#ifdef C_DIRECT3D\r?\n(        mainMenu\.get_item\("load_d3d_shader"\)[^\r\n]*)}, sub { "#if C_D3DSHADERS\n$1" }],
 );
 
 patch_file(

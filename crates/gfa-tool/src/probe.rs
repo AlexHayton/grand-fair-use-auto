@@ -535,6 +535,123 @@ fn build_combat_score_nonplayer() -> Result<GeneratedOverlay> {
     })
 }
 
+fn build_combat_score_script() -> Result<GeneratedOverlay> {
+    let mut b = fill_arena(|x, y| {
+        if (x, y) == (130, 129) {
+            Cell::Building
+        } else {
+            Cell::Road
+        }
+    });
+    let (cmp_bytes, cmp) = finish_cmp(&mut b, "Probe Script Car Explosion")?;
+    let ini_bytes = build_mission_ini_with_cmds(
+        "Probe Script Car Explosion",
+        &[
+            "2 1 (127,129,4) PLAYER 1 512",
+            "9 1 (127,129,4) TRIGGER 100 1",
+            "20 (129,129,4) FUTURECAR 31 0",
+            "21 (125,129,4) FUTURECAR 31 0",
+            "22 (127,130,4) FUTURECAR 31 0",
+            "30 (130,129,1) DUMMY 0 0",
+            "31 (130,129,2) DUMMY 0 0",
+            "32 (130,129,3) DUMMY 0 0",
+            "33 (130,129,4) DUMMY 0 0",
+            "34 (130,129,5) DUMMY 0 0",
+        ],
+        &[
+            "0 DONOWT 0 0 0 0 0",
+            "100 DISABLE 9 0 0 0 0",
+            "101 PARKED_ON 20 0 -1 0 0",
+            "102 PARKED_ON 21 0 -1 0 0",
+            "103 EXPLODE 30 0 0 0 0",
+            "104 SURVIVE 0 0 0 30 0",
+            "105 EXPLODE 31 0 0 0 0",
+            "106 SURVIVE 0 0 0 30 0",
+            "107 EXPLODE 32 0 0 0 0",
+            "108 SURVIVE 0 0 0 30 0",
+            "109 EXPLODE 33 0 0 0 0",
+            "110 SURVIVE 0 0 0 30 0",
+            "111 EXPLODE 34 0 0 0 0",
+            "112 PARKED_ON 22 0 -1 0 0",
+            "113 DONOWT 0 0 0 0 0",
+        ],
+    )?;
+    Ok(GeneratedOverlay {
+        cmp_bytes,
+        ini_bytes,
+        cmp,
+    })
+}
+
+fn build_combat_score_npc() -> Result<GeneratedOverlay> {
+    let mut b = fill_arena(|x, y| {
+        if (x, y) == (130, 129) {
+            Cell::Pavement
+        } else {
+            Cell::Road
+        }
+    });
+    let (cmp_bytes, cmp) = finish_cmp(&mut b, "Probe NPC Car Explosion")?;
+    let ini_bytes = build_mission_ini_with_cmds(
+        "Probe NPC Car Explosion",
+        &[
+            "2 1 (127,129,4) PLAYER 1 256",
+            "9 1 (127,129,4) TRIGGER 100 1",
+            "20 (128,129,4) FUTURECAR 31 0",
+            "21 1 (8328,8288,256) FUTUREPED 0 768",
+        ],
+        &[
+            "0 DONOWT 0 0 0 0 0",
+            "100 DISABLE 9 0 0 0 0",
+            "101 PARKED_ON 20 0 -1 0 0",
+            "102 UNLOCK_DOOR 20 0 0 0 0",
+            "103 SET_COLLIDE 20 0 0 0 0",
+            "104 PED_ON 21 0 0 147 0",
+            "105 CHANGE_PED_TYPE 21 0 -1 21 2",
+            "106 PED_WEAPON 21 0 0 3 0",
+            "107 DONOWT 0 0 0 0 0",
+        ],
+    )?;
+    Ok(GeneratedOverlay {
+        cmp_bytes,
+        ini_bytes,
+        cmp,
+    })
+}
+
+fn build_combat_score_npc_parked() -> Result<GeneratedOverlay> {
+    let mut b = fill_arena(|x, y| {
+        if (x, y) == (130, 129) {
+            Cell::Pavement
+        } else {
+            Cell::Road
+        }
+    });
+    let (cmp_bytes, cmp) = finish_cmp(&mut b, "Probe Parked NPC Car Explosion")?;
+    let ini_bytes = build_mission_ini_with_cmds(
+        "Probe Parked NPC Car Explosion",
+        &[
+            "2 1 (127,129,4) PLAYER 1 256",
+            "9 1 (127,129,4) TRIGGER 100 1",
+            "20 1 (128,129,4) PARKED 31 0",
+            "21 1 (8328,8288,256) FUTUREPED 0 768",
+        ],
+        &[
+            "0 DONOWT 0 0 0 0 0",
+            "100 DISABLE 9 0 0 0 0",
+            "101 PED_ON 21 0 0 147 0",
+            "102 CHANGE_PED_TYPE 21 0 -1 21 2",
+            "103 PED_WEAPON 21 0 0 3 0",
+            "104 DONOWT 0 0 0 0 0",
+        ],
+    )?;
+    Ok(GeneratedOverlay {
+        cmp_bytes,
+        ini_bytes,
+        cmp,
+    })
+}
+
 fn build_combat_punch() -> Result<GeneratedOverlay> {
     let mut b = fill_arena(|x, y| {
         if (118..=122).contains(&x) && (126..=130).contains(&y) && (x, y) != (120, 128) {
@@ -669,6 +786,52 @@ fn build_combat_tanker_drive() -> Result<GeneratedOverlay> {
     })
 }
 
+fn build_combat_tanker_npc() -> Result<GeneratedOverlay> {
+    let mut b = fill_arena(|x, y| {
+        if x == 135 && (122..=134).contains(&y) {
+            Cell::Building
+        } else if (120..=134).contains(&x) && (122..=134).contains(&y) {
+            Cell::Road
+        } else {
+            Cell::Pavement
+        }
+    });
+    // A normal traffic Tanker; unlike a FUTURECAR, it becomes the player's
+    // ordinary driven vehicle and can be left parked after exiting.
+    b.object(StartupObject {
+        x: 129 * 64 + 32,
+        y: 128 * 64 + 32,
+        z: 255,
+        kind: 44,
+        remap: 129,
+        rotation: 0,
+        pitch: 0,
+        roll: 0,
+    });
+    let (cmp_bytes, cmp) = finish_cmp(&mut b, "Probe Combat Tanker NPC")?;
+    let ini_bytes = build_mission_ini_with_cmds(
+        "Probe Combat Tanker NPC",
+        &[
+            "2 1 (126,128,4) PLAYER 1 256",
+            "9 (126,128,4) TRIGGER 100 0",
+            "20 1 (8608,8224,256) FUTUREPED 0 512",
+        ],
+        &[
+            "0 DONOWT 0 0 0 0 0",
+            "100 DISABLE 9 0 0 0 0",
+            "101 PED_ON 20 0 0 147 0",
+            "102 CHANGE_PED_TYPE 20 0 -1 21 2",
+            "103 PED_WEAPON 20 0 0 3 0",
+            "104 DONOWT 0 0 0 0 0",
+        ],
+    )?;
+    Ok(GeneratedOverlay {
+        cmp_bytes,
+        ini_bytes,
+        cmp,
+    })
+}
+
 pub fn probe_overlay(preset: &str, out: &Path) -> Result<()> {
     let generated = match preset {
         "arena" => build_arena()?,
@@ -679,11 +842,15 @@ pub fn probe_overlay(preset: &str, out: &Path) -> Result<()> {
         "combat_water" => build_combat_water()?,
         "combat_score" => build_combat_score()?,
         "combat_score_nonplayer" => build_combat_score_nonplayer()?,
+        "combat_score_script" => build_combat_score_script()?,
+        "combat_score_npc" => build_combat_score_npc()?,
+        "combat_score_npc_parked" => build_combat_score_npc_parked()?,
         "combat_punch" => build_combat_punch()?,
         "combat_tanker" => build_combat_tanker()?,
         "combat_tanker_drive" => build_combat_tanker_drive()?,
+        "combat_tanker_npc" => build_combat_tanker_npc()?,
         _ => bail!(
-            "unknown probe overlay preset {preset:?} (available: arena, shooting, getin, vault, blocked_exit, combat_water, combat_score, combat_score_nonplayer, combat_punch, combat_tanker, combat_tanker_drive)"
+            "unknown probe overlay preset {preset:?} (available: arena, shooting, getin, vault, blocked_exit, combat_water, combat_score, combat_score_nonplayer, combat_score_script, combat_score_npc, combat_score_npc_parked, combat_punch, combat_tanker, combat_tanker_drive, combat_tanker_npc)"
         ),
     };
 

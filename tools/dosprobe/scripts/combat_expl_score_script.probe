@@ -1,0 +1,13 @@
+# Scripted car explosion, on screen with no player action.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+10500 shot before
+11000 burst explosion 1000 0
+25000 shot after
+26000 shot later_26
+30000 shot later_30
+35000 shot later_35
+40000 shot later_40
+40500 quit
