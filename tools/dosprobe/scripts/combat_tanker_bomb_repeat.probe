@@ -1,0 +1,70 @@
+# Repeatable SETBOMB 4 Tanker wall contacts: same reverse/forward hold each cycle.
+# RAM windows include the 0x65a1e4 player globals and nearby game state; PPMs
+# record each contact so car-damage bytes can be compared after the run.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+17000 shot start
++100 down right
++256 up right
++100 down up
++1000 up up
++100 down left
++256 up left
++100 down up
++2100 up up
++100 down left
++256 up left
++100 down up
++1200 up up
++200 shot before_board_b
++50 tap enter 70
++2000 shot boarded_and_armed
++50 memdump bomb_armed 0x600000 0x100000
+
+# Controlled approach and first contact with the east wall.
++100 down up
++800 up up
++500 shot before_impact_01
++100 down up
++350 up up
++0 burst impact_01 30 14
++500 memdump after_impact_01 0x600000 0x100000
+
+# Back off and repeat the same forward hold four times.
++100 down up
++100 up down
++850 down down
++100 up up
++850 down up
++0 burst impact_02 30 14
++500 memdump after_impact_02 0x600000 0x100000
+
++100 down up
++100 up down
++850 down down
++100 up up
++850 down up
++0 burst impact_03 30 14
++500 memdump after_impact_03 0x600000 0x100000
+
++100 down up
++100 up down
++850 down down
++100 up up
++850 down up
++0 burst impact_04 30 14
++500 memdump after_impact_04 0x600000 0x100000
+
++100 down up
++100 up down
++850 down down
++100 up up
++850 down up
++0 burst impact_05 30 14
++500 memdump after_impact_05 0x600000 0x100000
+
++1000 shot after_contacts
++100 quit
