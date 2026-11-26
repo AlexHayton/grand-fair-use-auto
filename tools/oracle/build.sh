@@ -6,7 +6,7 @@
 # AmiGTA1's sources are compiled where they are, in a sibling checkout
 # (../AmiGTA1 from the repo root, or $AMIGTA1). Nothing of AmiGTA1 is copied
 # into this repo; only our own harness lives here, and the patches it
-# applies to copies under build/ (ped_sidestep.pl, traffic_giveup.pl,
+# applies to copies under build/ (ped_sidestep.pl, ped_counterpunch.pl, traffic_giveup.pl,
 # traffic_lights.pl, traffic_corner.pl, traffic_rejoin.pl, traffic_fits.pl,
 # traffic_follow.pl, traffic_spawn.pl, traffic_stopline.pl, weapons_clock.pl).
 set -eu
@@ -39,7 +39,8 @@ cc=${CC:-clang}
 # inside another or a bus waiting with its nose in the crossing.
 patched=$here/build/patched
 mkdir -p "$patched"
-perl "$here/ped_sidestep.pl" < "$src/gta_peds.c" > "$patched/gta_peds.c"
+perl "$here/ped_sidestep.pl" < "$src/gta_peds.c" |
+    perl "$here/ped_counterpunch.pl" > "$patched/gta_peds.c"
 perl "$here/weapons_clock.pl" < "$src/gta_weapon.c" > "$patched/gta_weapon.c"
 perl "$here/traffic_giveup.pl" < "$src/gta_traffic.c" |
     perl "$here/traffic_lights.pl" |

@@ -43,6 +43,7 @@
 
 /* gta_main.c's fire latch and the player's guns. */
 static int fire_held, fire_queued, weapon, punch_left, fire_cool, burning;
+static int knocked;   /* ticks down after a ped's counter-punch (M6b) */
 static int ammo[GTA_WEAPON_COUNT];
 static int ammo_sub[GTA_WEAPON_COUNT] = { 0, 0, GTA_AMMO_PER_UNIT, 0,
                                           GTA_AMMO_PER_UNIT };
@@ -164,7 +165,13 @@ int main(int argc, char **argv)
         for (i = 0; i < ticks; i++) {
             long speed;
             int hb, hc, bl, bu, gun_step;
-            if (!drown && punch_left > 0 && fwd == 0) {
+            if (knocked > 0) {
+                /* FLAT ON HIS BACK after a counter-punch: no walking or
+                 * firing until he gets up. */
+                knocked--;
+                pl.anim = GTA_ANIM_SLIDE_UNDER;
+                pl.frame = 0;
+            } else if (!drown && punch_left > 0 && fwd == 0) {
                 /* THE STANDING PUNCH, a state of its own; he may turn. */
                 pl.anim = GTA_ANIM_PUNCH;
                 pl.frame = (GTA_PUNCH_TICKS * GTA_PED_PUNCH_FRAMES - punch_left)
@@ -200,17 +207,19 @@ int main(int argc, char **argv)
             if (punch_left > 0) {
                 punch_left--;
                 if (punch_left == GTA_PUNCH_TICKS * (GTA_PED_PUNCH_FRAMES - 2))
-                    gta_peds_punch(&crowd, pl.x, pl.y, pl.angle, pl.layer);
+                    if (gta_peds_punch(&crowd, pl.x, pl.y, pl.angle,
+                                       pl.layer) == -3)
+                        knocked = 100;
             }
             if (weapon == 0) {
                 fire_queued = 0;
-                if (fire_held && !drown && punch_left == 0)
+                if (fire_held && !drown && !knocked && punch_left == 0)
                     punch_left = GTA_PUNCH_TICKS * GTA_PED_PUNCH_FRAMES;
             } else {
-                if (fire_held && !drown)
+                if (fire_held && !drown && !knocked)
                     fire_queued = 1;
                 if (gun_step) {
-                    int want = !drown && (fire_held || fire_queued);
+                    int want = !drown && !knocked && (fire_held || fire_queued);
                     fire_queued = 0;
                     if (want && fire_cool == 0 && ammo[weapon] > 0
                         && gta_weapons_fire(&weapons, weapon, pl.x, pl.y,
@@ -268,6 +277,7 @@ int main(int argc, char **argv)
                 drown = 0;
                 health = 100;
                 burning = 0;
+                knocked = 0;
                 fire_queued = 0;
                 fire_held = 0;
                 for (a = 1; a < GTA_WEAPON_COUNT; a++)

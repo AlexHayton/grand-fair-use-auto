@@ -356,7 +356,7 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
 - [ ] Boats: handling on water, getting on and off, what happens at the shore.
 - [ ] Tank: its handling against AmiGTA1's; the turret; the cannon; its armour; pushing cars; where it is found.
 - [ ] RC car and helicopter: whether either can be driven, and how. The escape helicopter's scripted flight is M7's.
-- [ ] The counter-punch: what the victim's punch back does to the player (AmiGTA1 has only the 13-step counter whose last two are it). For M6.
+- [x] The counter-punch: what the victim's punch back does to the player (the tenth blow that lands: he goes down about two seconds, no harm done; the wheel resets, so it is 11 long). Done 2026-11-26.
 - [ ] Gang roles: the state machine of the original's gang AI types (`gta_peds.c:1111`: AmiGTA1 has read the police ones only). For M7.
 - [ ] Special ped groups: where Hare Krishnas and Elvises appear, in which cities, how often and how they walk. For M6.
 - [ ] The weapons where AmiGTA1 chose for itself: weapon fire rates/cooldowns and projectile speeds (the owner notes guns fire too fast at 50 Hz); how long the original's bullet splat stays on the map; whether every car blowing up pays the player 100, whoever wrote it off; whether a drowning man can fire (fire-key latch across `WASTED` settled in AmiGTA1's favour without DOS probe, 2026-11-25).
@@ -485,7 +485,7 @@ Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.m
 
 **M6 Combat, police, services**
 
-- [ ] The victim's ped counter-punch (`gta_peds.c:1675`; moved from M5 on 2026-11-21: needs the player's punch). What it does: **(verify)** in M6b.
+- [x] The victim's ped counter-punch (`gta_peds.c:1675`; moved from M5 on 2026-11-21: needs the player's punch). Measured in M6b and built 2026-11-26.
 - [ ] **Special ped groups** that the bonuses need: Hare Krishna lines; Elvis impersonators **(verify which levels)** in M6b. Spawn rules come from the style and ped tables. (Moved from M5 on 2026-11-21: the bonuses are here.)
 - [x] **Bombs**: bomb shop rigs car for 5,000 points (`kind 1`), armed by fire key (`kind 2`, 250-tick fuse), plus trigger (`kind 3`), damage (`kind 4`), and speed (`kind 5`) bombs (`World::bombs_tick`). The type-4 tanker bomb global awaits **(verify)** in M6b.
 - [x] **Chain explosions**: a burning wreck sets off its neighbours (`gta_weapon.h:34`). 2026-11-21: AmiGTA1 already writes off every car in a blast's reach, whose own fuse then runs; ported with the weapons (`rocket.txt`).
@@ -550,7 +550,19 @@ Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.m
 
 ## Decision log
 
-Newest first. Each entry: date, decision, why.
+Newest first. 
+- **2026-11-26. M6b: the ped counter-punch.**
+  - On the tenth punch that lands on a ped, the ped turns to face him and hits back: the player is down for about two seconds (`World::knocked`, 100 ticks; no walking, firing or boarding), with no health or armour lost. The wheel resets at once, so it has 11 steps; AmiGTA1's has 13, whose last two are no-ops, so the oracle takes `tools/oracle/ped_counterpunch.pl` (wheel of 11, the ped turns, `walktrace.c` knocks him down) and `tools/scripts/counter_punch.txt` covers it (`cargo oracle-test`: 90,077 ticks match).
+  - Not modelled: the ped's punch animation (`0xa9`) and the player's exact fall frame (`0xaf`): the knocked player shows the lying-on-his-back frame.
+
+- **2026-11-26. M6b: explosion score attribution.**
+  - A car blowing up pays the player 100 only when he caused it (`Car::player_kill`, set by his bullets, flames, rockets, blasts, ramming and bombs; wreck blasts inherit the owner). Test `a_car_blowing_up_pays_only_when_the_player_caused_it`; `cargo oracle-test` unchanged.
+  - Left for later: a lone rocket kill pays 100 in the original and 200 here, and the chain streak (`+200`) and pistol kill (`+150` then `+100`) are not modelled.
+
+- **2026-11-26. M6b: the type-4 tanker bomb.**
+  - New `combat_tanker_bomb` overlay (`gfa-tool probe-overlay combat_tanker_bomb`): unmanned `SETBOMB 4` Tanker and Bulldog and a plain Tanker to rocket, and a driven `SETBOMB 4` Tanker and Bulldog with a runway to a wall. Owner-observed in DOSBox-X: a bomb goes off as four corner blasts then one centre blast, on the Tanker and the Bulldog, driven or parked; a plain Tanker blows up as five blasts in a line.
+  - `gfa-sim`: type-4 bomb fires above damage 10 (`BOMB4_DAMAGE`), bomb detonations use `Weapons::bomb_blasts`. Details in `docs/M6B_PROBES.md`.
+Each entry: date, decision, why.
 
 - **2026-11-25. Unlisted FXT hotkeys (police toggle & three zoom levels) are not pursued.** Per owner decision after the initial `traffic_controls.probe` sweep (`docs/M6B_PROBES.md`), original DOS key-binding discovery for these unlisted FXT toggles is skipped; GFA keeps the 1997 README key layout and its existing zoom and debug bindings (`docs/PARITY.md`).
 

@@ -688,6 +688,7 @@ impl Weapons {
             if ((c.x - x) >> FP).abs() <= BLAST_CAR_PX && ((c.y - y) >> FP).abs() <= BLAST_CAR_PX {
                 c.damage = cars::WRECKED;
                 c.dmg_bits |= cars::DAMAGE_MASK;
+                c.player_kill |= by_player;
             }
         }
     }
@@ -753,6 +754,35 @@ impl Weapons {
             }
             self.explode(st, cx + fx * (a * 4), cy + fy * (a * 4), layer, by_player);
         }
+    }
+
+    /// A car bomb going off (`GTA8.EXE` `0x7cad4`, shared by bomb types 2, 4
+    /// and 6, whatever the model): four blasts at the body's corners, then
+    /// one at its centre, and no wreck blasts after them.
+    #[allow(clippy::too_many_arguments)]
+    pub fn bomb_blasts(
+        &mut self,
+        st: &mut Street,
+        ci: &CarInfo,
+        cx: i64,
+        cy: i64,
+        face: i32,
+        layer: i32,
+        by_player: bool,
+    ) {
+        let (fx, fy, rx, ry) = axes(face);
+        let hl = i64::from(traffic::world_len(ci) / 2);
+        let hw = i64::from(ci.width >> 1) / 2;
+        for (a, l) in [(hl, hw), (hl, -hw), (-hl, hw), (-hl, -hw)] {
+            self.explode(
+                st,
+                cx + (fx * a + rx * l) * 4,
+                cy + (fy * a + ry * l) * 4,
+                layer,
+                by_player,
+            );
+        }
+        self.explode(st, cx, cy, layer, by_player);
     }
 
     /// One tick: fires burn and blasts advance at `50 Hz`, while splats fade
@@ -831,12 +861,20 @@ impl Weapons {
     fn wreck_sweep(&mut self, st: &mut Street) {
         let mut i = 0;
         while i < st.traffic.n {
-            if let Some((model, x, y, face, layer)) = st.traffic.wreck_step(i, &mut *st.say) {
+            if let Some(w) = st.traffic.wreck_step(i, &mut *st.say) {
                 let cars = st.cars;
-                self.wreck_car(st, &cars[model], x, y, face, layer, false);
-                // AmiGTA1 pays 100 for every car blowing up, whoever wrote
-                // it off.
-                st.score.add(100);
+                // The blasts inherit the car's owner (`car+0x132`), so a
+                // chain the player started stays his.
+                if w.bombed {
+                    self.bomb_blasts(st, &cars[w.model], w.x, w.y, w.face, w.layer, w.player);
+                } else {
+                    self.wreck_car(st, &cars[w.model], w.x, w.y, w.face, w.layer, w.player);
+                }
+                // `GTA8.EXE` pays 100 for a car blowing up only when the
+                // player caused it (the attacker test at `0x547cf`).
+                if w.player {
+                    st.score.add(100);
+                }
             }
             i += 1;
         }
@@ -1044,6 +1082,7 @@ impl Weapons {
             return false;
         }
         c.damage += 15;
+        c.player_kill |= by_player;
         let info = &cars[c.model];
         c.dmg_bits |= 1 << cars::panel_delta(info, c.x, c.y, c.face, s.x, s.y);
         let cop = info.model == traffic::COP_MODEL;
@@ -1114,6 +1153,7 @@ impl Weapons {
             let c = &mut st.traffic.cars[ci];
             c.damage = cars::WRECKED;
             c.dmg_bits |= cars::DAMAGE_MASK;
+            c.player_kill |= by_player;
             self.explode(st, s.x, s.y, s.layer, by_player);
             if by_player {
                 st.score.add(100);
@@ -1129,6 +1169,7 @@ impl Weapons {
         } else if !invuln {
             let c = &mut st.traffic.cars[ci];
             c.damage += bullet_damage(info, c.damage);
+            c.player_kill |= by_player;
             c.dmg_bits |= 1 << cars::panel_delta(info, c.x, c.y, c.face, s.x, s.y);
             let (damage, bits) = (c.damage, c.dmg_bits);
             self.splat(s.x, s.y, s.layer);

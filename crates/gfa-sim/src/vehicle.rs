@@ -185,6 +185,8 @@ pub struct Veh {
     pub dmg_bits: u32,
     /// Ticks of burning left before a write-off goes up; 0 when not burning.
     pub fuse: i32,
+    /// Its bomb went off: the write-off blows up as the bomb's five blasts.
+    pub bombed: bool,
     /// Sum of the axles' lateral forces this step, and whether that is a
     /// slide (tyre marks).
     pub skid: i64,
@@ -258,6 +260,7 @@ impl Veh {
             damage: 0,
             dmg_bits: 0,
             fuse: 0,
+            bombed: false,
             skid: 0,
             sliding: false,
             skid_level: SKID_NUM / (m8 >> 8).max(1),
@@ -619,6 +622,9 @@ impl SimHash for Veh {
         h.i32(self.damage);
         h.u32(self.dmg_bits);
         h.i32(self.fuse);
+        if self.bombed {
+            h.u8(1);
+        }
         h.bool(self.sliding);
         h.u32(self.model as u32);
         h.u8(self.remap.unwrap_or(255));

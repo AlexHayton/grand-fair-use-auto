@@ -9,7 +9,7 @@ use crate::hash::{SimHash, StateHasher};
 use crate::input::{Buttons, TickInput};
 use crate::map::{SimMap, ground};
 use crate::marks::Marks;
-use crate::peds::{self, Peds, TickCtx};
+use crate::peds::{self, Peds, Punch, TickCtx};
 use crate::pickups::{self, Pickups};
 use crate::player::{Anim, BODY_R, Player, RUN_SPEED, Stick};
 use crate::score::{self, Score, crime};
@@ -63,6 +63,13 @@ pub struct BombShop {
     pub by: i32,
     pub used: bool,
 }
+
+/// About two seconds at `50 Hz` (the counter-punch knockdown, `GTA8.EXE`).
+pub const KNOCKED_TICKS: i32 = 100;
+
+/// A type-4 (damage) bomb goes off once its car's damage is above this:
+/// `GTA8.EXE` `0x571bc` (`car+0xf7 > 10`), set once at `0x52012`.
+pub const BOMB4_DAMAGE: i32 = 10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct CarBomb {
@@ -279,6 +286,9 @@ pub struct World {
     pub lives: i32,
     pub jail_free: bool,
     pub player_speed: i32,
+    /// Ticks he is down for after a ped's counter-punch (`GTA8.EXE`
+    /// knocks him down about two seconds, with no harm to health or armour).
+    pub knocked: i32,
     pub bust_timer: i32,
     pub card: Card,
     pub foot_arrest: i32,
@@ -361,6 +371,7 @@ impl World {
             lives: DEFAULT_LIVES,
             jail_free: false,
             player_speed: 0,
+            knocked: 0,
             bust_timer: 0,
             card: Card::None,
             foot_arrest: 0,
@@ -494,6 +505,7 @@ impl World {
         }
         if pressed.contains(Buttons::ENTER) {
             match self.doing {
+                Doing::OnFoot if self.knocked > 0 => {}
                 Doing::OnFoot => {
                     if !self.try_board() {
                         self.try_enter();
@@ -510,7 +522,8 @@ impl World {
             }
         }
         // On foot, the handbrake key is jump.
-        if pressed.contains(Buttons::HANDBRAKE) && self.doing == Doing::OnFoot {
+        if pressed.contains(Buttons::HANDBRAKE) && self.doing == Doing::OnFoot && self.knocked == 0
+        {
             self.jump();
         }
         let released = self.prev.pressed_since(b);
@@ -726,15 +739,18 @@ impl World {
     /// (`gun_step`). On his feet, a punch is thrown or a shot fired, and the
     /// shot frightens the people around (AmiGTA1's main loop).
     fn trigger(&mut self, gun_step: bool) {
-        let can = matches!(self.doing, Doing::OnFoot | Doing::Drowning(_));
+        let can = self.knocked == 0 && matches!(self.doing, Doing::OnFoot | Doing::Drowning(_));
         let p = &self.player;
         let (x, y, layer, angle) = (i64::from(p.x), i64::from(p.y), p.layer, p.angle);
         match self.arms.tick(can, gun_step) {
             None | Some(Trigger::Swing) => {}
             Some(Trigger::Blow) => match self.peds.punch(x, y, angle, layer) {
-                Ok(i) => self.say(format!("player: punch - ped {i} down")),
-                Err(true) => self.say("player: punch - missed".into()),
-                Err(false) => {}
+                Punch::Down(i) => self.say(format!("player: punch - ped {i} down")),
+                Punch::Counter(i) => {
+                    self.knocked = KNOCKED_TICKS;
+                    self.say(format!("player: ped {i} punched back - he is down"));
+                }
+                Punch::Nobody => {}
             },
             Some(Trigger::Shot(w)) => {
                 let running = p.anim == Anim::Run;
@@ -1136,6 +1152,13 @@ impl World {
     }
 
     fn walk(&mut self, b: Buttons) {
+        if self.knocked > 0 {
+            // Flat on his back: no walking, no gun, until he gets up.
+            self.knocked -= 1;
+            self.player.anim = Anim::SlideUnder;
+            self.player.frame = 0;
+            return;
+        }
         if let Some(w) = self.arms.step_endless() {
             self.say(format!("player: endless weapon ended -> weapon {w}"));
         }
@@ -1286,6 +1309,7 @@ impl World {
         };
         self.say(format!("player: wasted{how}"));
         self.burning = 0;
+        self.knocked = 0;
         self.player_speed = 0;
         self.foot_arrest = 0;
         self.arms.disarm();
@@ -2294,6 +2318,7 @@ impl World {
         if v.fuse > 0 {
             return;
         }
+        let bombed = v.bombed;
         let (x, y, face, layer) = (v.ox, v.oy, v.angle(), d.layer);
         let (model, remap) = (v.model, i32::from(v.remap.unwrap_or(0)) - 1);
         self.driven = None;
@@ -2308,7 +2333,13 @@ impl World {
         // The blast finds him where he last was: still in it, so a driver
         // who stays in a burning car dies with it.
         let cars = std::mem::take(&mut self.cars);
-        self.street(|w, st| w.wreck_car(st, &cars[model], x, y, face, layer, true));
+        self.street(|w, st| {
+            if bombed {
+                w.bomb_blasts(st, &cars[model], x, y, face, layer, true);
+            } else {
+                w.wreck_car(st, &cars[model], x, y, face, layer, true);
+            }
+        });
         self.cars = cars;
         self.traffic
             .leave_wreck(&self.cars, model, x, y, face, layer, remap);
@@ -2853,24 +2884,26 @@ impl World {
                 }
                 if b.fuse <= 0 {
                     b.kind = 0;
-                    blow.push((b.serial, in_this));
+                    blow.push((b.serial, in_this, true, true));
                 }
             } else if b.kind == 3 && in_this {
                 b.kind = 0;
-                blow.push((b.serial, true));
+                blow.push((b.serial, true, false, true));
             } else if b.kind == 4 {
                 let damaged = if in_this {
-                    self.driven.as_ref().is_some_and(|d| d.veh.damage > 0)
+                    self.driven
+                        .as_ref()
+                        .is_some_and(|d| d.veh.damage > BOMB4_DAMAGE)
                 } else {
                     self.traffic
                         .cars
                         .iter()
                         .take(self.traffic.n)
-                        .any(|c| !c.done && c.serial == b.serial && c.damage > 0)
+                        .any(|c| !c.done && c.serial == b.serial && c.damage > BOMB4_DAMAGE)
                 };
                 if damaged {
                     b.kind = 0;
-                    blow.push((b.serial, in_this));
+                    blow.push((b.serial, in_this, true, false));
                 }
             } else if (b.kind == 5 || b.kind == 6) && in_this {
                 let spd = self
@@ -2883,19 +2916,27 @@ impl World {
                     }
                 } else if spd < (3 << FP) {
                     b.kind = 0;
-                    blow.push((b.serial, true));
+                    blow.push((b.serial, true, true, true));
                 }
             }
             self.bombs[i] = b;
         }
-        for (ser, in_this) in blow {
+        for (ser, in_this, five, own) in blow {
+            if own && !in_this {
+                self.traffic.mark_player_kill(ser);
+            }
             if in_this {
                 if let Some(d) = self.driven.as_mut() {
                     d.veh.damage = cars::WRECKED;
                     d.veh.fuse = 1;
+                    d.veh.bombed = five;
                 }
                 self.say(format!("car: bomb detonated in driven car #{ser}"));
-            } else if self.traffic.write_off(ser) {
+            } else if if five {
+                self.traffic.bomb_off(ser)
+            } else {
+                self.traffic.write_off(ser)
+            } {
                 self.say(format!("car: bomb detonated in fleet car #{ser}"));
             }
         }
@@ -3098,6 +3139,9 @@ impl World {
         self.player.sim_hash(&mut h);
         h.bytes(&self.prev.0.to_le_bytes());
         h.bool(self.prev_fire);
+        if self.knocked > 0 {
+            h.i32(self.knocked);
+        }
         match self.doing {
             Doing::OnFoot => h.u8(0),
             Doing::Driving => h.u8(2),

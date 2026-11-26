@@ -111,10 +111,24 @@ pub const BURN_TICKS: i32 = 100;
 /// A frightened ped runs at least this long before the pavement may calm
 /// him.
 const PANIC_TICKS: i32 = 150;
-/// Of the original's 13-step punch counter, the first 10 land; the last
-/// three are the victim's (the counter-punch, M6b).
-const PUNCH_WHEEL: i32 = 13;
+/// The original's punch counter (`GTA8.EXE` `0xf82ec..0xf84b6`): steps 0..9
+/// land, step 10 is the victim's counter-punch, which also resets the wheel
+/// to 0 (steps 11 and 12 are only reached by whiffs, which AmiGTA1's wheel
+/// of 13 let it do; here a punch that meets somebody never gets there).
+const PUNCH_WHEEL: i32 = 11;
 const PUNCH_LANDS: i32 = 10;
+
+/// What a punch did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Punch {
+    /// Met nobody.
+    Nobody,
+    /// Knocked ped `i` down.
+    Down(usize),
+    /// Ped `i` hit back: it turns to face the puncher, who goes down for
+    /// about two seconds with no harm done.
+    Counter(usize),
+}
 const RETIRE_TICKS: i32 = 45;
 
 const APART_PX: i64 = 5;
@@ -865,10 +879,9 @@ impl Peds {
 
     /// A punch from `(x, y)` along `angle`: the original's 6×6-unit box
     /// 8 units ahead (3 px either way, 4 px ahead). The first ped standing
-    /// in it is knocked down facing the puncher. Returns `Ok(i)` for him,
-    /// `Err(true)` when the punch met him but missed (the counter-punch's
-    /// turn on the original's wheel), `Err(false)` when it met nobody.
-    pub fn punch(&mut self, x: i64, y: i64, angle: i32, layer: i32) -> Result<usize, bool> {
+    /// in it is knocked down facing the puncher, except on the wheel's tenth
+    /// step, when it turns and punches back.
+    pub fn punch(&mut self, x: i64, y: i64, angle: i32, layer: i32) -> Punch {
         let (ax, ay) = ahead(x, y, angle, 4);
         let hit = self.p.iter().position(|p| {
             p.alive
@@ -881,10 +894,21 @@ impl Peds {
                 && ((p.x - ax) >> FP).abs() <= 3
                 && ((p.y - ay) >> FP).abs() <= 3
         });
-        let i = hit.ok_or(false)?;
+        let Some(i) = hit else {
+            return Punch::Nobody;
+        };
+        // The wheel counts before it tests, as AmiGTA1's does: a first punch
+        // is step 1, the tenth contact is the counter, then it starts again.
         self.punch_wheel = (self.punch_wheel + 1) % PUNCH_WHEEL;
         if self.punch_wheel >= PUNCH_LANDS {
-            return Err(true);
+            let p = &mut self.p[i];
+            p.angle = (angle + 128) & 255;
+            p.speed = 0;
+            p.tx = 0;
+            p.ty = 0;
+            p.mode = mode::IDLE;
+            p.panic = 0;
+            return Punch::Counter(i);
         }
         let p = &mut self.p[i];
         p.angle = (angle + 128) & 255;
@@ -895,7 +919,7 @@ impl Peds {
         p.mode = mode::IDLE;
         p.panic = 0;
         self.stats.punched += 1;
-        Ok(i)
+        Punch::Down(i)
     }
 
     /// A shot at `(x, y)` frightens everybody on their feet in its two-block

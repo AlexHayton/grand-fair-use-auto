@@ -1,0 +1,13 @@
+# combat_tanker_bomb: check the player (north flank of Tanker B) can board with one Enter.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+17000 shot start
++50 tap enter 70
++2500 shot after_enter
++100 down up
++1500 up up
++300 shot driving
++100 quit

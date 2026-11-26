@@ -1279,6 +1279,87 @@ fn spray_shop_and_bomb_shop_respray_and_rig_car_bomb() {
 }
 
 #[test]
+fn type_4_bomb_needs_damage_above_ten_and_goes_off_as_five_blasts() {
+    use gfa_sim::world::CarBomb;
+    let mut b = CmpBuilder::new(1);
+    street(&mut b, 5..25, 5..25);
+    let mut w = world(&b, south(15, 15));
+    w.put_in_car(0, 15, 15, 128);
+    let serial = 7;
+    w.driven.as_mut().unwrap().serial = serial;
+    w.bombs[0] = CarBomb {
+        serial,
+        kind: 4,
+        fuse: 0,
+    };
+
+    // Ten is not enough (`GTA8.EXE` tests `car+0xf7 > 10`).
+    w.damage_car(10);
+    run(&mut w, Buttons::NONE, 4);
+    assert_eq!(w.bombs[0].kind, 4);
+    assert!(!log_has(&mut w, "car: bomb detonated"));
+
+    // Eleven sets it off, and the write-off blows up as the bomb's five
+    // blasts (four corners, then the centre), not as a wreck's.
+    w.damage_car(1);
+    let before = w.weapons.stats.blasts;
+    run(&mut w, Buttons::NONE, 4);
+    assert_eq!(w.bombs[0].kind, 0);
+    assert!(log_has(&mut w, "car: bomb detonated"));
+    run(&mut w, Buttons::NONE, 200);
+    assert_eq!(w.weapons.stats.blasts - before, 5);
+}
+
+#[test]
+fn a_car_blowing_up_pays_only_when_the_player_caused_it() {
+    let mut b = CmpBuilder::new(1);
+    street(&mut b, 5..25, 5..25);
+    let mut w = world(&b, south(15, 15));
+    w.traffic.clear();
+    w.park(0, 0, 100, 0);
+    w.park(0, 0, -100, 0);
+    let n = w.traffic.n;
+    assert!(n >= 2, "two parked cars");
+    for (i, mine) in [(n - 2, false), (n - 1, true)] {
+        let c = &mut w.traffic.cars[i];
+        c.damage = gfa_sim::cars::WRECKED;
+        c.fuse = 1;
+        c.player_kill = mine;
+    }
+    let before = w.score.score;
+    run(&mut w, Buttons::NONE, 5);
+    // One wreck was his, the other somebody else's: 100 points, not 200.
+    assert_eq!(w.score.score - before, 100);
+}
+
+#[test]
+fn the_tenth_punch_that_lands_is_countered_and_puts_the_player_down_two_seconds() {
+    let mut b = CmpBuilder::new(1);
+    street(&mut b, 5..25, 5..25);
+    let mut w = world(&b, south(15, 15));
+    w.peds.clear();
+    let mut counter_at = None;
+    for n in 1..=12 {
+        // A fresh man walking up to him, 16 px ahead, so that he is in the
+        // fist's box when the blow lands eight ticks on; then time to
+        // get up again.
+        w.drop_ped(0, 16, 0);
+        run(&mut w, Buttons::FIRE, 30);
+        run(&mut w, Buttons::NONE, 130);
+        if log_has(&mut w, "punched back") && counter_at.is_none() {
+            counter_at = Some(n);
+        }
+    }
+    assert_eq!(counter_at, Some(10), "tenth contact hits back");
+    // The wheel starts again: the eleventh and twelfth blows land.
+    assert!(
+        w.peds.stats.punched >= 11,
+        "punched {}",
+        w.peds.stats.punched
+    );
+}
+
+#[test]
 fn friendly_fire_groups_and_gouranga_bonus() {
     let mut b = CmpBuilder::new(1);
     street(&mut b, 5..25, 5..30);

@@ -1,0 +1,54 @@
+# The counter-punch: the tenth punch that lands on a man hits back.
+#
+# GTA8.EXE (M6b, read from the code and watched in DOSBox-X): a punch counter
+# runs 0..9 for blows that land, and on step 10 the victim turns to face the
+# puncher and hits back: the player goes down for about two seconds, with no
+# harm to his health or armour, and the counter starts again. A fresh man is
+# walked up to him for every blow (16 px ahead, so he is in the fist's box
+# when the blow lands); the tenth knocks the player down
+# (no walking or punching until he gets up), then blows land again.
+#
+# oracle: walk
+# section: 1
+# expect: player: punch - ped
+# expect: punched back
+# reject: no walkable layer
+start 64 60
+
+0 0 0 20
+ped 0 12 0
+fire 90
+0 0 0 130
+ped 0 12 0
+fire 90
+0 0 0 130
+ped 0 12 0
+fire 90
+0 0 0 130
+ped 0 12 0
+fire 90
+0 0 0 130
+ped 0 12 0
+fire 90
+0 0 0 130
+ped 0 12 0
+fire 90
+0 0 0 130
+ped 0 12 0
+fire 90
+0 0 0 130
+ped 0 12 0
+fire 90
+0 0 0 130
+ped 0 12 0
+fire 90
+0 0 0 130
+ped 0 12 0
+fire 90
+0 0 0 130
+ped 0 12 0
+fire 90
+0 0 0 130
+ped 0 12 0
+fire 90
+0 0 0 130

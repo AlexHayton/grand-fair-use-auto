@@ -832,6 +832,74 @@ fn build_combat_tanker_npc() -> Result<GeneratedOverlay> {
     })
 }
 
+/// One arena for every type-4 tanker-bomb check, for the owner to eyeball.
+///
+/// West column (x=121), parked and unmanned, 4 blocks apart so their blasts
+/// cannot reach each other: SETBOMB-4 Tanker (y=123), SETBOMB-4 Bulldog
+/// (y=127), plain Tanker (y=131). Shoot them for the blast counts.
+///
+/// Driven pair (x=125, facing EAST, 15-block runway to the wall at x=140):
+/// SETBOMB-4 Tanker B (y=128) and SETBOMB-4 Bulldog C (y=132). The player
+/// starts on foot on the driver's (north) flank of Tanker B.
+fn build_combat_tanker_bomb() -> Result<GeneratedOverlay> {
+    let mut b = fill_arena(|x, y| {
+        if x == 140 && (120..=136).contains(&y) {
+            Cell::Building
+        } else if (118..=139).contains(&x) && (120..=136).contains(&y) {
+            Cell::Road
+        } else {
+            Cell::Pavement
+        }
+    });
+    // Plain, unbombed StartupObject Tanker (control), parked unmanned.
+    b.object(StartupObject {
+        x: 121 * 64 + 32,
+        y: 131 * 64 + 32,
+        z: 255,
+        kind: 44,
+        remap: 129,
+        rotation: 256,
+        pitch: 0,
+        roll: 0,
+    });
+    let (cmp_bytes, cmp) = finish_cmp(&mut b, "Probe Combat Tanker Bomb")?;
+    let ini_bytes = build_mission_ini_with_cmds(
+        "Probe Combat Tanker Bomb",
+        &[
+            "2 1 (125,127,4) PLAYER 1 512",
+            "9 (125,127,4) TRIGGER 100 0",
+            "20 (121,123,4) FUTURECAR 44 256",
+            "21 (121,127,4) FUTURECAR 31 256",
+            "22 (125,128,4) FUTURECAR 44 256",
+            "23 (125,132,4) FUTURECAR 31 256",
+        ],
+        &[
+            "0 DONOWT 0 0 0 0 0",
+            "100 DISABLE 9 0 0 0 0",
+            "101 PARKED_ON 20 0 -1 0 0",
+            "102 PARKED_ON 21 0 -1 0 0",
+            "103 PARKED_ON 22 0 0 0 0",
+            "104 PARKED_ON 23 0 0 0 0",
+            "105 SETBOMB 20 0 0 4 0",
+            "106 SETBOMB 21 0 0 4 0",
+            "107 KICKSTART 200 0 -1 0 0",
+            "108 KICKSTART 210 0 -1 0 0",
+            "109 DONOWT 0 0 0 0 0",
+            "200 STEAL 22 0 0 0 5000",
+            "201 SETBOMB 22 0 0 4 0",
+            "202 DONOWT 0 0 0 0 0",
+            "210 STEAL 23 0 0 0 5000",
+            "211 SETBOMB 23 0 0 4 0",
+            "212 DONOWT 0 0 0 0 0",
+        ],
+    )?;
+    Ok(GeneratedOverlay {
+        cmp_bytes,
+        ini_bytes,
+        cmp,
+    })
+}
+
 pub fn probe_overlay(preset: &str, out: &Path) -> Result<()> {
     let generated = match preset {
         "arena" => build_arena()?,
@@ -849,8 +917,9 @@ pub fn probe_overlay(preset: &str, out: &Path) -> Result<()> {
         "combat_tanker" => build_combat_tanker()?,
         "combat_tanker_drive" => build_combat_tanker_drive()?,
         "combat_tanker_npc" => build_combat_tanker_npc()?,
+        "combat_tanker_bomb" => build_combat_tanker_bomb()?,
         _ => bail!(
-            "unknown probe overlay preset {preset:?} (available: arena, shooting, getin, vault, blocked_exit, combat_water, combat_score, combat_score_nonplayer, combat_score_script, combat_score_npc, combat_score_npc_parked, combat_punch, combat_tanker, combat_tanker_drive, combat_tanker_npc)"
+            "unknown probe overlay preset {preset:?} (available: arena, shooting, getin, vault, blocked_exit, combat_water, combat_score, combat_score_nonplayer, combat_score_script, combat_score_npc, combat_score_npc_parked, combat_punch, combat_tanker, combat_tanker_drive, combat_tanker_npc, combat_tanker_bomb)"
         ),
     };
 
@@ -1070,5 +1139,22 @@ mod tests {
         );
         let start = Start::from_section(&sections[0]).unwrap();
         assert_eq!((start.bx, start.by, start.angle), (130, 130, Some(128)));
+    }
+    #[test]
+    fn combat_tanker_bomb_preset_is_valid_and_compact() {
+        let g = build_combat_tanker_bomb().unwrap();
+        let sections = mission::parse(&g.ini_bytes).unwrap();
+        assert!(g.cmp.blocks.len() < 20, "blocks: {}", g.cmp.blocks.len());
+        assert_eq!(g.cmp.objects.len(), 1);
+        assert_eq!(
+            sections[0]
+                .decls
+                .iter()
+                .filter(|d| d.kind == "FUTURECAR")
+                .count(),
+            4
+        );
+        let start = Start::from_section(&sections[0]).unwrap();
+        assert_eq!((start.bx, start.by, start.angle), (125, 127, Some(128)));
     }
 }

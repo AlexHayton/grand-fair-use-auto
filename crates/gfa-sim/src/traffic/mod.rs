@@ -23,7 +23,7 @@ mod drive;
 pub mod geom;
 pub mod roads;
 
-pub use contact::{Ram, Taken};
+pub use contact::{Ram, Taken, WreckStep};
 
 use gfa_fixed::trig::{cos, sin};
 use gfa_formats::style::CarInfo;
@@ -359,6 +359,12 @@ pub struct Car {
     pub damage: i32,
     pub dmg_bits: u32,
     pub fuse: i32,
+    /// Its bomb went off: the write-off blows up as the bomb's five blasts.
+    pub bombed: bool,
+    /// The player did the harm that wrote it off, so he is paid for the
+    /// blast; a blast somebody else caused pays nothing (`GTA8.EXE`
+    /// skips the score when the attacker is -1; chain blasts inherit it).
+    pub player_kill: bool,
     pub ram_cool: u8,
     pub hit_latch: u8,
     pub mission: bool,
@@ -1036,6 +1042,8 @@ impl Traffic {
         car.damage = 0;
         car.dmg_bits = 0;
         car.fuse = 0;
+        car.bombed = false;
+        car.player_kill = false;
         car.knock = 0;
         car.recover = 0;
         car.allow_turn = true;
@@ -3115,6 +3123,25 @@ impl Traffic {
         true
     }
 
+    /// A bomb went off in car `serial`: it is written off and blows up as
+    /// the bomb's five blasts.
+    pub fn bomb_off(&mut self, serial: u64) -> bool {
+        if !self.write_off(serial) {
+            return false;
+        }
+        if let Some(c) = self.car_mut(serial) {
+            c.bombed = true;
+        }
+        true
+    }
+
+    /// The player caused car `serial`'s end (his bomb): he is paid for it.
+    pub fn mark_player_kill(&mut self, serial: u64) {
+        if let Some(c) = self.car_mut(serial) {
+            c.player_kill = true;
+        }
+    }
+
     pub fn set_locked(&mut self, serial: u64, locked: bool) -> bool {
         let Some(c) = self.car_mut(serial) else {
             return false;
@@ -3221,6 +3248,12 @@ impl SimHash for Traffic {
             h.i32(c.damage);
             h.u32(c.dmg_bits);
             h.i32(c.fuse);
+            if c.bombed {
+                h.u8(1);
+            }
+            if c.player_kill {
+                h.u8(2);
+            }
             h.i32(c.knock);
             h.i32(c.pull);
             h.u8(u8::from(c.abandoned) | u8::from(c.wrecked) << 1 | u8::from(c.resident) << 2);

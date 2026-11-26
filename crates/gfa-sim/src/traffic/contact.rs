@@ -627,6 +627,7 @@ impl Traffic {
                 let dmg_p = (sev / (2 * pm)).clamp(1, 100) as i32;
                 if !o.invuln {
                     o.damage += dmg_o;
+                    o.player_kill = true;
                 }
                 out.damage += dmg_p;
                 o.dmg_bits |= 1 << panel_delta(oi, o.x, o.y, o.face, plx, ply);
@@ -642,11 +643,7 @@ impl Traffic {
     /// wreck nobody drives (AmiGTA1's `wreck_sweep`). Returns the car's
     /// model, centre, heading and layer on the tick it blows up, for the
     /// blast.
-    pub fn wreck_step(
-        &mut self,
-        i: usize,
-        say: &mut dyn FnMut(String),
-    ) -> Option<(usize, i64, i64, i32, i32)> {
+    pub fn wreck_step(&mut self, i: usize, say: &mut dyn FnMut(String)) -> Option<WreckStep> {
         let c = &mut self.cars[i];
         if c.done || c.wrecked || c.damage < cars::WRECKED {
             return None;
@@ -679,7 +676,15 @@ impl Traffic {
         c.cop = 0;
         c.svc = 0;
         c.hold = hold::NONE;
-        Some((c.model, c.x, c.y, c.face, c.layer))
+        Some(WreckStep {
+            model: c.model,
+            x: c.x,
+            y: c.y,
+            face: c.face,
+            layer: c.layer,
+            bombed: std::mem::take(&mut c.bombed),
+            player: std::mem::take(&mut c.player_kill),
+        })
     }
 
     /// The cars standing with nobody in them: parked, left or wrecked.
@@ -688,4 +693,17 @@ impl Traffic {
             .iter()
             .filter(|c| !c.done && c.abandoned)
     }
+}
+
+/// A fleet car blowing up in the wreck sweep: what and where, and whether
+/// its bomb went off and whether the player caused it.
+#[derive(Debug, Clone, Copy)]
+pub struct WreckStep {
+    pub model: usize,
+    pub x: i64,
+    pub y: i64,
+    pub face: i32,
+    pub layer: i32,
+    pub bombed: bool,
+    pub player: bool,
 }
