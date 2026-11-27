@@ -71,9 +71,22 @@ pub fn is_play_file(game_path: &str) -> bool {
     first.eq_ignore_ascii_case("GTADATA")
         && parts.len() > 1
         && !parts.iter().any(|p| p.eq_ignore_ascii_case("AUDIO"))
-        && name
-            .rsplit_once('.')
-            .is_some_and(|(_, ext)| PLAY_EXTENSIONS.iter().any(|e| ext.eq_ignore_ascii_case(e)))
+        && ([
+            "F_PAL.RAW",
+            "F_BMG.RAT",
+            "F_DMA.RAT",
+            "F_PLAYN.RAT",
+            "F_LOWER0.RAT",
+            "F_LOWER1.RAT",
+            "PLAYER_A.DAT",
+        ]
+        .iter()
+        .any(|n| name.eq_ignore_ascii_case(n))
+            || (1..=8).any(|i| name.eq_ignore_ascii_case(&format!("F_PLAY{i}.RAT")))
+            || (0..8).any(|i| name.eq_ignore_ascii_case(&format!("F_LOGO{i}.RAT")))
+            || name.rsplit_once('.').is_some_and(|(_, ext)| {
+                PLAY_EXTENSIONS.iter().any(|e| ext.eq_ignore_ascii_case(e))
+            }))
 }
 
 /// Split a path inside a folder or archive at its `GTADATA` folder:

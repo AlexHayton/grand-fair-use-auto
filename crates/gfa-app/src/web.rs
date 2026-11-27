@@ -55,10 +55,12 @@ pub fn config_from_url() -> crate::AppConfig {
         match pair.split_once('=') {
             Some(("level", v)) => {
                 if let Ok(n) = v.parse() {
+                    config.show_menu = false;
                     config.level = n;
                 }
             }
             Some(("game", v)) => {
+                config.show_menu = false;
                 config.game = match v.to_ascii_lowercase().as_str() {
                     "london69" | "london" => gfa_assets::Dataset::London69,
                     "london61" => gfa_assets::Dataset::London61,
@@ -221,4 +223,25 @@ pub async fn gfa_unpack(
         game.root
     );
     Ok(out)
+}
+
+/// The page owns the touch controls. Show them once a chapter starts.
+pub fn set_playing(playing: bool) {
+    if let Some(el) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.document_element())
+    {
+        let _ = el.set_attribute("data-playing", if playing { "true" } else { "false" });
+    }
+}
+
+/// Leave the title screen for the page that chooses the game data.
+pub fn show_data_picker() {
+    if let Some(el) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.get_element_by_id("data-button"))
+        && let Some(button) = el.dyn_ref::<web_sys::HtmlElement>()
+    {
+        button.click();
+    }
 }

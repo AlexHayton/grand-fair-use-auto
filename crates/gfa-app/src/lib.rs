@@ -3,11 +3,11 @@
 //! It owns the window, the GPU surface and the frame loop. It loads a
 //! level, runs the simulation at its fixed tick ([`game`]), and draws the
 //! city with the player in it, followed by the camera. The backtick key shows the egui
-//! debug overlay. Game states (front end, briefing) arrive in later
-//! milestones.
+//! debug overlay. The front end hands a selected chapter to the level loader.
 
 mod controls;
 mod game;
+mod menu;
 mod overlay;
 #[cfg(test)]
 mod popin;
@@ -38,6 +38,17 @@ use scene::Scene;
 
 pub const TITLE: &str = "Grand Fair Use Auto";
 
+#[derive(Debug)]
+pub enum SetupAction {
+    ChooseArchive,
+    ChooseFolder,
+    Dropped(std::path::PathBuf),
+    Search,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub type SetupHandler = fn(SetupAction) -> Result<Option<DataPath>, String>;
+
 /// Start-up options.
 #[derive(Debug, Clone)]
 pub struct AppConfig {
@@ -47,6 +58,9 @@ pub struct AppConfig {
     /// Which game, and which mission-file section, to load.
     pub game: Dataset,
     pub level: u32,
+    pub show_menu: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub setup: Option<SetupHandler>,
     /// `--nohd`: ignore HD packs even if present.
     pub no_hd: bool,
     /// Save the first frame of the city here as a PNG, then quit. Native only.
@@ -61,6 +75,9 @@ impl Default for AppConfig {
             data: None,
             game: Dataset::Gta,
             level: 1,
+            show_menu: true,
+            #[cfg(not(target_arch = "wasm32"))]
+            setup: None,
             no_hd: false,
             screenshot: None,
             size: (1280, 800),
@@ -88,6 +105,7 @@ struct App {
     overlay: Option<Overlay>,
     /// Loaded before the GPU was ready; becomes a [`Scene`] when it is.
     pending: Option<Level>,
+    menu: Option<menu::Menu>,
     scene: Option<Scene>,
     game: Option<Game>,
     controls: Controls,
@@ -111,6 +129,7 @@ impl App {
             gfx: None,
             overlay: None,
             pending: None,
+            menu: None,
             scene: None,
             game: None,
             controls: Controls::new(Vec3::new(centre, centre, 128.0)),
@@ -162,6 +181,48 @@ impl App {
         }
     }
 
+    fn needs_setup(&self) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.config.data.is_none() && self.config.setup.is_some()
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            false
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn setup_action(&mut self, action: SetupAction) {
+        let Some(handler) = self.config.setup else {
+            return;
+        };
+        match handler(action) {
+            Ok(Some(data)) => match data.open() {
+                Ok(src) => {
+                    self.config.data = Some(data);
+                    self.accept_data(src);
+                }
+                Err(e) => self.status = e.to_string(),
+            },
+            Ok(None) => {}
+            Err(e) => self.status = e,
+        }
+    }
+
+    fn accept_data(&mut self, src: Box<dyn AssetSource>) {
+        if self.config.show_menu {
+            self.game = None;
+            self.scene = None;
+            self.status.clear();
+            #[cfg(target_arch = "wasm32")]
+            web::set_playing(false);
+            self.menu = Some(menu::Menu::new(src));
+        } else {
+            self.load_level(src.as_ref());
+        }
+    }
+
     /// Read the configured level from `src`. Errors become the overlay's
     /// status line.
     fn load_level(&mut self, src: &dyn AssetSource) {
@@ -206,6 +267,8 @@ impl App {
         let game = Game::new(&level);
         self.controls.jump_to(game.frame().follow.pos);
         self.game = Some(game);
+        #[cfg(target_arch = "wasm32")]
+        web::set_playing(true);
         self.scene = Some(Scene::new(gpu, surface.format(), surface.size(), level));
         log::info!("city uploaded in {} ms", started.elapsed().as_millis());
         if let Some(w) = &self.window {
@@ -251,6 +314,7 @@ impl App {
         self.controls
             .update(dt, frame.map(|(f, _)| (f.follow.pos, f.zoom)), ceiling);
 
+        let needs_setup = self.needs_setup();
         let Some((gpu, surface)) = self.gfx.as_mut() else {
             return;
         };
@@ -305,6 +369,7 @@ impl App {
             }
             if let Some(o) = overlay.as_mut() {
                 let info = OverlayInfo {
+                    needs_setup,
                     fps,
                     frames,
                     frame_ms,
@@ -321,9 +386,39 @@ impl App {
                     mesh: scene.as_ref().map(|s| s.city.mesh_stats),
                     inspect,
                 };
-                actions = o.draw(&window, gpu, encoder, view, size, &info);
+                actions = o.draw(&window, gpu, encoder, view, size, &info, self.menu.as_mut());
             }
         });
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(action) = actions.setup {
+            self.setup_action(action);
+        }
+        if self.menu.as_ref().is_some_and(|m| m.quit) {
+            #[cfg(not(target_arch = "wasm32"))]
+            event_loop.exit();
+            #[cfg(target_arch = "wasm32")]
+            {
+                self.menu = None;
+                web::show_data_picker();
+            }
+            return;
+        }
+        if let Some(section) = actions.launch
+            && let Some(menu) = self.menu.take()
+        {
+            self.config.level = section;
+            self.load_level(menu.source.as_ref());
+            self.last_frame = Instant::now();
+            if let (Some(scene), Some(w)) = (&self.scene, &self.window) {
+                w.set_title(&format!(
+                    "{TITLE} — {} — {}",
+                    menu.name(),
+                    scene.level.files.name
+                ));
+            } else {
+                self.menu = Some(menu);
+            }
+        }
         if actions.top_up {
             self.controls.tap(Buttons::ALL_WEAPONS);
         }
@@ -418,13 +513,14 @@ impl ApplicationHandler<UserEvent> for App {
                 Some(d) => {
                     log::info!("game data: {} (from {})", d.root.display(), d.origin);
                     match d.open() {
-                        Ok(src) => self.load_level(src.as_ref()),
+                        Ok(src) => self.accept_data(src),
                         Err(e) => {
                             log::error!("{e}");
                             self.status = e.to_string();
                         }
                     }
                 }
+                None if self.needs_setup() => {}
                 None => {
                     self.status = if cfg!(target_arch = "wasm32") {
                         "select your game archive to begin".into()
@@ -461,16 +557,29 @@ impl ApplicationHandler<UserEvent> for App {
                     event_loop.exit();
                 }
             },
-            UserEvent::DataReady(src) => self.load_level(src.as_ref()),
-            UserEvent::Touch(b, down) => self.controls.touch(b, down),
+            UserEvent::DataReady(src) => self.accept_data(src),
+            UserEvent::Touch(b, down) => {
+                if self.menu.is_none() {
+                    self.controls.touch(b, down)
+                }
+            }
         }
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        let setup = self.needs_setup();
+        #[cfg(not(target_arch = "wasm32"))]
+        if setup && let WindowEvent::DroppedFile(path) = &event {
+            self.setup_action(SetupAction::Dropped(path.clone()));
+            return;
+        }
         if let (Some(o), Some(w)) = (self.overlay.as_mut(), self.window.as_ref())
-            && o.visible
+            && (o.visible || setup || self.menu.is_some())
             && o.event(w, &event)
         {
+            return;
+        }
+        if self.menu.is_some() && matches!(event, WindowEvent::KeyboardInput { .. }) {
             return;
         }
         match &event {
@@ -514,7 +623,9 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::RedrawRequested => self.redraw(event_loop),
             _ => {}
         }
-        self.controls.event(&event);
+        if !setup && self.menu.is_none() {
+            self.controls.event(&event);
+        }
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {

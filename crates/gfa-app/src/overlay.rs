@@ -24,6 +24,7 @@ pub struct SimInfo {
 
 /// What the overlay shows this frame.
 pub struct OverlayInfo<'a> {
+    pub needs_setup: bool,
     pub fps: f32,
     /// Frames presented since the start.
     pub frames: u64,
@@ -45,10 +46,12 @@ pub struct OverlayInfo<'a> {
 }
 
 /// What the menu's buttons asked for this frame.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Default)]
 pub struct OverlayActions {
     /// Every gun with 99 rounds (keypad `*`).
     pub top_up: bool,
+    pub launch: Option<u32>,
+    pub setup: Option<crate::SetupAction>,
 }
 
 pub struct Overlay {
@@ -99,6 +102,7 @@ impl Overlay {
     }
 
     /// Build the overlay and draw it over `view`.
+    #[allow(clippy::too_many_arguments)]
     pub fn draw(
         &mut self,
         window: &Window,
@@ -107,15 +111,48 @@ impl Overlay {
         view: &gfa_render::wgpu::TextureView,
         size: (u32, u32),
         info: &OverlayInfo<'_>,
+        mut menu: Option<&mut crate::menu::Menu>,
     ) -> OverlayActions {
         let mut actions = OverlayActions::default();
-        if !self.visible {
+        if !self.visible && menu.is_none() && !info.needs_setup {
             return actions;
         }
         let (device, queue) = (&gpu.device, &gpu.queue);
         let input = self.state.take_egui_input(window);
         let mut debug_view = self.debug_view;
         let output = self.ctx.run_ui(input, |ui| {
+            if info.needs_setup {
+                egui::Window::new("Choose your game data")
+                    .anchor(egui::Align2::CENTER_CENTER, [0., 0.])
+                    .collapsible(false)
+                    .resizable(false)
+                    .show(ui.ctx(), |ui| {
+                        ui.group(|ui| {
+                            ui.add_space(14.);
+                            ui.label("Drop a .zip or .rar archive here from Downloads");
+                            ui.add_space(14.);
+                        });
+                        ui.horizontal(|ui| {
+                            if ui.button("Choose archive…").clicked() {
+                                actions.setup = Some(crate::SetupAction::ChooseArchive);
+                            }
+                            if ui.button("Choose folder…").clicked() {
+                                actions.setup = Some(crate::SetupAction::ChooseFolder);
+                            }
+                        });
+                        if ui.link("Search Google for GTA 1 Directors Cut").clicked() {
+                            actions.setup = Some(crate::SetupAction::Search);
+                        }
+                        if !info.status.is_empty() {
+                            ui.label(info.status);
+                        }
+                    });
+                return;
+            }
+            if let Some(menu) = menu.as_deref_mut() {
+                actions.launch = menu.draw(ui, info.status);
+                return;
+            }
             let ctx = ui.ctx().clone();
             egui::Window::new("debug")
                 .default_pos([12.0, 12.0])

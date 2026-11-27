@@ -1,0 +1,14 @@
+# Retail GTA8.EXE, default 60000 cycles. Capture the base-game front end.
+3500 tap esc 80
+5500 tap enter 80
+7300 shot title
+8500 tap enter 80
+9500 shot player
+10300 tap enter 80
+11400 shot chapters
+12000 tap esc 80
+13000 tap esc 80
+14000 tap down 80
+15000 tap enter 80
+16000 shot options
+16200 quit

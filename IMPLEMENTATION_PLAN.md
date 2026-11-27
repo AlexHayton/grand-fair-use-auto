@@ -922,6 +922,10 @@ Each entry: date, decision, why.
 
 ## Progress log
 
+- **2026-11-27. M8 front-end parity.** Measured GTA8.EXE in DOSBox-X with `tools/dosprobe/scripts/front_end.probe`. The title, options, player and chapter screens use the indexed front-end palette, mixed-case bitmap fonts, animated logo, key cursor and city icons at the DOS layout coordinates. Player changes and options are in memory. All six chapters remain selectable during mission development.
+
+- **2026-11-27. M8 started.** Default startup opens the base-game title, player and chapter picker. Explicit game/level launches and screenshot runs still go straight to the level. The picker reads the original front-end art, font and player names. All available single-player chapters are selectable pending career progression. Desktop and browser setup accept a picked or dropped archive or a picked folder.
+
 Newest first.
 
 - **2026-11-27. M7: the mission VM's machinery, ported from GTA8.EXE.**

@@ -27,7 +27,7 @@ roadmap, decision log and progress log.
    - a `.rar` or `.zip` of the game in the same folder as the program (for an
      app bundle, the folder holding it);
    - the archive you chose last time;
-   - otherwise it asks you to select the archive, and remembers it
+   - otherwise choose an archive or folder on the setup screen, or drop the archive there. The app remembers the location
      (`~/Library/Application Support/GrandFairUseAuto/game.toml` on macOS).
 
    A folder is the one that **contains** `GTADATA/`. An archive may hold it
@@ -49,7 +49,7 @@ with Visual Studio C++ Build Tools installed.
 ## Running
 
 ```sh
-cargo run --release -p gfa-native                         # Liberty City, level [1]
+cargo run --release -p gfa-native                         # title, player and chapter selection
 cargo run --release -p gfa-native -- --level 102          # San Andreas
 cargo run --release -p gfa-native -- --level 202          # Vice City
 cargo run --release -p gfa-native -- --game london69 --level 2

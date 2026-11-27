@@ -41,7 +41,9 @@
         display: grid; place-items: center; }
       .card li p { margin: 0 0 8px; }
       .search { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-      .search strong { font-size: 17px; color: var(--accent); }
+      .search a { font-size: 17px; color: var(--accent); }
+      #drop-zone { border: 2px dashed var(--muted); border-radius: 6px; padding: 18px; margin-bottom: 10px; }
+      #drop-zone.dragging { border-color: var(--accent); }
       .note { margin: 0; color: var(--muted); font-size: 13px; }
       button { font: inherit; cursor: pointer; border-radius: 6px; padding: 8px 14px;
         border: 1px solid var(--line); background: #22252d; color: var(--text); }
@@ -66,7 +68,7 @@
         align-items: flex-end; pointer-events: none; box-sizing: border-box;
         padding: 12px max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
         user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
-      #touch[hidden] { display: none; }
+      #touch[hidden], html:not([data-playing="true"]) #touch { display: none; }
       #touch .pad, #touch .acts { pointer-events: auto; display: grid; gap: 8px; }
       #touch .pad { grid-template-columns: repeat(3, var(--key)); grid-template-rows: repeat(3, var(--key)); }
       #touch .acts { grid-template-columns: repeat(2, var(--key)); grid-auto-rows: var(--key); }
@@ -92,15 +94,10 @@
           None of the game comes with this page.</p>
         <ol>
           <li>
-            <p>Find the game: search for this in your favourite search engine, and download it.
-              It comes as a <code>.rar</code> or <code>.zip</code> file.</p>
-            <div class="search">
-              <strong id="search-term">GTA1 Director's Cut</strong>
-              <button id="copy" class="small" type="button">Copy</button>
-            </div>
+            <div class="search"><a href="https://www.google.com/search?q=GTA+1+Directors+Cut" target="_blank" rel="noopener noreferrer">Search Google for GTA 1 Directors Cut</a></div>
           </li>
           <li>
-            <p>Then select the file you downloaded. You don't need to unpack it.</p>
+            <p id="drop-zone">Drop a .rar or .zip archive here from Downloads</p>
             <button id="archive-button" class="primary" type="button">Select game archive</button>
             <input id="archive" type="file" accept=".rar,.zip" hidden />
           </li>
@@ -219,6 +216,9 @@
       }
 
       async function keepAndLoad(entries) {
+        if (!entries.some(({ path }) => /^GTADATA\/(UK\/)?MISS(ION|UKE?)\.INI$/i.test(path))) {
+          throw new Error("No game mission file found in the selected files.");
+        }
         status.textContent = "Saving them in this browser…";
         await cache.replace(entries);
         status.textContent = "";
@@ -228,6 +228,29 @@
       $("archive").addEventListener("change", async (ev) => {
         const file = ev.target.files[0];
         ev.target.value = "";
+        await readArchive(file);
+      });
+
+      const dropZone = $("drop-zone");
+      panel.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        dropZone.classList.add("dragging");
+      });
+      panel.addEventListener("dragleave", (event) => {
+        if (!panel.contains(event.relatedTarget)) dropZone.classList.remove("dragging");
+      });
+      panel.addEventListener("drop", (event) => {
+        event.preventDefault();
+        dropZone.classList.remove("dragging");
+        if ($("archive-button").disabled) return;
+        if (event.dataTransfer.files.length !== 1) {
+          status.textContent = "Drop one game archive at a time.";
+          return;
+        }
+        readArchive(event.dataTransfer.files[0]);
+      });
+
+      async function readArchive(file) {
         if (!file) return;
         busy(true);
         bar.removeAttribute("value");
@@ -245,7 +268,7 @@
         } finally {
           busy(false);
         }
-      });
+      }
 
       $("folder").addEventListener("change", async (ev) => {
         const w = await wasmReady;
@@ -263,17 +286,10 @@
           const entries = await Promise.all(
             files.map(async (x) => ({ path: x.path, bytes: await x.f.arrayBuffer() })));
           await keepAndLoad(entries);
+        } catch (e) {
+          status.textContent = "Could not read that folder: " + (e.message || e);
         } finally {
           busy(false);
-        }
-      });
-
-      $("copy").addEventListener("click", async () => {
-        try {
-          await navigator.clipboard.writeText($("search-term").textContent);
-          $("copy").textContent = "Copied";
-        } catch (e) {
-          getSelection().selectAllChildren($("search-term"));
         }
       });
 

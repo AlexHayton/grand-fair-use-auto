@@ -7,7 +7,7 @@
 //! 2. a `.rar` or `.zip` of the game in the program's folder (or, for an
 //!    app bundle, the folder holding it);
 //! 3. the archive chosen last time ([`remember`]);
-//! 4. a file dialog asking for the archive, whose answer is remembered.
+//! 4. the setup screen for picking a folder or picking or dropping an archive.
 //!
 //! An archive is read in place, never unpacked to disk
 //! (`gfa_assets::archive`).
@@ -31,11 +31,11 @@ struct Args {
     #[arg(long)]
     data: Option<PathBuf>,
     /// Which game: gta, london69 or london61.
-    #[arg(long, default_value = "gta", value_parser = Dataset::from_str)]
-    game: Dataset,
+    #[arg(long, value_parser = Dataset::from_str)]
+    game: Option<Dataset>,
     /// Mission script section to start in, e.g. 1, 102, 202 (London: 2, 3, 4).
-    #[arg(long, default_value_t = 1)]
-    level: u32,
+    #[arg(long)]
+    level: Option<u32>,
     /// Ignore HD packs and draw the original art.
     #[arg(long)]
     nohd: bool,
@@ -78,35 +78,49 @@ fn remembered() -> Option<DataPath> {
         .ok()
 }
 
-/// Ask for the archive until the player gives a good one or gives up.
-fn choose() -> Option<DataPath> {
-    loop {
-        let picked = rfd::FileDialog::new()
-            .set_title("Select your GTA game archive (.rar or .zip)")
+fn setup(action: gfa_app::SetupAction) -> Result<Option<DataPath>, String> {
+    use gfa_app::SetupAction;
+    let path = match action {
+        SetupAction::Dropped(path) => Some(path),
+        SetupAction::ChooseArchive => rfd::FileDialog::new()
             .add_filter("Game archive", &["rar", "zip", "RAR", "ZIP"])
-            .pick_file()?;
-        match DataPath::check(&picked, DataPathOrigin::Chosen) {
-            Ok(d) => {
-                match remember::save(&d.root) {
-                    Ok(file) => log::info!("remembered in {}", file.display()),
-                    Err(e) => log::warn!("could not remember the game: {e}"),
-                }
-                return Some(d);
+            .pick_file(),
+        SetupAction::ChooseFolder => rfd::FileDialog::new()
+            .set_title("Choose the folder containing GTADATA")
+            .pick_folder(),
+        SetupAction::Search => {
+            let url = "https://www.google.com/search?q=GTA+1+Directors+Cut";
+            #[cfg(target_os = "macos")]
+            let mut cmd = std::process::Command::new("open");
+            #[cfg(windows)]
+            let mut cmd = {
+                let mut c = std::process::Command::new("rundll32.exe");
+                c.arg("url.dll,FileProtocolHandler");
+                c
+            };
+            #[cfg(not(any(target_os = "macos", windows)))]
+            let mut cmd = std::process::Command::new("xdg-open");
+            let result = cmd.arg(url).status().map_err(|e| e.to_string())?;
+            if !result.success() {
+                return Err("Could not open Google in your browser".into());
             }
-            Err(e) => {
-                log::warn!("{e}");
-                let again = rfd::MessageDialog::new()
-                    .set_level(rfd::MessageLevel::Warning)
-                    .set_title("That archive cannot be used")
-                    .set_description(format!("{e}\n\nChoose another?"))
-                    .set_buttons(rfd::MessageButtons::YesNo)
-                    .show();
-                if again != rfd::MessageDialogResult::Yes {
-                    return None;
-                }
-            }
+            return Ok(None);
         }
+    };
+    let Some(path) = path else { return Ok(None) };
+    let data = DataPath::check(&path, DataPathOrigin::Chosen).map_err(|e| e.to_string())?;
+    if gfa_assets::Datasets::detect(data.open().map_err(|e| e.to_string())?.as_ref())
+        .present
+        .is_empty()
+    {
+        return Err(
+            "No game mission file found. Choose the game archive or its installed folder.".into(),
+        );
     }
+    if let Err(e) = remember::save(&data.root) {
+        log::warn!("Could not remember game data: {e}");
+    }
+    Ok(Some(data))
 }
 
 fn main() -> ExitCode {
@@ -139,11 +153,8 @@ fn main() -> ExitCode {
         }
     };
     let unattended = args.screenshot.is_some();
-    let data = configured
-        .or_else(beside_program)
-        .or_else(remembered)
-        .or_else(|| if unattended { None } else { choose() });
-    if data.is_none() {
+    let data = configured.or_else(beside_program).or_else(remembered);
+    if data.is_none() && unattended {
         log::error!(
             "no game chosen: select the game's .rar or .zip, put it beside the program, \
              or pass --data"
@@ -153,8 +164,10 @@ fn main() -> ExitCode {
 
     let config = gfa_app::AppConfig {
         data,
-        game: args.game,
-        level: args.level,
+        setup: Some(setup),
+        show_menu: args.game.is_none() && args.level.is_none() && !unattended,
+        game: args.game.unwrap_or(Dataset::Gta),
+        level: args.level.unwrap_or(1),
         no_hd: args.nohd,
         screenshot: args.screenshot,
         size: args.size,
