@@ -140,7 +140,7 @@ Because `tools/dosprobe/run.py` mounts the owner's game folder under DOSBox-X wi
 
 ## 3. Vehicles AmiGTA1 Doesn't Drive
 
-- [ ] **Tank (`model 0x25`)**
+- [x] **Tank (`model 0x25`)**
   - Measure handling and turn rate vs `crates/gfa-sim/src/vehicle.rs` (`TANK_MODEL = 0x25` engine cut), independent rotating turret aiming, cannon shells on Fire (projectile speed, explosion, reload cadence, wall/car damage), armour and damage resistance, pushing/crushing cars, and where/how it spawns (`IMPLEMENTATION_PLAN.md`, `docs/PARITY.md`).
   - **Probe script:** `tools/dosprobe/scripts/combat_tank_board.probe`, `combat_tank_keys.probe` (`combat_tank` overlay); `tank_straight.probe`, `tank_fire.probe`, `tank_fire2.probe`, `tank_fire_cheat.probe` (`tank_drive` overlay); `tank_turn.probe` (`tank_turn` overlay); all `--cycles 150000`, overlays from `gfa-tool probe-overlay`. Handling read from the bursts with `tools/dosprobe/analyze_drive.py` (lane-line spacing = scale, lane-line phase = camera x, block-periodic texture masks the tank for its position and heading). Owner-run interactive `combat_tank`.
   - **Placement:** a tank from the map's object list (`StartupObject` kind `37`) or a script `PARKED 37` both board and drive. (An earlier note that a `PARKED` tank was inert was an artifact of the arena's declaration order; see the gotchas above.) The levels place tanks as `PARKED 37` / `PARKED_PIXELS 37`: three plain ones in Liberty City [2]; with a `CARTRIGGER` that starts a kill frenzy in San Andreas [102] (tanks 2500, 2530) and Vice City [202] (tank 3000) and [203].
@@ -197,8 +197,8 @@ Because `tools/dosprobe/run.py` mounts the owner's game folder under DOSBox-X wi
         - **Settled headless (`tank_blast_reach`, `tank_blast_reach_15`, test plan D7):** a lone car 2 blocks from the target, and another 1.5 blocks off, stood untouched 12.5 s after the target blew up. A control 1 block on its other side blew up about half a second after it. So the reach is between 1 and 1.5 blocks, which fits gfa-sim's `BLAST_CAR_PX = 32` (1 block).
       - **Score:** **100** for each vehicle, whether car, Coach or Tanker. **Ported:** the rocket's or shell's direct hit no longer pays the 100 AmiGTA1 adds, so a kill pays the wreck's 100.
       - **Deferred (owner, 2026-11-27):** whether a shell at another tank crashes `GTA8.EXE` with "ADDING TWICE", as a rocket did.
-  - **Armour:** a rocket at the tank makes it disappear, then `GTA8.EXE` stops with `Error 126.94 ADDING TWICE inform Ian 99` (an original-game crash; not to be reproduced).
-  - **Crush:** the tank drives straight through cars, the Bus and peds: cars and the Bus blow up on touch, peds are run over. Nothing stops or pushes it (owner, interactive; in `combat_tank_keys` the tank drove into a parked Bulldog and wrote it off, score `100`).
+  - **Armour:** a rocket at the tank makes it disappear, then `GTA8.EXE` stops with `Error 126.94 ADDING TWICE inform Ian 99` (an original-game crash; not to be reproduced). **Ported (2026-11-27), agreed with the owner:** a rocket or shell writes off a tank as it does any car (it already did). The player in his tank takes no harm from blasts (`World::harm`), since the cars it crushes blow up against it and he drives on. That a rocket's blast spares him too is ours: nobody has fired one at a tank with him in it.
+  - **Crush:** the tank drives straight through cars, the Bus and peds: cars and the Bus blow up on touch, peds are run over. Nothing stops or pushes it (owner, interactive; in `combat_tank_keys` the tank drove into a parked Bulldog and wrote it off, score `100`). **Ported (2026-11-27):** `Traffic::crush` takes the place of the stop at the contact and the ram for the tank. Each fleet car it touches is written off on the spot, his doing, so it blows up on the next game frame and pays as his wreck. The tank drives on through it and its wreck, undented. A car the script keeps from harm is driven through untouched (ours). People: the car's rule already runs them over, because the tank is past the 5 units a car needs to kill within a few ticks of pulling away. `tools/scripts/tank_crush.txt` (Liberty City's tank, two cars) and three synthetic tests.
   - **Glitch:** running over a ped can leave the turret drawn detached from the hull (original-game visual bug; not to be reproduced).
   - **Manual test plan:** `docs/M6B_TANK_TEST_PLAN.md` (overlays from `tools/dosprobe/tank_scenarios.sh`) for the shell's range, what makes it burst, damage to cars and walls, and the turret aiming itself.
   - **Follow-up / status:** Ported (2026-11-27).
@@ -210,6 +210,7 @@ Because `tools/dosprobe/run.py` mounts the owner's game folder under DOSBox-X wi
     - **Settled (2026-11-27):**
       - **The blast reach**, headless (D7: 1 to 1.5 blocks, as gfa-sim).
       - **By the owner's call:** the far-wreck rule is a square, applies sideways, and covers a rocket's wreck. No projectile bursts on water, only on what it hits (ported).
+    - **Ported (2026-11-27):** the crush and the armour (above).
     - **Open, not blocking:**
       - whether the far-wreck rule counts from the player or the camera
       - a shell at a tank (deferred).

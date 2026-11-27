@@ -160,6 +160,9 @@ const PULL_DOWN_TICKS: i32 = 21 * PULL_TICKS;
 const CORPSE_TICKS: i32 = 1500;
 /// A ped set alight burns to death in this many ticks.
 pub const BURN_TICKS: i32 = 100;
+/// The player's car kills the people it hits at this speed or more, five
+/// units (16.16 px a physics step); slower, it shoves them aside.
+pub const RUN_OVER_SPEED: i64 = 5 * 32768;
 /// A frightened ped runs at least this long before the pavement may calm
 /// him.
 const PANIC_TICKS: i32 = 150;
@@ -1167,9 +1170,9 @@ impl Peds {
     }
 
     /// The player's car against the crowd, centred at `(px, py)` facing
-    /// `pface` with half extents in px. At `speed` five units or more
-    /// (16.16 px a physics step) a ped in the box is killed where he
-    /// stands; slower, he is shoved along his own heading. Returns what
+    /// `pface` with half extents in px. At `speed` [`RUN_OVER_SPEED`] or
+    /// more a ped in the box is killed where he stands; slower, he is
+    /// shoved along his own heading. Returns what
     /// each one killed standing scores as ([`Ped::score_kind`]), in turn.
     #[allow(clippy::too_many_arguments)]
     pub fn ram(
@@ -1185,7 +1188,7 @@ impl Peds {
         let (fx, fy) = (i64::from(sin(pface)), -i64::from(cos(pface)));
         let (rx, ry) = (i64::from(cos(pface)), i64::from(sin(pface)));
         let (phl, phw) = (i64::from(phl), i64::from(phw));
-        let fast = speed >= 5 * 32768 || speed <= -5 * 32768;
+        let fast = speed.abs() >= RUN_OVER_SPEED;
         let mut hits = Vec::new();
         for p in &mut self.p {
             if !p.alive || p.corpse || p.pull >= 0 || p.layer != layer || p.drown > 0 {

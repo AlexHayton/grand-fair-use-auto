@@ -71,10 +71,14 @@ enum Command {
         cars: bool,
     },
     /// List a mission file's sections, or tally one section's declarations
-    /// and commands.
+    /// and commands. `mission coverage` reports what the scripts use against
+    /// what gfa-sim does.
+    #[command(args_conflicts_with_subcommands = true)]
     Mission {
+        #[command(subcommand)]
+        report: Option<MissionReport>,
         /// Game path, e.g. GTADATA/MISSION.INI.
-        path: String,
+        path: Option<String>,
         /// Show this section in detail.
         #[arg(long)]
         section: Option<u32>,
@@ -197,6 +201,24 @@ enum Command {
     },
 }
 
+#[derive(Subcommand)]
+enum MissionReport {
+    /// Every command and declaration kind the single-player sections use,
+    /// how often and where, and whether gfa-sim does it yet: the mission
+    /// VM's work list.
+    Coverage {
+        /// Game path of a mission file.
+        #[arg(default_value = "GTADATA/MISSION.INI")]
+        path: String,
+        /// Count the multiplayer sections ([1000] and up) too.
+        #[arg(long)]
+        multiplayer: bool,
+        /// Print the tables of docs/MISSION_OPCODES.md instead.
+        #[arg(long)]
+        markdown: bool,
+    },
+}
+
 fn parse_xy(s: &str) -> Result<(usize, usize), String> {
     let (x, y) = s.split_once(',').ok_or("expected X,Y")?;
     Ok((
@@ -235,10 +257,23 @@ fn main() -> Result<()> {
         } => map(src, &path, at, objects.then_some(kind)),
         Command::Style { path, cars } => style(src, &path, cars),
         Command::Mission {
+            report:
+                Some(MissionReport::Coverage {
+                    path,
+                    multiplayer,
+                    markdown,
+                }),
+            ..
+        } => coverage(src, &path, multiplayer, markdown),
+        Command::Mission {
+            report: None,
             path,
             section,
             dump,
-        } => mission(src, &path, section, dump),
+        } => {
+            let path = path.context("which mission file? e.g. GTADATA/MISSION.INI")?;
+            mission(src, &path, section, dump)
+        }
         Command::Text { path, key, grep } => text(src, &path, key.as_deref(), grep.as_deref()),
         Command::Render {
             path,
@@ -456,6 +491,21 @@ fn mission(src: &dyn AssetSource, path: &str, section: Option<u32>, dump: bool) 
             println!("{} {} {:?}", c.id, c.name, c.nums);
         }
     }
+    Ok(())
+}
+
+fn coverage(src: &dyn AssetSource, path: &str, multiplayer: bool, markdown: bool) -> Result<()> {
+    use gfa_formats::mission;
+    let sections = mission::parse(&src.read(path)?).with_context(|| format!("parsing {path}"))?;
+    let report = gfa_tool::coverage::Report::new(path, &sections, multiplayer);
+    print!(
+        "{}",
+        if markdown {
+            report.markdown()
+        } else {
+            report.text()
+        }
+    );
     Ok(())
 }
 

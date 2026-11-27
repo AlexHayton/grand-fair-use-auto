@@ -138,6 +138,12 @@ impl Scene {
                         out.extend(object_sprite(style, &self.atlas, obj, 0, pos, 0.0));
                     }
                 }
+                PickupState::Loose => {
+                    let pos = ground(p.x, p.y, p.layer, 0);
+                    if let Some(obj) = item_object(p.kind) {
+                        out.extend(object_sprite(style, &self.atlas, obj, 0, pos, 0.0));
+                    }
+                }
             }
         }
         for p in game.peds() {

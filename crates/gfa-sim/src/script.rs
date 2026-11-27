@@ -20,6 +20,7 @@
 //! ```
 //!
 //! `expect` text must appear in some log line, `reject` text in none.
+//! `# mission: on` runs the section's mission script as the level does.
 
 use std::fmt;
 
@@ -101,6 +102,8 @@ pub struct Script {
     pub start: Option<(i32, i32)>,
     /// `# section: N`.
     pub section: Option<u32>,
+    /// `# mission: on`: run the section's mission script (M7).
+    pub mission: bool,
     pub lines: Vec<Line>,
     /// `# expect:` texts.
     pub expect: Vec<String>,
@@ -280,6 +283,19 @@ impl Script {
         match key.trim() {
             "expect" => self.expect.push(value.to_string()),
             "reject" => self.reject.push(value.to_string()),
+            "mission" => {
+                self.mission = match value {
+                    "on" => true,
+                    "off" => false,
+                    _ => {
+                        return Err(ParseError {
+                            line: number,
+                            text: line.to_string(),
+                            why: "mission must be on or off",
+                        });
+                    }
+                };
+            }
             "section" => {
                 self.section = Some(value.parse().map_err(|_| ParseError {
                     line: number,

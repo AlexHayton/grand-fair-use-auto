@@ -255,6 +255,9 @@ pub fn run_recorded(
     mut each_tick: impl FnMut(&World, bool),
 ) -> Report {
     let total = opts.ticks.unwrap_or_else(|| script.ticks());
+    if script.mission && world.mission.is_none() && !world.start_mission() {
+        world.say("script: # mission: on, but the world has no section".to_string());
+    }
     let mut runner = Runner::new();
     let mut report = Report::default();
     let hash_at = |t: u32| {

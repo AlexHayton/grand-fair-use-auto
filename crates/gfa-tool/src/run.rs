@@ -206,6 +206,11 @@ pub fn world_sprites(
                     out.extend(scene.object_sprite(obj, 0, pos, 0));
                 }
             }
+            PickupState::Loose => {
+                if let Some(obj) = item_object(p.kind) {
+                    out.extend(scene.object_sprite(obj, 0, at(p.x, p.y, p.layer, 0), 0));
+                }
+            }
         }
     }
     // The crowd first, so a car at the same height is drawn over a body.

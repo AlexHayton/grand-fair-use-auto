@@ -323,6 +323,9 @@ pub struct World {
     pub cops_killed_seen: u64,
     pub section: Option<Section>,
     pub explode_proc: Option<(usize, i32)>,
+    /// The mission script, running ([`World::start_mission`]); `None` until a
+    /// level starts it.
+    pub mission: Option<Box<crate::mission::Vm>>,
     /// Where the level put him, for the stopgap respawn.
     start: Start,
     /// Last tick's buttons, to find presses.
@@ -408,6 +411,7 @@ impl World {
             cops_killed_seen: 0,
             section: None,
             explode_proc: None,
+            mission: None,
             start,
             prev: Buttons::NONE,
             prev_fire: false,
@@ -632,6 +636,7 @@ impl World {
         self.shops_tick();
         self.bombs_tick();
         self.explode_proc_tick();
+        self.mission_tick();
         self.peds_view();
         self.burn();
         self.score.tick(gun_step);
@@ -809,14 +814,18 @@ impl World {
         }
     }
 
-    /// Is he in a tank with the special key held: aiming its turret?
-    fn aiming(&self, b: Buttons) -> bool {
-        b.contains(Buttons::SPECIAL)
-            && self.doing == Doing::Driving
+    /// Is he driving a tank?
+    pub fn driving_tank(&self) -> bool {
+        self.doing == Doing::Driving
             && self
                 .driven
                 .as_ref()
                 .is_some_and(|d| d.veh.model_id == crate::vehicle::TANK_MODEL)
+    }
+
+    /// Is he in a tank with the special key held: aiming its turret?
+    fn aiming(&self, b: Buttons) -> bool {
+        b.contains(Buttons::SPECIAL) && self.driving_tank()
     }
 
     /// Is a kill frenzy on: the script's, or the pickup's endless weapon?
@@ -834,12 +843,7 @@ impl World {
     /// The cannon's tick: in a tank during a frenzy, fire sends a shell
     /// along the turret.
     fn cannon_tick(&mut self, gun_step: bool) {
-        let tank = self.doing == Doing::Driving
-            && self
-                .driven
-                .as_ref()
-                .is_some_and(|d| d.veh.model_id == crate::vehicle::TANK_MODEL);
-        let can = tank && self.in_frenzy();
+        let can = self.driving_tank() && self.in_frenzy();
         if !self.cannon.tick(can, self.arms.fire_held, gun_step) {
             return;
         }
@@ -1361,7 +1365,11 @@ impl World {
         {
             d.veh.damage += 5 * hurt.car_hits;
         }
-        if hurt.blast > 0 {
+        // In the tank a blast does him no harm: the cars it crushes blow
+        // up against it and he drives on (`GTA8.EXE`, the owner's play).
+        // Ours: any blast, a rocket's too, which nobody has fired at a
+        // tank with him in it.
+        if hurt.blast > 0 && !self.driving_tank() {
             self.health = 0;
         }
         if hurt.burn > 0 && self.burning < BURN_TICKS {
@@ -2293,73 +2301,99 @@ impl World {
                     ci.vtype == CLASS_BIKE,
                 );
             }
-            // The fleet: stopped at the contact rather than inside a car,
-            // then the ram (AmiGTA1's main loop).
+            // The fleet. The tank: nothing stops it, and every car it
+            // touches is written off (`Traffic::crush`). Any other car:
+            // stopped at the contact rather than inside a car, then the
+            // ram (AmiGTA1's main loop).
             let v = &mut d.veh;
-            let (hl, hw) = (traffic::half_len(ci), traffic::half_wid(ci));
-            let mut pos = (v.ox, v.oy, v.ang16);
-            if self
-                .traffic
-                .sweep_box(&self.cars, ox0, oy0, ang0, &mut pos, hl, hw, d.layer)
-            {
-                v.x += pos.0 - v.ox;
-                v.y += pos.1 - v.oy;
-                v.ox = pos.0;
-                v.oy = pos.1;
-                v.ang16 = pos.2;
-            }
-            let (hvx, hvy) = (v.vx, v.vy);
-            let cops_before = self.traffic.rammed_cops;
-            let r = self.traffic.ram(
-                &self.cars,
-                v.ox,
-                v.oy,
-                v.angle(),
-                v.len / 2,
-                v.wid / 2,
-                v.vx,
-                v.vy,
-                v.mass,
-                d.layer,
-            );
-            if r.dvx != 0 || r.dvy != 0 || r.dyaw != 0 {
-                v.vx += r.dvx;
-                v.vy += r.dvy;
-                v.ang16 = (v.ang16 + r.dyaw) & 0xFF_FFFF;
-            }
-            v.x += r.dpx;
-            v.ox += r.dpx;
-            v.y += r.dpy;
-            v.oy += r.dpy;
-            // Touching a police car is a wanted level at once; a shunt at
-            // speed (five units on either axis, as a run-over needs) is
-            // two heat a car.
-            if self.traffic.rammed_cops != cops_before
-                && let Some(l) = self.score.force_level(1)
-            {
-                lines.push(l);
-            }
-            if r.hits > 0 && (hvx.abs() >= 5 * 32768 || hvy.abs() >= 5 * 32768) {
-                for _ in 0..r.hits {
-                    if let Some(l) = self.score.crime(crime::SHUNT) {
-                        lines.push(l);
+            if ci.model == crate::vehicle::TANK_MODEL {
+                let cops_before = self.traffic.rammed_cops;
+                let n = self.traffic.crush(
+                    &self.cars,
+                    v.ox,
+                    v.oy,
+                    v.angle(),
+                    v.len / 2,
+                    v.wid / 2,
+                    d.layer,
+                );
+                if self.traffic.rammed_cops != cops_before
+                    && let Some(l) = self.score.force_level(1)
+                {
+                    lines.push(l);
+                }
+                if n > 0 {
+                    lines.push(format!("car: the tank crushed {n}"));
+                }
+            } else {
+                let (hl, hw) = (traffic::half_len(ci), traffic::half_wid(ci));
+                let mut pos = (v.ox, v.oy, v.ang16);
+                if self
+                    .traffic
+                    .sweep_box(&self.cars, ox0, oy0, ang0, &mut pos, hl, hw, d.layer)
+                {
+                    v.x += pos.0 - v.ox;
+                    v.y += pos.1 - v.oy;
+                    v.ox = pos.0;
+                    v.oy = pos.1;
+                    v.ang16 = pos.2;
+                }
+                let (hvx, hvy) = (v.vx, v.vy);
+                let cops_before = self.traffic.rammed_cops;
+                let r = self.traffic.ram(
+                    &self.cars,
+                    v.ox,
+                    v.oy,
+                    v.angle(),
+                    v.len / 2,
+                    v.wid / 2,
+                    v.vx,
+                    v.vy,
+                    v.mass,
+                    d.layer,
+                );
+                if r.dvx != 0 || r.dvy != 0 || r.dyaw != 0 {
+                    v.vx += r.dvx;
+                    v.vy += r.dvy;
+                    v.ang16 = (v.ang16 + r.dyaw) & 0xFF_FFFF;
+                }
+                v.x += r.dpx;
+                v.ox += r.dpx;
+                v.y += r.dpy;
+                v.oy += r.dpy;
+                // Touching a police car is a wanted level at once; a shunt at
+                // speed (five units on either axis, as a run-over needs) is
+                // two heat a car.
+                if self.traffic.rammed_cops != cops_before
+                    && let Some(l) = self.score.force_level(1)
+                {
+                    lines.push(l);
+                }
+                if r.hits > 0
+                    && (hvx.abs() >= crate::peds::RUN_OVER_SPEED
+                        || hvy.abs() >= crate::peds::RUN_OVER_SPEED)
+                {
+                    for _ in 0..r.hits {
+                        if let Some(l) = self.score.crime(crime::SHUNT) {
+                            lines.push(l);
+                        }
                     }
                 }
-            }
-            if r.hits > 0 {
-                v.damage += r.damage;
-                // The push points out of the other car: the dent is the
-                // other way.
-                let (hx, hy) = (v.ox - r.dpx * 8, v.oy - r.dpy * 8);
-                v.dmg_bits |= 1 << panel_delta(ci, v.ox, v.oy, v.angle(), hx, hy);
-                lines.push(format!(
-                    "car: ram x{} - player dv ({},{}) damage {} (+{} this crash)",
-                    r.hits,
-                    r.dvx >> 16,
-                    r.dvy >> 16,
-                    v.damage,
-                    r.damage
-                ));
+                if r.hits > 0 {
+                    v.damage += r.damage;
+                    // The push points out of the other car: the dent is the
+                    // other way.
+                    let (hx, hy) = (v.ox - r.dpx * 8, v.oy - r.dpy * 8);
+                    v.dmg_bits |= 1 << panel_delta(ci, v.ox, v.oy, v.angle(), hx, hy);
+                    lines.push(format!(
+                        "car: ram x{} - player dv ({},{}) damage {} (+{} this crash)",
+                        r.hits,
+                        r.dvx >> 16,
+                        r.dvy >> 16,
+                        v.damage,
+                        r.damage
+                    ));
+                }
             }
         }
         if self.doing == Doing::Driving {
@@ -3278,6 +3312,43 @@ impl World {
         }
     }
 
+    /// Start the section's mission script (`docs/MISSION_VM.md`). False
+    /// when the world has no section.
+    ///
+    /// The crates become the script's. GTA8.EXE's loader only keeps a
+    /// `POWERUP`'s two numbers (0x79db3); a crate exists once a
+    /// `POWERUP_ON` names it. So the ones [`World::load_section`] put out
+    /// go, and the script's own make them again.
+    pub fn start_mission(&mut self) -> bool {
+        let Some(section) = &self.section else {
+            return false;
+        };
+        self.mission = Some(Box::new(crate::mission::Vm::new(section)));
+        let placed = self
+            .pickups
+            .p
+            .iter()
+            .filter(|p| p.state != pickups::PickupState::Gone)
+            .count();
+        self.pickups = Pickups::new();
+        self.say(format!(
+            "pickups: {placed} cleared; the script's POWERUP_ON makes them now"
+        ));
+        true
+    }
+
+    /// The mission script's tick: a game frame of it when its clock says.
+    fn mission_tick(&mut self) {
+        let Some(mut vm) = self.mission.take() else {
+            return;
+        };
+        vm.tick(self);
+        for line in vm.drain_log() {
+            self.say(line);
+        }
+        self.mission = Some(vm);
+    }
+
     pub fn say(&mut self, text: String) {
         self.log.push(LogLine {
             tick: self.tick,
@@ -3388,6 +3459,9 @@ impl World {
         h.i32(self.player_speed);
         h.i32(self.bust_timer);
         h.u8(self.card as u8);
+        if let Some(vm) = &self.mission {
+            vm.sim_hash(&mut h);
+        }
         h.i32(self.foot_arrest);
         h.bool(self.game_over);
         self.camera.sim_hash(&mut h);

@@ -1,0 +1,34 @@
+# Liberty City's opening, run by its mission script as GTA8.EXE runs it
+# (docs/MISSION_VM.md).
+#
+# The crates become the script's: the ones the level put out go, and the
+# script's POWERUP_ONs make them again, one a frame.
+#
+# The level puts the player on trigger 303's own block, so it fires on the
+# first game frame and starts line 9 in slot 4:
+# - SURVIVE 5 waits six frames;
+# - ARROW points at TARGET 137;
+# - MOBILE_BRIEF puts brief 1001 on the mobile;
+# - STARTUP marks 303 started and jumps to 30000;
+# - from 30000, POWERUP_ON after POWERUP_ON: the crates, and the 16 kill
+#   frenzies, which stand loose with no crate.
+#
+# The opening goes no further yet. 31500 is DOOR_ON, which is not ported,
+# and the process waits on it, logged.
+#
+# section: 1
+# mission: on
+# expect: pickups: 150 cleared; the script's POWERUP_ON makes them now
+# expect: mission: trigger 303 starts line 9 in slot 4
+# expect: mission: arrow at 137
+# expect: mission: brief 1001 (mobile)
+# expect: pickups: crate 0 at (127,136) - kind 1 (pistol), 99
+# expect: pickups: loose 1 at (81,146) - kind 14 (kill frenzy), 16
+# expect: pickups: crate 88 at (182,31) - kind 1 (pistol), 99
+# expect: 31500 DOOR_ON waits: not ported yet
+# reject: does not know
+# reject: names no trigger
+# reject: not a POWERUP
+# reject: made no crate
+# reject: POWERUP_ON waits
+wait 300

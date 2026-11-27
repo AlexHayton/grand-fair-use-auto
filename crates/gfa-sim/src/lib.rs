@@ -19,6 +19,8 @@
 //! - [`input`]: buttons per tick, and recordings of them.
 //! - [`script`], [`replay`]: test scripts, run logs and state hashes.
 //! - [`script_world`]: what the mission VM may ask of the world.
+//! - [`mission`]: the mission VM; so far the original's command and
+//!   declaration tables.
 #![deny(clippy::float_arithmetic)]
 
 pub mod cars;
@@ -27,6 +29,7 @@ pub mod hash;
 pub mod input;
 pub mod map;
 pub mod marks;
+pub mod mission;
 pub mod peds;
 pub mod pickups;
 pub mod player;

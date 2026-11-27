@@ -4,6 +4,7 @@ use gfa_formats::mission::Section;
 use crate::hash::StateHasher;
 use crate::map::SimMap;
 
+/// Records, as GTA8.EXE keeps (0x3baafc, 28 bytes each).
 pub const MAX_PICKUPS: usize = 256;
 
 pub const OBJ_CRATE: usize = 0x54;
@@ -61,7 +62,18 @@ pub enum PickupState {
     #[default]
     Gone = 0,
     Crate = 1,
+    /// The item, standing in its opened crate.
     Open = 2,
+    /// The item with no crate under it: a kill frenzy the script turns on
+    /// (GTA8.EXE's 0xd7c10 makes object 0x5f in its state 2 and no 0x55).
+    Loose = 3,
+}
+
+impl PickupState {
+    /// An item the player can take.
+    pub fn takeable(self) -> bool {
+        matches!(self, PickupState::Open | PickupState::Loose)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -142,6 +154,73 @@ impl Pickups {
         )
     }
 
+    /// `POWERUP_ON`'s crate (GTA8.EXE's 0xd7c10): `kind` holding `amount`
+    /// on block `(bx, by)`, in the first free record. A kill frenzy (14)
+    /// stands loose at once, with no crate. Unlike [`Pickups::add_block`]
+    /// it does not look for one already there: a second `POWERUP_ON` makes
+    /// a second record, as there.
+    ///
+    /// The original makes nothing for a block outside 1 to 255 or a height
+    /// `bz` outside 1 to 5 (the object routine, 0xae040), or with all 256
+    /// records in use. gfa-sim also needs ground to stand it on. GTA8.EXE
+    /// passes the block's corner; the probe arena (`weapons_ammo`) shows the
+    /// crate in line with the player, who starts at the block's centre, so
+    /// it is put there.
+    pub fn power_up(
+        &mut self,
+        map: &SimMap,
+        [bx, by, bz]: [i32; 3],
+        kind: i32,
+        amount: i32,
+    ) -> Option<usize> {
+        if !(1..=255).contains(&bx) || !(1..=255).contains(&by) || !(1..=5).contains(&bz) {
+            return None;
+        }
+        let layer = map.stand_layer(bx, by)?;
+        let entry = Pickup {
+            x: i64::from(block_centre(bx)),
+            y: i64::from(block_centre(by)),
+            layer,
+            kind,
+            amount,
+            state: if kind == kind::FRENZY {
+                PickupState::Loose
+            } else {
+                PickupState::Crate
+            },
+        };
+        if let Some(i) = self.p.iter().position(|p| p.state == PickupState::Gone) {
+            self.p[i] = entry;
+            return Some(i);
+        }
+        if self.p.len() >= MAX_PICKUPS {
+            return None;
+        }
+        self.p.push(entry);
+        Some(self.p.len() - 1)
+    }
+
+    /// The first crate or item standing exactly on block `(bx, by)`'s
+    /// place, whatever its state (GTA8.EXE's search in 0xd7fd0 and 0xd8060).
+    pub fn first_at(&self, bx: i32, by: i32) -> Option<usize> {
+        let (x, y) = (i64::from(block_centre(bx)), i64::from(block_centre(by)));
+        self.p
+            .iter()
+            .position(|p| p.state != PickupState::Gone && p.x == x && p.y == y)
+    }
+
+    /// `POWERUP_OFF` (GTA8.EXE's 0xd7fd0): the first crate or item on
+    /// block `(bx, by)` taken away. False when there was none.
+    pub fn take_off(&mut self, bx: i32, by: i32) -> bool {
+        match self.first_at(bx, by) {
+            Some(i) => {
+                self.p[i].state = PickupState::Gone;
+                true
+            }
+            None => false,
+        }
+    }
+
     pub fn at_block(&self, bx: i32, by: i32) -> bool {
         self.p.iter().any(|p| {
             p.state != PickupState::Gone && ((p.x >> BS) as i32) == bx && ((p.y >> BS) as i32) == by
@@ -203,7 +282,7 @@ impl Pickups {
     ) -> Option<(usize, i32, i32)> {
         let r = i64::from(radius_px) << FP;
         for (i, p) in self.p.iter().enumerate().skip(from) {
-            if p.state != PickupState::Open || p.layer != layer {
+            if !p.state.takeable() || p.layer != layer {
                 continue;
             }
             if (p.x - x).abs() <= r && (p.y - y).abs() <= r {
@@ -215,7 +294,7 @@ impl Pickups {
 
     pub fn take_index(&mut self, index: usize) -> Option<(i32, i32)> {
         let p = self.p.get_mut(index)?;
-        if p.state != PickupState::Open {
+        if !p.state.takeable() {
             return None;
         }
         let out = (p.kind, p.amount);

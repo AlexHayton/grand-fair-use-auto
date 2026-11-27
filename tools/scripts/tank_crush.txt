@@ -1,0 +1,23 @@
+# The tank drives through the cars in its way.
+#
+# In Liberty City's tank (car 28) at (62,60), facing south, a car is left
+# standing across the road two blocks ahead, and another four blocks past
+# it, out of the first one's blast. The tank drives straight on. Each car
+# it touches is written off on the spot and blows up on the next game
+# frame, paying as his wreck. Nothing stops or dents the tank, and the
+# blasts against it do him no harm (GTA8.EXE, the owner's play under
+# DOSBox-X: docs/M6B_PROBES.md, the tank's crush).
+#
+# section: 1
+# expect: car: in - model 37 at (62,60)
+# expect: car: the tank crushed 1
+# expect: score: wreck +100
+# expect: car: the tank crushed 1
+# reject: player: wasted
+# reject: car: ram
+# reject: no walkable layer
+drive 28 62 60 128
+park 0 0 64 64
+park 0 0 192 64
+run 250 1 0 0 0
+wait 20

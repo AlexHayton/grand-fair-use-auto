@@ -638,6 +638,63 @@ impl Traffic {
         out
     }
 
+    /// One tick of the player's tank against the fleet, in place of
+    /// [`Traffic::sweep_box`] and [`Traffic::ram`]: nothing stops or pushes
+    /// it. Every car it touches, a bus or a tanker as much as a car, is
+    /// written off on the spot, his doing, and so blows up on the next game
+    /// frame (`GTA8.EXE`, the owner's play: `docs/M6B_PROBES.md`, the
+    /// tank's crush). It drives on through the burning car and the wreck.
+    /// Ours: a car the script keeps from harm is driven through
+    /// untouched. A police car touched counts in `rammed_cops`, as a ram's
+    /// does. Returns how many it wrote off.
+    #[allow(clippy::too_many_arguments)]
+    pub fn crush(
+        &mut self,
+        cars: &[CarInfo],
+        px: i64,
+        py: i64,
+        pface: i32,
+        phl: i32,
+        phw: i32,
+        layer: i32,
+    ) -> u32 {
+        let mut hits = 0;
+        for o in &mut self.cars[..self.n] {
+            if o.done || o.layer != layer || o.wrecked || o.damage >= cars::WRECKED {
+                continue;
+            }
+            let (dx, dy) = ((o.x - px) >> FP, (o.y - py) >> FP);
+            if !(-96..=96).contains(&dx) || !(-96..=96).contains(&dy) {
+                continue;
+            }
+            let oi = &cars[o.model];
+            if !box_hit(
+                px,
+                py,
+                pface,
+                phl + TOUCH_PX,
+                phw + TOUCH_PX,
+                o.x,
+                o.y,
+                o.face,
+                half_len(oi),
+                half_wid(oi),
+            ) {
+                continue;
+            }
+            if oi.model == COP_MODEL {
+                self.rammed_cops += 1;
+            }
+            if o.invuln {
+                continue;
+            }
+            o.damage = cars::WRECKED;
+            o.player_kill = true;
+            hits += 1;
+        }
+        hits
+    }
+
     /// One car's turn in the wreck sweep, every tick: a write-off catches
     /// fire, its fuse counts down on the game frames (`frame`, 23.333 Hz),
     /// and when it runs out the car blows up and stays where it stood as a

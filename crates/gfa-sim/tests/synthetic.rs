@@ -1562,6 +1562,107 @@ fn a_shot_car_blows_up_a_frame_later_and_one_in_its_blast_ten_frames_after() {
     assert_eq!(w.score.score - before, 300);
 }
 
+/// The tank drives straight through a bus and a car: each it touches is
+/// written off, blows up on the next game frame and pays as his wreck, and
+/// nothing stops, pushes or dents it (`GTA8.EXE`, the owner's play).
+#[test]
+fn the_tank_writes_off_every_car_it_touches_and_drives_on() {
+    let mut w = in_tank();
+    w.cars.push(saloon());
+    // A bus across the road 3 blocks ahead, and a saloon 4 blocks past it,
+    // out of the bus's blast.
+    w.park(1, 0, -96, 64);
+    w.park(2, 0, -224, 64);
+    let (bus, car) = (w.traffic.n - 2, w.traffic.n - 1);
+    w.drain_log();
+    let before = w.score.score;
+    let (mut crushed, mut up) = (Vec::new(), [None, None]);
+    let mut speeds = Vec::new();
+    // Through both, and stopped short of the wall at the street's end.
+    for t in 0..90u32 {
+        w.step(press(Buttons::UP));
+        let v = &w.driven.as_ref().expect("wasted in the tank").veh;
+        speeds.push(v.vx.abs() + v.vy.abs());
+        if w.drain_log()
+            .iter()
+            .any(|l| l.text.contains("car: the tank crushed 1"))
+        {
+            crushed.push(t);
+        }
+        for (k, i) in [bus, car].into_iter().enumerate() {
+            if up[k].is_none() && w.traffic.cars[i].wrecked {
+                up[k] = Some(t);
+            }
+        }
+    }
+    assert_eq!(crushed.len(), 2, "one crush a car: {crushed:?}");
+    for (k, at) in crushed.iter().enumerate() {
+        let gone = up[k].expect("never blew up");
+        // On the first game frame from the touch: the same tick if it is
+        // one (the sweep comes after the drive), else within 3 ticks.
+        assert!((0..=3).contains(&(gone - at)), "{at} -> {gone}");
+    }
+    let d = w.driven.as_ref().expect("still in the tank");
+    assert_eq!(d.veh.damage, 0, "the tank took no dent");
+    // The blasts against it did him no harm.
+    assert_eq!(w.health, 100);
+    let y = d.veh.oy >> 16;
+    assert!(
+        y < (w.traffic.cars[car].y >> 16) - 64,
+        "drove on through the wrecks: at {y}"
+    );
+    // Not slowed by either: no more than the engine cut's dither at the
+    // top speed over the tick it touched.
+    for &t in &crushed {
+        let (was, now) = (speeds[t as usize - 1], speeds[t as usize + 2]);
+        assert!(now * 10 >= was * 9, "slowed at {t}: {was} -> {now}");
+    }
+    // Each pays as his wreck, the second doubled in the same streak.
+    assert_eq!(w.score.score - before, 300);
+}
+
+/// The tank runs over the people in its way (`GTA8.EXE`, the owner's
+/// play). Slow as it is, it is past the speed a car needs to kill within a
+/// few ticks of pulling away, so the car's rule gives it.
+#[test]
+fn the_tank_runs_people_over() {
+    let mut w = in_tank();
+    let (x, y) = (w.player.x as i64, w.player.y as i64);
+    assert!(w.peds.drop_ped(x, y - (60 << 16), 2, 128, -1, 0));
+    w.drain_log();
+    let mut ran_over = false;
+    for _ in 0..100 {
+        w.step(press(Buttons::UP));
+        if log_has(&mut w, "car: ran over 1") {
+            ran_over = true;
+            break;
+        }
+    }
+    assert!(ran_over, "the man in its path lived");
+    assert!(w.peds.p.iter().any(|p| p.corpse));
+}
+
+/// A rocket writes off a tank as it does any car (ours: `GTA8.EXE` makes
+/// the tank vanish and then stops with `ADDING TWICE`, a crash not copied).
+#[test]
+fn a_rocket_writes_off_a_tank_like_any_car() {
+    use gfa_sim::weapons::weapon;
+    let mut b = CmpBuilder::new(1);
+    street(&mut b, 5..35, 5..45);
+    let mut w = world(&b, south(15, 15));
+    w.peds.clear();
+    w.traffic.clear();
+    w.cars[0].model = gfa_sim::vehicle::TANK_MODEL;
+    w.park(0, 0, 64, 64);
+    let tank = w.traffic.n - 1;
+    w.give_weapon(weapon::ROCKET as i32, 1);
+    w.drain_log();
+    for t in 0..80 {
+        w.step(press(if t == 0 { Buttons::FIRE } else { Buttons::NONE }));
+    }
+    assert!(w.traffic.cars[tank].wrecked, "the tank stood the rocket");
+}
+
 #[test]
 fn the_tenth_punch_that_lands_is_countered_and_puts_the_player_down_two_seconds() {
     let mut b = CmpBuilder::new(1);

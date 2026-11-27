@@ -6,7 +6,7 @@
 //!
 //! | Subsystem                      | Rate      | Divider                 |
 //! |--------------------------------|-----------|-------------------------|
-//! | mission script                 | 25 Hz     | [`Half`], second tick   |
+//! | mission script                 | 23.333 Hz | [`game_frame`] 7/15     |
 //! | marks (blood, fires), trains   | 25 Hz     | [`Half`], first tick    |
 //! | vehicle physics                | 23.333 Hz | [`Ratio`] 7/15          |
 //! | weapons (gun cooldown, shots, splats) | 23.333 Hz | [`Ratio`] 7/15   |
@@ -99,6 +99,12 @@ impl Ratio {
 
 /// The vehicle physics clock: the original's 23.333 Hz against our 50.
 pub const fn vehicle_physics() -> Ratio {
+    Ratio::new(DOS_FRAME_NUM, DOS_FRAME_DEN)
+}
+
+/// The DOS game frame, 23.333 Hz against our 50: GTA8.EXE's main loop
+/// runs the mission script once a frame (0xa1490, called from 0x57165).
+pub const fn game_frame() -> Ratio {
     Ratio::new(DOS_FRAME_NUM, DOS_FRAME_DEN)
 }
 

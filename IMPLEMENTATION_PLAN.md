@@ -70,6 +70,7 @@ folder that contains `GTADATA/`. Alternatively set `GFA_DATA` or pass
   - Unknown commands silently succeed.
   - Only the first job of each level has been played through.
   - The vocabulary docs are private, not in the repo.
+  - It was written without the original's interpreter code, and it differs from GTA8.EXE in places. Examples: the rate (25 Hz against the game frame), which commands pay `p5`, where a jump to a missing label goes, and whether `RESET` re-arms triggers (`docs/MISSION_VM.md`). gfa-sim follows GTA8.EXE.
   - Bug: `parse_line` drops the 5th number, which breaks SPECIFIC_DOOR remaps.
 - `gta_main.c` is 11k lines: game logic (arrest, cranes, doors and garages, bombs, the jump arc, the arrow, HUD text, the script callbacks) tangled with the platform layer. It needs careful extraction.
 - Test harness:
@@ -103,7 +104,7 @@ Toolchain: Rust stable (1.100 at the start), the `wasm32-unknown-unknown` target
 
 ## Principles
 
-1. **Behaviour comes from AmiGTA1; data and geometry from Carnage3D.** On gameplay, AmiGTA1 wins.
+1. **Behaviour comes from AmiGTA1; data and geometry from Carnage3D.** On gameplay, AmiGTA1 wins, except where GTA8.EXE's own code has been read or its behaviour measured: then the original wins (see Principle 8). The mission VM is ported from GTA8.EXE's interpreter, with AmiGTA1 as the guide to what each command is for (decision log, 2026-11-27).
 2. **The sim is pure and deterministic.** `gfa-sim` has no floats (`#![deny(clippy::float_arithmetic)]`), no I/O, no clock and no platform crates. It is a function `(state, tick inputs) -> state`. Rendering interpolates between ticks with floats.
 3. **Use AmiGTA1's sim units exactly**: 16.16 at 32 px/block, 256-step angles, the Q14 table, the 50 Hz base and its subsystem dividers.
    - The ~38k lines then translate mechanically, with their tuned constants intact.
@@ -127,6 +128,7 @@ Toolchain: Rust stable (1.100 at the start), the `wasm32-unknown-unknown` target
    - the game's own data (FXT strings, MISSION.INI, style tables);
    - Carnage3D's docs;
    - community format and mission docs;
+   - reading GTA8.EXE's code (`tools/dosprobe/gta8.py`);
    - watching the original `GTADOS` executables run under DOSBox-X.
 
    Never invent features. For example, AmiGTA1 notes that the original's police send no army or SWAT (`gta_traffic.h:2622`), so we add none unless evidence says otherwise.
@@ -347,14 +349,14 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
 
 **M6b: Measured from the original.** The vehicles AmiGTA1 does not drive, measured from the DOS original running under DOSBox-X (Principle 8). After M6, because the tank's cannon uses its explosions.
 
-- [ ] Probe harness, `tools/dosprobe`. DOSBox-X runs `GTADOS/GTA8.EXE` from the owner's data folder with a generated config.
+- [x] Probe harness, `tools/dosprobe`. DOSBox-X runs `GTADOS/GTA8.EXE` from the owner's data folder with a generated config. Built 2026-11-23 and used for every M6b measurement since (progress log).
   - Key presses come from a script timed in emulated time, not wall-clock time, so a run repeats exactly.
   - Readouts are screenshots, with sprite position and angle measured from the pixels, and memory dumps once the player's vehicle is found in memory.
   - Nothing it captures is committed. The input scripts and the measured numbers are.
   - The harness also serves the later **(verify)** items: special ped groups, the counter-punch, gang roles, bonuses, cheats.
   - Overlay test maps: `run.py`'s DOSBox-X `-t overlay` layer can inject either synthetic `CmpBuilder` `.CMP` + custom `MISSION.INI` arenas (run side-by-side in both `GTA8.EXE` and `gfa-tool`) or `MISSION.INI`-only overrides over real cities without touching the owner's game data; see `docs/M6B_PROBES.md` for the per-probe checklist and results.
 - [ ] Boats: **deferred to M7 (2026-11-27)**. Measured: the player cannot board or drive one, and a boat dies like a car, in 3 blasts in a line (as gfa-sim already does). Only three exist, all mission props (`FUTURECAR 13`, then `CAR_ON`, `SENDTO`, `KILL_CAR`/`DESTROY`), so what is left (a `DUMMY` boat's `SENDTO` run) needs the mission VM first. See `docs/M6B_PROBES.md`.
-- [ ] Tank: its handling against AmiGTA1's; the turret; the cannon; its armour; pushing cars; where it is found.
+- [x] Tank: its handling against AmiGTA1's; the turret; the cannon; its armour; pushing cars; where it is found. All measured (`docs/M6B_PROBES.md`, `docs/M6B_TANK_TEST_PLAN.md`) and ported by 2026-11-27. Its handling matches as it is. The cannon fires only in a kill frenzy, and the turret turns on Tab. Tanks are placed by `PARKED 37` in the scripts. It crushes every car it touches, and no blast harms him in it (decision log).
 - [ ] RC car and helicopter: neither is map-placed. The RC car is the mission model car (`START_MODEL`/`DO_MODEL`) and the helicopter a scripted escape, so both move to M7's mission VM (owner, 2026-11-27); the model car's handling is measured there.
 - [x] Shop refusals and charges measured in the DOS original and implemented in the sim. The bomb shop rejects ambulances, fire engines, the tank and the model car with the corresponding FXT messages. The spray shop silently skips emergency vehicles and charges for a repaint or wanted plate change. A four-head plate change with no damage and a 1× multiplier costs 8,080. Both shops refuse unaffordable work. Pager display is part of M7. See `docs/M6B_PROBES.md`.
 - [x] Camera speed-zoom and lead measured on an unobstructed DOS runway. Ground coverage grows to about 2.05× at speed, with up to four blocks of lead toward the bonnet even in reverse. The shared simulation camera uses the measured zoom ramp and a fitted lead. The pop-in check passed in all three cities. See `docs/M6B_PROBES.md`.
@@ -362,7 +364,7 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
 - [x] The counter-punch: what the victim's punch back does to the player (the tenth blow that lands: he goes down about two seconds, no harm done; the wheel resets, so it is 11 long). Done 2026-11-26.
 - [ ] Gang roles: the state machine of the original's gang AI types (`gta_peds.c:1111`: AmiGTA1 has read the police ones only). For M7.
 - [x] Special ped groups: where Hare Krishnas and Elvises appear, in which cities, how often and how they walk. For M6. Read from `GTA8.EXE`'s code and checked headless on 2026-11-27: only Hare Krishnas, a line of 7 in every city, made from the 100th passer-by (`docs/M6B_PROBES.md`). There are no Elvises. The owner's checks are in `docs/M6B_KRISHNA_TEST_PLAN.md`, all run by 2026-11-27. Followers trace the leader's path at a steady gap. Every weapon doubles from its base, and a line run over pays 25,000. The leader's following of the player, seen by the owner in K9, is read from the code too (`0xbb2e6`). Ported 2026-11-27 (decision log).
-- [ ] The weapons where AmiGTA1 chose for itself: weapon fire rates/cooldowns and projectile speeds (the owner notes guns fire too fast at 50 Hz); how long the original's bullet splat stays on the map; whether every car blowing up pays the player 100, whoever wrote it off; whether a drowning man can fire (fire-key latch across `WASTED` settled in AmiGTA1's favour without DOS probe, 2026-11-25).
+- [x] The weapons where AmiGTA1 chose for itself: weapon fire rates/cooldowns and projectile speeds (the owner notes guns fire too fast at 50 Hz); how long the original's bullet splat stays on the map; whether every car blowing up pays the player 100, whoever wrote it off; whether a drowning man can fire (fire-key latch across `WASTED` settled in AmiGTA1's favour without DOS probe, 2026-11-25). All settled under DOSBox-X: the 23.333 Hz gun clock and splat (2026-11-23), a wreck pays only when he caused it, and a drowning man fires (`docs/M6B_PROBES.md`, `docs/PARITY.md`).
 - [x] The pull-over: how far to the side the look reaches, how slowly the car moves over, whether it stops and for how long, whether the siren left on does it too. Measured by the owner on 2026-11-27 (`docs/M6B_PROBES.md`):
   - it works only while Tab is held, in any car;
   - it reaches about 2 blocks and takes in the next lane;
@@ -371,16 +373,57 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
 - [x] Getting into a car, frame by frame against the original. The owner reports that ours looks as if he goes in through the wrong side of the door (2026-11-21). Check the door point, the walk-in path, the sprite frames and the door's opening delta (`docs/M6B_PROBES.md` Section 2; also settled slide-under from outside, far-side tall-vehicle detour, flush-wall vault turn & entry refusal, and forward blocked-door exit).
 - Exit: each drives as measured; the numbers and the probe scripts that produced them are in the decision log.
 
-**M7: Mission VM, HUD, text.** Ref: `gta_script.c`, `gta_script_run.c` (`cmd_names[]` at lines 35-172; `step()` at 645; `gta_script_tick` at 2691), `gta_script.h:203-220` and `:459-663`, the `gta_main.c` callbacks (doors, cranes, bombs, the arrow), `gta_hud.c`, `gta_font.c`, `gta_text.c`, and `gta_main.c:2615-2830` (text displays).
+**M7: Mission VM, HUD, text.**
 
-- [ ] Port the VM: declarations, the command table, 32 processes, triggers (TRIGGER/MPHONES/CARTRIGGER/DUM_MISSION_TRIG), phones, arrows, garages and doors, cranes, kill frenzies, bank robbery.
-- [ ] **Unknown commands log section and line and count toward coverage. They do not silently succeed.**
-- [ ] `docs/MISSION_OPCODES.md` lists every command used in GTA's `MISSION.INI` with its status. Sources: AmiGTA1's table, Carnage3D `docs/ped.txt`, community mission docs, and observed behaviour.
-- [ ] `gfa-tool mission coverage` produces the coverage report.
+Ref, for the VM:
+- **The reference:** GTA8.EXE's live interpreter, which is the spec (`docs/MISSION_VM.md`, read with `tools/dosprobe/gta8.py`):
+  - the scheduler at 0xa1490, called once a frame from the main loop;
+  - its command switch through the table at 0xa1234;
+  - the trigger and shop scan at 0xf3800;
+  - the shared helpers in 0x7axxx to 0x7fxxx.
+
+  The other two copies of the switch (0x896c0, 0x95a50) are dead and must not be read as the original.
+- **The guide:** AmiGTA1, for what each command is for and how the world serves it:
+  - `gta_script.c`;
+  - `gta_script_run.c` (`step()` at 645, `gta_script_tick` at 2691);
+  - `gta_script.h:459-663` (the `gta_script_world` callbacks);
+  - the `gta_main.c` callbacks (doors, cranes, bombs, the arrow).
+
+Ref, for the HUD and text: `gta_hud.c`, `gta_font.c`, `gta_text.c`, `gta_main.c:2615-2830` (text displays).
+
+- [x] Read GTA8.EXE's interpreter before porting it (2026-11-27, `docs/MISSION_VM.md`): the frame, the process slots, how a command moves on and pays, the trigger records, and the first dozen commands. Each differs from AmiGTA1 somewhere.
+- [x] Port the VM's machinery from GTA8.EXE (2026-11-27, `gfa_sim::mission::Vm`; the points target waits for the career data in M8):
+  - the script runs on the game frame (23.333 Hz), not the 25 Hz divider set up in M3;
+  - 32 slots: 0 to 3 are the players', and processes take the first free slot from 4;
+  - each process's parent (the root player is the one paid), state, trigger and keep class;
+  - the two advance helpers: 0 = next, -1 = end and re-arm, any other negative = free the slot, a label through the label table, and a missing label landing on command 0;
+  - `p5` paid on the success path unless the command's case says otherwise;
+  - the check on the points target after every command;
+  - the trigger records and their states 0 to 4.
+- [ ] Port each command from its live case (table 0xa1234). Record what it does in `docs/MISSION_VM.md` and its status in `gfa_sim::mission`. Where the code leaves a question, a DOSBox-X probe settles it; where AmiGTA1 differs, the original wins and the difference is noted. Commands and declarations needed:
+  - triggers: TRIGGER, MPHONES, CARTRIGGER, DUM_MISSION_TRIG and the watch triggers;
+  - phones (`MPHONE`, `ANSWER`) and arrows;
+  - garages and doors;
+  - cranes;
+  - kill frenzies;
+  - the bank robbery.
+- [ ] Still to read before the commands that need them:
+  - the 34 trigger types;
+  - `MPHONE` and `ANSWER`;
+  - the per-kind `ENABLE` routine (0x7aa60);
+  - `RESET`'s eight clean-ups;
+  - 0x10b50;
+  - the score routine's multiplier (0xca190);
+  - what slots 0 to 3 run in a single-player game.
+- [ ] **Unknown commands log section and line and count toward coverage. They do not silently succeed.** In the original an unknown command stops the game (error -182). gfa-sim logs it and never takes its success path.
+- [x] `docs/MISSION_OPCODES.md` lists every command used in GTA's `MISSION.INI` with its status. Sources: AmiGTA1's table, Carnage3D `docs/ped.txt`, community mission docs, and observed behaviour.
+  - Done 2026-11-27 (decision log). The tables are generated, and `cargo data-test` fails when they are stale. The doc also records how GTA8.EXE reads a script and what it does with a name it lacks.
+- [x] `gfa-tool mission coverage` produces the coverage report.
+  - Done 2026-11-27. Single-player GTA uses 129 of the original's 150 commands on 20,130 lines, and 50 of its 72 declaration kinds on 4,568 lines. Every name is in GTA8.EXE's tables and AmiGTA1 has a case for each. gfa-sim runs no command yet and reads 5 declaration kinds (23.9% of the declaration lines).
 - [ ] Original HUD: cop heads, weapon and ammo, armour, jail-free card, the pager scroll, the brief box, the big two-line card, score and multiplier fonts.
 - [ ] Close the M7 items in _Gaps beyond AmiGTA1_: every job, a playthrough script per job, mission-only vehicles, gang roles.
 - Exit, in order:
-  1. LC jobs 1–2 pass AmiGTA1's `threejobs`/`phonering`/`lc2_job1` scripts.
+  1. LC jobs 1–2 play through, driven by AmiGTA1's `threejobs`/`phonering`/`lc2_job1` scripts. Their expectations (pay, timing) come from GTA8.EXE, not from AmiGTA1's runs.
   2. Each level's first job passes (`sa1`, `sa2`, `vc1`, `vc2`).
   3. All of chapter 1 is completable. This goes beyond AmiGTA1.
   4. All 6 chapters are completable.
@@ -512,7 +555,7 @@ Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.m
 
 **M6b Measured from the original**
 
-- [ ] **Tank** (model 0x25). AmiGTA1 has only its handling: the engine cut at top speed (`gta_vehphys.c:395`) and its turn rate. Add:
+- [x] **Tank** (model 0x25). Done in M6b, 2026-11-27 (decision log). AmiGTA1 has only its handling: the engine cut at top speed (`gta_vehphys.c:395`) and its turn rate. Add:
   - the rotating turret, aimed independently of the hull;
   - cannon shells on the fire key: projectile, explosion, wall and car damage;
   - its armour and resistance to damage;
@@ -560,6 +603,46 @@ Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.m
 ## Decision log
 
 Newest first. 
+- **2026-11-27. M7: the mission VM is ported from GTA8.EXE's own interpreter.**
+  - **Evidence:** GTA8.EXE's interpreter, read with `tools/dosprobe/gta8.py` (`docs/MISSION_VM.md`). AmiGTA1 wrote its interpreter without the original's code, and it differs in ways the scripts use:
+    - **The rate:** the script runs once a game frame (23.333 Hz), not at 25 Hz.
+    - **Pay:** most commands pay `p5` on success, where AmiGTA1 pays on 17 named ones. GTA's scripts carry a `p5` on `SURVIVE` 94 times and on `DISABLE` 27 times.
+    - **Missing labels:** a jump to a missing label lands on command 0 (`DONOWT`) and idles there, holding its slot. AmiGTA1 ends the process. The scripts have 42 such jumps.
+    - **`RESET`:** it re-arms the triggers of the processes it ends, and `RESET_WITH_BRIEFS` is a different command.
+    - **The rest:** `SURVIVE` keeps its counter in the command and lasts one frame longer; `STARTUP` runs once a game; `KICKSTART` records its children in a spare declaration and rewrites its own p4 and p5; triggers have a waiting state.
+  - **Decided (by the owner):**
+    - GTA8.EXE's live code is the reference for the VM: the scheduler at 0xa1490, the switch at 0xa1234, the trigger scan at 0xf3800.
+    - AmiGTA1 stays the guide to what each command is for and how the world serves it (its `gta_script_world` callbacks become `ScriptWorld`).
+    - Each command is ported from its live case, and what it does is recorded in `docs/MISSION_VM.md`. Where the code leaves a question, a DOSBox-X probe settles it.
+  - **What follows:**
+    - AmiGTA1's job scripts still drive the playthroughs, but their expected pay and timing are taken from the original.
+    - Nothing of the VM is compared with AmiGTA1's interpreter in the oracle (the oracle's policy: no new patches).
+
+- **2026-11-27. M7: the mission VM keeps GTA8.EXE's numbers, and an unknown command never succeeds.**
+  - **Evidence:** GTA8.EXE read with `tools/dosprobe/gta8.py` (`docs/MISSION_OPCODES.md`).
+    - The names are two tables of string pointers: 72 declaration kinds and 150 commands. A name's position is its number.
+    - Every command line is read as its label, the name and five numbers into a 22-byte record. The reader counts numbers, not lines.
+    - An unknown declaration kind stops the game while it loads (error -171). An unknown command loads as opcode 0xFFFF and stops the game when a process reaches it (error -182).
+  - **Decided:**
+    - `gfa_sim::mission::Op` and `DeclKind` number every entry as GTA8.EXE does. That includes the eight AmiGTA1 numbers from 150 and 200 up, and the original's unused entries. Probes of the original's RAM then read the same numbers.
+    - The VM logs the section and line of a command it does not carry out, and never takes that command's success path. The original stops the game there; AmiGTA1 takes the success path and counts the command.
+    - Coverage counts the single-player sections only (multiplayer is out of scope), by name and by line. `gfa_sim::mission::IMPLEMENTED_OPS` and `READ_DECLS` are the record of what is done, and the doc's tables are generated from them, checked by `cargo data-test`.
+  - **Found on the way:** London's executables have their own command tables (`RED_ARROWCAR`, `PLAYER_DRIVE_BY`, `PLAYER_DRIVE_BY_OFF`), and London 1961 has a command line with a sixth number. All three wait for M11.
+
+- **2026-11-27. M6b: the tank crushes what it touches.**
+  - **Evidence:** the owner's play under DOSBox-X (`docs/M6B_PROBES.md`, the tank). It drives straight through cars, the bus and people. Cars and the bus blow up on touch, and people are run over. Nothing stops or pushes it. A parked Bulldog it drove into was written off and paid 100.
+  - **Built:**
+    - `Traffic::crush` takes the place of the stop at the contact (`sweep_box`) and the ram for the tank. Each fleet car it touches is written off on the spot, his doing. So it blows up on the next game frame and pays as his wreck, and the tank drives on, undented. A police car touched still brings the wanted level, as a ram does.
+    - No blast harms him in the tank (`World::harm`, `World::driving_tank`). The cars it crushes blow up against it, and in gfa-sim a blast had killed anybody in any car.
+    - People: no change. The car's rule (5 units) already runs them over, because the tank is past that speed within a few ticks of pulling away.
+  - **Armour, agreed with the owner:** in `GTA8.EXE` a rocket at a tank makes it vanish, then the game stops with `ADDING TWICE`. We don't copy the crash: a rocket or shell writes off a tank as it does any car, which gfa-sim already did.
+  - **Ours:**
+    - A blast spares him in the tank even when it is a rocket's; nobody has fired one at a tank with him in it.
+    - A car the script keeps from harm is driven through untouched.
+    - A tank creeping from rest still shoves people for its first few ticks, as any car does (not measured).
+  - **Checks:** `tools/scripts/tank_crush.txt` (Liberty City's tank through two cars), synthetic `the_tank_writes_off_every_car_it_touches_and_drives_on`, `the_tank_runs_people_over` and `a_rocket_writes_off_a_tank_like_any_car`.
+  - The oracle is not affected: AmiGTA1 has no tank to drive in its runs.
+
 - **2026-11-27. The oracle becomes a regression net, not the reference.**
   - **Why:**
     - gfa-sim's fidelity now comes from `GTA8.EXE`: the code read with `gta8.py`, headless DOSBox-X probes and the owner's checks.
@@ -577,7 +660,7 @@ Newest first.
     - The wall fire (one fire, 10 px back along the rocket's line, 1100 ticks) was checked only by the oracle. `synthetic.rs` checks it now.
     - The shot, blast and fire lines (`w`, `x`, `h`) are no longer printed or compared, and `Weapons::trace_lines` is gone. The walk harness's `s` line keeps only his health.
     - `weapons_clock.pl`, `weapons_wallfire.pl`, `weapons_chain.pl`, `weapons_water.pl` and `score_streak.pl` are deleted. The harnesses link AmiGTA1's `gta_weapon.c` and `gta_score.c` unpatched, so the street around the player is still AmiGTA1's whole street. The walk harness has no guns now; its punch stays, since the crowd is still compared.
-    - RESULT_PLACEHOLDER
+    - Every oracle run still matches without the five patches: 73 runs, being 10 scripts, 24 random walks, 24 random drives, 3 of the trains and 12 of the traffic. So nothing still compared had depended on them. 11 patches are left: 9 for the traffic and 2 for the crowd.
   - **Next to retire:** the fleet's comparison (9 patches, `oracle_traffic` and the `f` lines), once the traffic's own measurements are in and the data tests cover them. The crowd's 2 patches stay while the crowd is compared.
 
 - **2026-11-27. M6b: traffic light cycle.**
@@ -840,6 +923,57 @@ Each entry: date, decision, why.
 ## Progress log
 
 Newest first.
+
+- **2026-11-27. M7: the mission VM's machinery, ported from GTA8.EXE.**
+  - **Ported:** `gfa_sim::mission::Vm` (`docs/MISSION_VM.md`):
+    - the game frame (`clock::game_frame`, 7/15);
+    - 32 slots, with processes from slot 4, parents and keep classes;
+    - the two advance helpers, with a missing label landing on command 0;
+    - pay on success;
+    - the check on the points target after every command;
+    - trigger records for every kind that makes one, in load order and born armed;
+    - the scan's block-range test for `TRIGGER`.
+  - **Commands:**
+    - done: `DONOWT`, `SURVIVE`, `KICKSTART`, `KEEP_THIS_PROC`, `KILL_SIDE_PROC`, `DISABLE`, `COMPARE`, `INCCOUNT`, `DECCOUNT`, `MOBILE_BRIEF`, `ARROW_OFF`;
+    - in part: `STARTUP`, `ENABLE`, `ARROW`.
+
+    Any other command waits, logged once with its section and line.
+  - **Read on the way:** how the loader makes each kind's trigger, the scan's range test (blocks, inclusive, so radius 0 is the block itself), `ENABLE`'s per-kind routine, `ARROW`, `KEEP_THIS_PROC`, and the `KICKSTART` record's slots.
+  - **Wiring:**
+    - `World::start_mission` and `ScriptWorld::{trigger_block, pay, target_reached}`;
+    - the `# mission: on` header for test scripts;
+    - the coverage report's `part` status.
+  - **Checks:**
+    - `tools/scripts/mission_opening.txt`: Liberty City's opening fires trigger 303, points the arrow, sends brief 1001 and passes `STARTUP`, then waits at `30000 POWERUP_ON`;
+    - unit tests in `mission::vm`.
+
+    Commands now cover 39.1% of the command lines.
+
+- **2026-11-27. M7: GTA8.EXE's interpreter read; the VM is to be ported from it** (decision log).
+  - `docs/MISSION_VM.md` covers:
+    - which of the three copies of the command switch is live;
+    - the frame and the process slots;
+    - how a command moves on and pays;
+    - the trigger records;
+    - the commands read so far: `DONOWT`, `SURVIVE`, `STARTUP`, `KICKSTART`, `KILL_SIDE_PROC`, `DISABLE`, `ENABLE`, `COMPARE`, `INCCOUNT`, `DECCOUNT`, `RESET`, `RESET_WITH_BRIEFS`, `MOBILE_BRIEF`, `BRIEF`.
+  - M7's VM items now name GTA8.EXE as the reference and AmiGTA1 as the guide, and list what is still to read. Principles 1 and 8 say the same.
+
+- **2026-11-27. M7: the mission coverage report** (decision log).
+  - `gfa_sim::mission` holds the original's command and declaration tables (`Op`, `DeclKind`) and what gfa-sim does of them.
+  - `gfa-tool mission coverage [PATH] [--multiplayer] [--markdown]` (`gfa_tool::coverage`). `gfa-tool mission <path>` works as before.
+  - `docs/MISSION_OPCODES.md` holds GTA8.EXE's reader, the sources, London's extras and the generated tables.
+  - Data tests `mission_coverage_doc_is_current` and `london_uses_commands_gta8_lacks` (`crates/gfa-tool/tests/coverage.rs`).
+
+- **2026-11-27. M6b: the tank's crush and armour; M6b's own items done** (decision log).
+  - `Traffic::crush`, `World::driving_tank`, and the tank's shield against blasts in `World::harm`. `peds::RUN_OVER_SPEED` names the car's kill speed.
+  - `tools/scripts/tank_crush.txt` and three synthetic tests.
+  - Ticked the probe harness, the tank and the weapons items. What M6b still lists (boats, the RC car, the helicopter and gang roles) waits for M7's mission VM.
+
+- **2026-11-27. The oracle becomes a regression net; the weapons and the score retired from it** (decision log).
+  - The five gun scripts left the oracle and stay data tests; `rocket.txt` also expects the chain's second pay. The wall fire's check moved to `synthetic.rs`.
+  - `w`, `x` and `h` lines gone from both sides (`Weapons::trace_lines` removed); the walk harness's `s` line is his health only; its guns are gone and its punch stays.
+  - Deleted `weapons_clock.pl`, `weapons_wallfire.pl`, `weapons_chain.pl`, `weapons_water.pl` and `score_streak.pl`. AmiGTA1's `gta_weapon.c` and `gta_score.c` are linked unpatched.
+  - Verified `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all -- --check`, `cargo data-test` and `cargo oracle-test` (73 runs match, and `wasm_matches_native`).
 
 - **2026-11-27. M6b: captured the DOS traffic light cycle and wired it into the simulation and renderer.** The probe and its frame analyzer are in `tools/dosprobe`.
 

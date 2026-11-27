@@ -350,4 +350,6 @@ up to the next one.
 
 The base game uses 130 distinct commands, London 1969 79 and 1961 75. MC.CMP
 turns out to be the 1961 deathmatch map. `gfa-tool mission <path> [--section N] [--dump]`
-lists sections and tallies kinds and commands.
+lists sections and tallies kinds and commands. Without multiplayer, the base
+game uses 129 commands. `gfa-tool mission coverage` reports each name against
+GTA8.EXE's tables and gfa-sim (`MISSION_OPCODES.md`).
