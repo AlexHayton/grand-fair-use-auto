@@ -11,23 +11,23 @@
  * the walk into water and the drowning from gta_main.c's main loop, and
  * runs the fleet, the trains and the crowd around him (fleet.h), with
  * every car held off him as he walks. The style is read for the fleet's car table.
- * His fire key is restated from gta_main.c too: the punch (its standing
- * animation and the blow on its third state), the guns' cooldown, the shot
- * and the panic it starts, the ammunition, and what the weapons do to him
- * (bullets, blasts, fire) down to WASTED.
+ * His fire key is restated from gta_main.c too, for the punch only (its
+ * standing animation and the blow on its third state), and what the
+ * weapons do to him (bullets, blasts, fire) down to WASTED. The guns are
+ * retired from the oracle (decision log, 2026-11-27), so he has none.
  *
  *     walktrace <map.cmp> <style.gry> <script.txt>
  *
  * The script is the walk format: `start bx by`, then `turn forward walk
  * ticks` legs, which keep the fire key as it was; `fire ticks`, which holds
- * it on top of the leg's keys; `wait ticks`, which lets every key go;
- * `weapon w rounds`, which hands him a gun; and the fixtures `ped dx dy
+ * it on top of the leg's keys; `wait ticks`, which lets every key go; and
+ * the fixtures `ped dx dy
  * angle` (somebody put down beside him, the farthest of a full crowd making
  * room) and `park model dx dy face` (a car left standing beside him), as
  * gta_main.c does them, each lasting a tick. `#` lines and blank lines are
  * skipped. After each tick's player and street lines comes
  *
- *     s <tick> <score> <heat> <level> <health> <weapon> <ammo>
+ *     s <tick> <health>
  *
  * Grand Fair Use Auto, MIT.
  */
@@ -41,12 +41,9 @@
 #include "gta_trig.h"
 #include "fleet.h"
 
-/* gta_main.c's fire latch and the player's guns. */
-static int fire_held, fire_queued, weapon, punch_left, fire_cool, burning;
+/* gta_main.c's fire key, for the punch. */
+static int fire_held, punch_left, burning;
 static int knocked;   /* ticks down after a ped's counter-punch (M6b) */
-static int ammo[GTA_WEAPON_COUNT];
-static int ammo_sub[GTA_WEAPON_COUNT] = { 0, 0, GTA_AMMO_PER_UNIT, 0,
-                                          GTA_AMMO_PER_UNIT };
 
 static const char *const ground_name[8] = {
     "air", "water", "road", "pavement", "field", "building", "?6", "?7"
@@ -149,12 +146,6 @@ int main(int argc, char **argv)
                                 pl.y + ((long)i << 16), ticks & 255, pl.layer,
                                 -1, 0);
             ticks = 1;
-        } else if (sscanf(line, "weapon %d %d", &a, &b) == 2) {
-            if (a >= 0 && a < GTA_WEAPON_COUNT) {
-                weapon = a;
-                ammo[a] = b;
-            }
-            ticks = 1;
         } else if (sscanf(line, "%d %d %d %d", &a, &b, &i, &ticks) == 4) {
             turn = a; fwd = b; walk = i;
             is_leg = 1;
@@ -164,7 +155,7 @@ int main(int argc, char **argv)
             ticks = 1;
         for (i = 0; i < ticks; i++) {
             long speed;
-            int hb, hc, bl, bu, gun_step;
+            int hb, hc, bl, bu;
             if (knocked > 0) {
                 /* FLAT ON HIS BACK after a counter-punch: no walking or
                  * firing until he gets up. */
@@ -198,12 +189,7 @@ int main(int argc, char **argv)
                     }
                 }
             }
-            /* THE FIRE LATCH (gta_main.c), on his feet only. Punches run at
-             * 50 Hz; guns step on the 23.333 Hz weapon clock (gun_step) and
-             * latch presses/holds between steps. */
-            gun_step = fleet_weapons_clock_step();
-            if (gun_step && fire_cool > 0)
-                fire_cool--;
+            /* THE PUNCH (gta_main.c), on his feet only, at 50 Hz. */
             if (punch_left > 0) {
                 punch_left--;
                 if (punch_left == GTA_PUNCH_TICKS * (GTA_PED_PUNCH_FRAMES - 2))
@@ -211,42 +197,12 @@ int main(int argc, char **argv)
                                        pl.layer) == -3)
                         knocked = 100;
             }
-            if (weapon == 0) {
-                fire_queued = 0;
-                if (fire_held && !drown && !knocked && punch_left == 0)
-                    punch_left = GTA_PUNCH_TICKS * GTA_PED_PUNCH_FRAMES;
-            } else {
-                if (fire_held && !drown && !knocked)
-                    fire_queued = 1;
-                if (gun_step) {
-                    int want = !drown && !knocked && (fire_held || fire_queued);
-                    fire_queued = 0;
-                    if (want && fire_cool == 0 && ammo[weapon] > 0
-                        && gta_weapons_fire(&weapons, weapon, pl.x, pl.y,
-                                            pl.layer, pl.angle,
-                                            pl.anim == GTA_ANIM_RUN, -1)) {
-                        fire_cool = gta_weapons_cooldown(weapon);
-                        gta_peds_panic(&crowd, pl.x, pl.y, pl.layer);
-                        if (ammo_sub[weapon] > 0) {
-                            if (--ammo_sub[weapon] == 0) {
-                                ammo_sub[weapon] = GTA_AMMO_PER_UNIT;
-                                ammo[weapon]--;
-                            }
-                        } else
-                            ammo[weapon]--;
-                        if (ammo[weapon] <= 0) {
-                            ammo[weapon] = 0;
-                            weapon = ammo[GTA_WEAPON_PISTOL] > 0
-                                   ? GTA_WEAPON_PISTOL : GTA_WEAPON_FIST;
-                        }
-                    }
-                }
-            }
+            if (fire_held && !drown && !knocked && punch_left == 0)
+                punch_left = GTA_PUNCH_TICKS * GTA_PED_PUNCH_FRAMES;
             speed = pl.anim == GTA_ANIM_RUN || pl.anim == GTA_ANIM_WALK
                   ? GTA_RUN_SPEED_FP : 0;
             if (fleet_tick(pl.x, pl.y, speed, pl.angle, pl.layer, 3, 3, 1,
-                           pl.anim == GTA_ANIM_RUN || pl.anim == GTA_ANIM_WALK,
-                           gun_step)) {
+                           pl.anim == GTA_ANIM_RUN || pl.anim == GTA_ANIM_WALK)) {
                 printf("player: run over by a train\n");
                 health = 0;
             }
@@ -268,27 +224,20 @@ int main(int argc, char **argv)
             if (drown && (drown++ & 1))
                 health -= 3;
             if (health <= 0) {
-                /* Wasted: the guns and the heat go. AmiGTA1 shows the card
-                 * and starts again at a hospital; gfa-sim, until the card
-                 * comes, starts again where the script began, and so does
-                 * this. */
+                /* Wasted. AmiGTA1 shows the card and starts again at a
+                 * hospital; gfa-sim's oracle runs start again where the
+                 * script began, and so does this. */
                 printf("player: wasted\n");
                 gta_player_init(&pl, &map, &tiles, sx, sy);
                 drown = 0;
                 health = 100;
                 burning = 0;
                 knocked = 0;
-                fire_queued = 0;
                 fire_held = 0;
-                for (a = 1; a < GTA_WEAPON_COUNT; a++)
-                    ammo[a] = 0;
-                weapon = 0;
-                gta_score_clear_heat(&score);
             }
             trace(++tick, &pl);
             fleet_dump(tick);
-            printf("s %ld %ld %d %d %d %d %d\n", tick, score.score, score.heat,
-                   score.level, health, weapon, ammo[weapon]);
+            printf("s %ld %d\n", tick, health);
         }
         if (!is_leg)
             continue;

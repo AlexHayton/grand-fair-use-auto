@@ -6,7 +6,6 @@
 # level go with him; the score stays. Until the card and the hospitals come,
 # he starts again where the script began.
 #
-# oracle: walk
 # section: 1
 # expect: weapons: rocket burst on car
 # expect: player: hit - bullets 0, on the car 0, blast 1; health 0

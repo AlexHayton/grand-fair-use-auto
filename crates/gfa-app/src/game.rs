@@ -324,7 +324,6 @@ impl Game {
         let view = w.view_now();
         let (cx, cy) = w.view_centre();
         let (cbx, cby) = ((cx >> 21) as i32, (cy >> 21) as i32);
-        let tick = w.traffic.light_tick();
         self.lamps
             .iter()
             .filter(move |l| {
@@ -337,7 +336,7 @@ impl Game {
                 // The sprite's front is its lens: it faces the drivers
                 // coming the other way (see `Pose::draw_angle`).
                 let angle = gfa_render::sprites::sim_angle(l.toward);
-                (l.light(tick), pos, angle)
+                (w.traffic.lamp_light(l), pos, angle)
             })
     }
 

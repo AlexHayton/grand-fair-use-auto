@@ -3,11 +3,10 @@
 # Block (66,62) is a building; the player stands three blocks north of it,
 # on the road at (66,59), facing south. The rocket bursts on the wall and
 # leaves one fire on this side of it, 10 px back along its line, which burns
-# for 1100 ticks (about 22 s, as in GTA8.EXE; AmiGTA1 lights three for 250,
-# and the oracle is patched to match) and sets alight anybody who comes
-# within 8 px.
+# for 1100 ticks (about 22 s, as in GTA8.EXE; AmiGTA1 lights three for 250)
+# and sets alight anybody who comes within 8 px. The fire itself is checked
+# in synthetic.rs (weapon_fire_rates_...).
 #
-# oracle: walk
 # section: 1
 # expect: weapons: rocket burst on a wall at block (66,62,2)
 # reject: no walkable layer

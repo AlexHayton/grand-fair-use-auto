@@ -643,6 +643,7 @@ impl World {
         self.aim_at_player();
         self.harm();
         self.run_over();
+        self.gouranga();
         self.prev = b;
         self.prev_fire = raw_fire;
         self.tick += 1;
@@ -1073,7 +1074,7 @@ impl World {
     /// The peds' tick, with the view where the fleet's was.
     fn run_peds(&mut self, centre: (i64, i64)) {
         let traffic = &self.traffic;
-        let green = |bx, by, along_x| traffic.light_green(bx, by, along_x);
+        let green = |along_x| traffic.light_green(along_x);
         let ctx = TickCtx {
             map: &self.map,
             cars: &self.cars,
@@ -1084,6 +1085,15 @@ impl World {
         self.peds.tick(&ctx, &mut |s| lines.push(s));
         for l in lines {
             self.say(l);
+        }
+        // Those his blast set alight, burnt to death: paid now, as burnt.
+        for kind in self.peds.take_owed() {
+            let award = self.score.event(kind, score::reason::BURNED);
+            self.crime(crime::MURDER);
+            self.say(format!(
+                "score: burnt to death, {award} points (score {})",
+                self.score.score
+            ));
         }
     }
 
@@ -1102,31 +1112,37 @@ impl World {
         } else {
             avy + avx / 2
         };
-        let hits = self
+        let kinds = self
             .peds
             .ram(v.ox, v.oy, v.angle(), v.len / 2, v.wid / 2, d.layer, speed);
-        if hits > 0 {
+        if !kinds.is_empty() {
             // A run-over is a "hit and run"; from a motorbike the original
             // files nothing.
             let bike = self.cars[v.model].vtype == CLASS_BIKE;
             let mut award = 0;
-            for _ in 0..hits {
-                award = self
-                    .score
-                    .event(score::kind::CIVILIAN, score::reason::RUNOVER);
+            for &kind in &kinds {
+                award = self.score.event(kind, score::reason::RUNOVER);
                 if !bike {
                     self.crime(crime::RUNOVER);
                 }
             }
-            let total = self.peds.stats.runover;
+            let (hits, total) = (kinds.len(), self.peds.stats.runover);
             self.say(format!(
                 "car: ran over {hits} - {total} so far, {award} points (score {}, heat {})",
                 self.score.score, self.score.heat
             ));
-            if self.score.streak_count() >= 4 {
-                let bonus = self.score.add(500);
-                self.say(format!("score: GOURANGA! +{bonus} points"));
-            }
+        }
+    }
+
+    /// GOURANGA!: the bonus the score paid for the 7th Krishna in a streak,
+    /// whatever killed him. The big text and its sound are M8's.
+    fn gouranga(&mut self) {
+        let bonus = self.score.take_gouranga();
+        if bonus > 0 {
+            self.say(format!(
+                "score: GOURANGA! +{bonus} points (score {})",
+                self.score.score
+            ));
         }
     }
 

@@ -171,7 +171,7 @@ Because `tools/dosprobe/run.py` mounts the owner's game folder under DOSBox-X wi
       - **Score: a far wreck pays nothing.** In `GTA8.EXE`, a car the player wrecks pays only if it is close to him. gfa-sim pays at any distance.
         - **Owner, manual, test plan A5:** each try was a fresh `tank_range`, with the tank stopped level with a marker and one shell fired straight up the lane. The target car was destroyed every time. It paid **100 from 6 blocks** (marker 12), and **nothing from 10, 15, 20 … 65 blocks**. A wreck on screen or a few blocks off paid 100 in `tank_damage`.
         - **Cut-off: between 7 and 8 blocks.** The owner's shots bracket it between 6 and 10 blocks. The `tank_chain` total, decoded with the streak measured below, narrows it: a wreck 7 blocks away pays, one 8 away does not. Measured only straight ahead, from the tank's centre to the wreck's, with the tank standing still. gfa-sim's view half-height at rest happens to be 7 blocks (`SimView::GAME`); the two have not been compared.
-        - **Still unknown:** the cut-off's shape (a square or a circle; across the screen as well as up it), and whether it counts from the player or from the camera, which leads a moving player.
+        - **Taken as settled (owner, 2026-11-27):** the cut-off is a square that applies across the screen as well as up it, and a rocket's wreck follows it too. gfa-sim already does both. Still unknown: whether it counts from the player or from the camera, which leads a moving player.
         - **The rule is probably the wreck's distance, not the shell's flight time.** If the shell stopped counting as the player's after flying for a while, it would explain the same misses.
         - **Headless chain check** (`tank_chain`, `tank_chain_check.probe`): 11 cars nose to tail, 4 to 14 blocks ahead, set off by one shell at the nearest. The score reached **1500** and no more. With the doubling streak measured below, 1500 = 100+200+400+800 is exactly the first **4** cars, at 4 to 7 blocks. The car at 8 blocks would have paid 1600 and did not. The chain ran on (its later cars blew up), so the wreck's distance decides it, not the shell's flight.
         - **Ported:** a wreck pays only within 7 blocks of the player on both axes (`PAY_REACH_PX = 256`, a square, from the player's centre).
@@ -180,20 +180,21 @@ Because `tools/dosprobe/run.py` mounts the owner's game folder under DOSBox-X wi
         - **The hit car:** the shell bursts on it at game frame 3 after the key, and it blows up at **frame 4, one frame later**, paying 100. A car the pistol wrecks also blew up one frame after the lethal shot (`combat_expl_score1c`, above).
         - **Cars a blast writes off** blow up **10 game frames (≈430 ms) after** the car whose blast caught them. Both neighbours went at frame 14. The next pair went at frames 24 (east) and 25 (west); the one-frame split is not explained. The next went at frame 34.
         - **The streak doubles:** popups read **100, 200, 400, 800, 1600, 3200**, in the order the cars blew up, two in the same frame included. The final score was 6300. Each step (10 frames) is inside the 13-frame streak window, so the streak runs the length of the chain.
-        - **Ported:** a car written off where it stands blows up on the next game frame (`cars::HIT_FUSE`), a car a blast writes off 10 frames later (`cars::BLAST_FUSE`). Fuses burn first, then the cars blow up, so the step does not depend on the fleet's order. Each wreck pays `Score::wreck`: 100, doubling along a streak whose window is now 13 game frames (`score::STREAK_FRAMES`). The oracle takes `weapons_chain.pl` and `score_streak.pl`. Known gap: gfa-sim's square 32 px reach catches the hit car's side neighbours in the shell's own burst (frame 3), so they go at frame 13, not 14. The 24/25 split is not modelled.
+        - **Ported:** a car written off where it stands blows up on the next game frame (`cars::HIT_FUSE`), a car a blast writes off 10 frames later (`cars::BLAST_FUSE`). Fuses burn first, then the cars blow up, so the step does not depend on the fleet's order. Each wreck pays `Score::wreck`: 100, doubling along a streak whose window is now 13 game frames (`score::STREAK_FRAMES`). The oracle took `weapons_chain.pl` and `score_streak.pl` until the weapons and the score were retired from it (2026-11-27). Known gap: gfa-sim's square 32 px reach catches the hit car's side neighbours in the shell's own burst (frame 3), so they go at frame 13, not 14. The 24/25 split is not modelled.
     - **What it bursts on (owner, manual, `tank_burst`):** like the rocket in every case.
       - **Car:** the shell bursts on contact. The car's own wreck explosion follows, and that one shell writes it off.
       - **Burnt-out wreck:** the shell bursts on it, and so does a rocket.
-      - **Building wall:** the shell bursts on it and leaves **one** small fire on that side of the wall. Remeasured, it burns about **22 s**. A **rocket** does the same (B5): one fire, 22 s. AmiGTA1, and gfa-sim until now, lit **three** fires for 250 ticks (**5 s** at 50 Hz). **Ported:** `WALL_FIRE_TICKS = 1100`, one fire a step back along the line. The oracle takes `tools/oracle/weapons_wallfire.pl`, and `cargo oracle-test` passes. The script explosion's two fires keep AmiGTA1's 250 ticks, unmeasured.
+      - **Building wall:** the shell bursts on it and leaves **one** small fire on that side of the wall. Remeasured, it burns about **22 s**. A **rocket** does the same (B5): one fire, 22 s. AmiGTA1, and gfa-sim until now, lit **three** fires for 250 ticks (**5 s** at 50 Hz). **Ported:** `WALL_FIRE_TICKS = 1100`, one fire a step back along the line. The oracle took `tools/oracle/weapons_wallfire.pl` until the weapons were retired from it (2026-11-27); `synthetic.rs` checks the fire now. The script explosion's two fires keep AmiGTA1's 250 ticks, unmeasured.
       - **Person:** the shell bursts on them and kills them at once, and the corpse does not burn. This matches gfa-sim: a direct hit is inside `BLAST_KILL_PX`, which kills, rather than the outer `BLAST_BURN_PX` ring, which sets alight.
     - **Railings and water (owner, manual, `tank_fence`, on Vice City's bridge deck at `(222,122)`):**
       - **East edge, `x=224`:** the shell bursts and leaves the 22 s fire. At deck height that block is **Building**-typed with flat sides, so it counts as a wall. gfa-sim's rocket bursts on block `(224,122,3)` as well.
       - **West railing, `x=216`:** a pavement block with flat faces of side tile `102`. The shell flies over it with no bang and on over the land and water beyond. Tile `102` is on Vice City's shot-through list (`WallTiles::gta`, `SHOT3`, from AmiGTA1), so gfa-sim agrees. This confirms that entry in `GTA8.EXE`, as the footbridge earlier confirmed tile `101`.
-      - **Water:** not settled. Neither shot met water at its own height.
+      - **Water:** not measured; neither shot met water at its own height. **Taken by the owner's call (2026-11-27):** a shell, like a bullet or a rocket, does not burst on water. It bursts only when it hits something. **Ported (2026-11-27):** AmiGTA1, and gfa-sim until now, stopped all three at water on their own layer, as at a wall. That only happens off a beach, where the water is level with the shooter. Now they fly on over it (the oracle took `tools/oracle/weapons_water.pl` until the weapons were retired from it, 2026-11-27). Synthetic test: the water check in `weapon_fire_rates_projectile_speed_and_splat_lifetime_match_original`.
     - **Damage (owner, manual, `tank_damage`):** like the rocket in gfa-sim, apart from the score.
       - **One shell writes off anything:** a Coach, a car (Itali GTB) and a Tanker each took **1** shell.
       - **Tanker:** the shell bursts at the point of contact, then the Tanker goes up in its usual 5 blasts in a line.
-      - **Blast reach:** the target's neighbour 1 block away blew up shortly after it, and the one 2 blocks away slightly after that: a chain. Cars one blast writes off go up together, in gfa-sim too (`cars::BLAST_FUSE`). One after the other means each wreck's blast reached only the next car, 1 block away, as gfa-sim's `BLAST_CAR_PX = 32` does. A 2-block reach would have caught both neighbours at once. The reading `GTA8.EXE`'s code suggested (2) is not borne out; a lone car 2 blocks from a target would settle it outright.
+      - **Blast reach:** the target's neighbour 1 block away blew up shortly after it, and the one 2 blocks away slightly after that: a chain. Cars one blast writes off go up together, in gfa-sim too (`cars::BLAST_FUSE`). One after the other means each wreck's blast reached only the next car, 1 block away, as gfa-sim's `BLAST_CAR_PX = 32` does. A 2-block reach would have caught both neighbours at once. The reading `GTA8.EXE`'s code suggested (2) is not borne out.
+        - **Settled headless (`tank_blast_reach`, `tank_blast_reach_15`, test plan D7):** a lone car 2 blocks from the target, and another 1.5 blocks off, stood untouched 12.5 s after the target blew up. A control 1 block on its other side blew up about half a second after it. So the reach is between 1 and 1.5 blocks, which fits gfa-sim's `BLAST_CAR_PX = 32` (1 block).
       - **Score:** **100** for each vehicle, whether car, Coach or Tanker. **Ported:** the rocket's or shell's direct hit no longer pays the 100 AmiGTA1 adds, so a kill pays the wreck's 100.
       - **Deferred (owner, 2026-11-27):** whether a shell at another tank crashes `GTA8.EXE` with "ADDING TWICE", as a rocket did.
   - **Armour:** a rocket at the tank makes it disappear, then `GTA8.EXE` stops with `Error 126.94 ADDING TWICE inform Ian 99` (an original-game crash; not to be reproduced).
@@ -206,9 +207,11 @@ Because `tools/dosprobe/run.py` mounts the owner's game folder under DOSBox-X wi
     - **Ported (2026-11-27):** the frenzy-gated cannon (`weapons::Cannon`: 99 shells, one every 24 game frames; `Kind::Shell`, from the muzzle 26 px out, 7 then +3 a frame to 17), the turret (`Driven::turret`, 8 a frame, drawn in the app and `gfa-tool run`), the chain timing, the far-wreck rule and the doubling streak. The script's frenzy is M7; `World::start_frenzy` and the test scripts' `frenzy` order load the cannon meanwhile, as does the frenzy crate. Synthetic tests: `the_tank_fires_only_in_a_frenzy_a_shell_every_24_frames`, `a_shell_leaves_the_muzzle_and_speeds_up_by_three_to_seventeen`, `tab_with_left_or_right_turns_the_turret_eight_a_frame_and_not_the_hull`, `a_shot_car_blows_up_a_frame_later_and_one_in_its_blast_ten_frames_after`, `a_wreck_pays_only_within_seven_blocks_of_the_player`.
     - **Measured (owner, 2026-11-27, under DOSBox-X):** the turret turns with the hull as it steers (gfa-sim holds it relative to the hull); `Tab` in a tank sounds no horn; the shell is drawn with the rocket's sprite.
     - **Assumed, not measured:** no car pulls over for a tank's `Tab` (it follows from there being no horn); the frenzy crate loads the cannon too.
+    - **Settled (2026-11-27):**
+      - **The blast reach**, headless (D7: 1 to 1.5 blocks, as gfa-sim).
+      - **By the owner's call:** the far-wreck rule is a square, applies sideways, and covers a rocket's wreck. No projectile bursts on water, only on what it hits (ported).
     - **Open, not blocking:**
-      - the far-wreck rule's shape, and whether a rocket's wreck follows it
-      - water
+      - whether the far-wreck rule counts from the player or the camera
       - a shell at a tank (deferred).
 
 - [ ] **Boats** *(deferred to M7, 2026-11-27)*
@@ -238,7 +241,7 @@ Because `tools/dosprobe/run.py` mounts the owner's game folder under DOSBox-X wi
     - **RC car = the "model car", a mission mechanic.** `START_MODEL` (24 of them: sections 2, 102, 103, 202, 203) waits until the player is driving, then swaps them into a bomb car (model 47, text `car47` "Model Car"). `DO_MODEL` supervises the session: it ends when the player gets out or the last model car is spent, a spent one is replaced after 100 ticks, and the target's wreck ends it about 100 ticks later. No score on any path. Pressing fire sets the car off. The player never meets it outside those missions. The bomb shop refuses it (`no_modelcar_respray`).
     - **Helicopter = scripted only.** The only trace in the data is `CHOPPER_ENDPOINT` (a section-wide destination: `20010 … (4800,128,0)` in [202] and `(5632,16256,0)` in [203], both Vice City). Nothing declares a model 88 car, so how it is spawned and flown is internal to `GTA8.EXE`. Traffic filters it out (`gta_traffic.c:1186`).
   - **Still to measure:** the model car's handling (speed, turning, fire's blast radius and damage, the camera while driving it) and the helicopter's flight to `CHOPPER_ENDPOINT`. Both can only be staged through a mission section, so they need a `level_overlay.py --section 2` run (Liberty City [2] has one `START_MODEL`, `7300`) or the Vice City [202] run for the helicopter.
-  - **Follow-up / status:** Neither can be driven by the player outside a mission, so the port's work is the mission VM's (M7): `START_MODEL`/`DO_MODEL` and a script-flown helicopter. AmiGTA1 already implements the model-car session (`gta_main.c:4805`), which is the starting point. Waiting on the owner's call: probe the model car's handling in the original now, or defer both to M7 with the boats.
+  - **Follow-up / status:** Neither can be driven by the player outside a mission, so the port's work is the mission VM's (M7): `START_MODEL`/`DO_MODEL` and a script-flown helicopter. AmiGTA1 already implements the model-car session (`gta_main.c:4805`), which is the starting point. Deferred to M7 (owner, 2026-11-27), with the boats. A probe through Liberty City [2] (`level_overlay.py --section 2 --player 45,64,4 --cmd "0=0 KICKSTART 17010 0 -1 0 0"`, skipping the phone call) did get the player into the RC car and drivable, but the level exited as soon as the first mission text line cleared, and blanking the mission's `RESET`/`MISSION_END` commands (`--donowt`) did not stop it. Own commands with labels above the section's range page-faulted. To resume: run the mission from its start in the mission VM, where `START_MODEL`/`DO_MODEL` end properly, then measure speed, turning, the fire blast and the camera. The helicopter's flight needs Vice [202].
 
 - [x] **Respray refusals**
   - Verify exact trigger conditions and behaviour for emergency vehicles (`no_emerg_respray`), RC car (`no_modelcar_respray`), tank (`no_tank_respray`), and insufficient cash (`no_respray`) (`docs/PARITY.md`).
@@ -252,11 +255,30 @@ Because `tools/dosprobe/run.py` mounts the owner's game folder under DOSBox-X wi
 
 ## 4. Traffic, Pull-Over, Camera & Controls
 
-- [ ] **Horn / siren pull-over (`Traffic::pull_over`)**
+- [x] **Horn / siren pull-over (`Traffic::pull_over`)**
   - Measure lateral look width (provisional half-block in `crates/gfa-sim/src/traffic/mod.rs`), forward reach (`5` blocks?), pull-over speed (provisional `2` speed units), kerb offset (offsets `7` and `0x37` of `0x40`), whether the car stops completely and for how long (provisional `3` s), and whether an active (un-held) siren also triggers pull-over (`IMPLEMENTATION_PLAN.md`, `docs/PARITY.md`, `docs/REFERENCE_MAP.md`).
   - **Probe script:** `tools/dosprobe/scripts/traffic_pull_over.probe`; no-siren control: `traffic_pull_over_control.probe`. Both use `tools/dosprobe/overlays/traffic/GTADATA/MISSION.INI`.
   - **Measured:** The treatment/control scripts run the same timed approach with and without Tab, but captures do not confirm that the player is seated in the cop car; no pull-over response can be attributed.
-  - **Follow-up / status:** **Pending.** Confirm car entry and isolate a target before measuring pull-over geometry, stop duration, or held-vs-toggled siren behavior.
+  - **Measured by the owner (2026-11-27, interactive, `overlays/traffic`):**
+    - **P1:** in the police car with Tab held, the car ahead moves only very slightly within its lane and **does not stop**. Taxis seem to speed up, if anything.
+    - **P2:** it works from about **2 blocks** behind at most.
+    - **P3:** a car in the next lane, a little ahead, reacts too.
+    - **P4:** no stopping was seen, so no stop time.
+    - **P5:** the siren switched on alone does nothing; cars react only while Tab is held.
+    - **P6:** the horn in an ordinary car does it too.
+  - **Read from `GTA8.EXE`'s code (2026-11-27, `gta8.py dis`):**
+    - **The look** (`0x18ec0`, the special key in a car, horn or siren): points 1 to 5 blocks ahead of his car's centre (the sine table is 65536 to 1, read from a RAM dump). At each, a search of the map's 2-block cells (`0x65640`) for the first car whose shape meets a box of his own car's (`car+0x1ce`). That car goes to `0x1abb0`, and the look stops there.
+      - The box is not read. It is what limits the reach to the owner's 2 blocks and takes in the next lane.
+    - **The pull-over** (`0x1abb0`): only a car in ordinary traffic (`car+0x11f == 1`). Its lane target (`car+0x107`) goes from the middle, `0x1f`, to 7 or `0x37` of the block's `0x40`, picked by its direction. The target flips to the other side where the block on that side is road. The dead band (`car+0xbf`) becomes 4; the state becomes 2.
+    - **Driving pulled over** (`0x1e3a5`): each frame its speed (`car+0x1c`) goes up one, then down one with the throttle (`car+0xa`) cut. It keeps its speed and **never stops**.
+    - **The end:** when a probe at its side meets a building, state 3 (`0x30cd0` and two like it) sets the middle again (`0x1f`). The next frame it is back to state 1 (`0x1e3b0`).
+  - **Follow-up / status:** **Ported (2026-11-27).** `Traffic::pull_over`:
+    - the nearest car up to 2 blocks ahead of his nose, 48 px either side (his lane and the next);
+    - in ordinary traffic, it moves 12 px to the kerb on its right, or its left where the right is road;
+    - it drives on at the speed it had, no faster, and only what is in its way stops it.
+    - Ours: it goes back to its lane at its next turn, lane change or crossing, or 3 s after the look last found it. The original waits for a building at its side.
+    - Data test `the_car_ahead_pulls_over_for_the_horn`.
+    - Not explained: the taxis seeming to speed up (P1).
 
 - [x] **Unlisted hotkeys (police toggle & three zoom levels)**
   - Identify the DOS key bindings for the police toggle and the three zoom levels present in the FXT strings but missing from the 1997 README (`IMPLEMENTATION_PLAN.md` M6b & decision log).
@@ -275,11 +297,17 @@ Because `tools/dosprobe/run.py` mounts the owner's game folder under DOSBox-X wi
   - **Zoom settings:** Sampled both settings and car position every DOS frame during acceleration, coast and straight reverse. The settings matched `lens = clamp(48 + 12 × floor(abs(speed)), 80, 240)` and `plane = 324 − lens/2` as targets, with speed in **half-pixels per 23.333 Hz frame**. Each setting moves using the previous frame's ramp speed, capped at 8 units per frame. When decreasing it uses the full ramp speed, and when increasing it uses half rounded up. The ramp gains one unit per frame and resets on reaching the target. The ground footprint ratio fits `(256 + lens) × 284 / (336 × plane)`. On this DOSBox-X/macOS run, the representative dumps start at guest physical `0x3bd4a8`: `u16` lens at +0, `i32` 16.16 camera x and y at +2/+6, `u16` plane at +12, and the tracked car's `i32` 24.8 x and y at +36/+40. Positions are in half-pixels and fields are little-endian. The physical addresses are build-specific.
   - **Follow-up / status:** Implemented the zoom settings and ramp in `SimCamera`, and fitted the lead from speed and hull direction using the measured cap and initial ramp. The lead transient through turns and changes of direction is an approximation. The renderer applies the measured footprint change at its existing field of view, and the traffic view uses the same lead and zoom. The three-city pop-in check passed at full zoom.
 
-- [ ] **Traffic light cycle**
-  - Measure exact green, amber, and red durations (provisional AmiGTA1 `5 s` green / `0.6 s` amber) (`docs/PARITY.md`).
-  - **Probe script:** `tools/dosprobe/scripts/traffic_lights.probe` with `tools/dosprobe/overlays/traffic_lights/GTADATA/MISSION.INI`; captures one frame per second for 20 s.
-  - **Measured:** The sampling run completes, but the current fixed view does not yet provide a reliable, unobstructed signal-state sequence.
-  - **Follow-up / status:** **Pending.** Reposition the player/camera until the signal is clearly visible, then time phase transitions at frame-level resolution.
+- [x] **Traffic light cycle**
+  - **Probe script:** `tools/dosprobe/scripts/traffic_lights.probe` parks the camera at Liberty City block (161,83) with both signal axes visible. It captures 1,960 VGA frames (about 1.5 GB). The analyzer reads the two lenses and bounds each transition between their last old and first new readings.
+    ```sh
+    python3 tools/dosprobe/run.py --overlay tools/dosprobe/overlays/traffic_lights --script tools/dosprobe/scripts/traffic_lights.probe --cycles 150000 --fast --run-name light_cycle --out /tmp/light-cycle
+    python3 tools/dosprobe/analyze_lights.py /tmp/light-cycle
+    ```
+  - **Measured:** Each approach shows green for **96 game frames** (4.11 s), amber for **40** (1.71 s), red for **176** (7.54 s), and amber again for **40** (1.71 s). The full cycle is **352 frames** (15.09 s) at 23.333 Hz. As one axis changes from amber to red, the other changes from red to amber in the same capture. One axis stays red through every phase.
+  - **Phase:** The level starts with north–south green. Repeating the probe with the player's x coordinate changed to 61 showed the same phase and transition times within one game frame, even though AmiGTA1's neighbourhood offset puts the two crossings in opposite phases.
+  - **Follow-up / status:** The game and the AmiGTA1 comparison harnesses use one DOS cycle for all crossings. Lamps, drivers and pedestrians read the same signal.
+  - **Visibility check:** The new timing exposed a case in Vice City where roadblock officers could reuse pedestrian slots that were still visible. Slot reuse now requires the old occupant to be out of view.
+  - **Traffic stress check:** The DOS timings revealed brief vehicle overlaps in two of the twelve fixed-camera runs. Fleet collision correction now separates cars along the shallowest overlap and uses the closing axis for the impact impulse. The gate checks car serials for disappearances, so a position jump at the start of a turn does not count as a despawn.
 
 ---
 
@@ -287,10 +315,73 @@ Because `tools/dosprobe/run.py` mounts the owner's game folder under DOSBox-X wi
 
 - [ ] **Special ped groups & bonuses (Hare Krishnas / Elvises)**
   - Verify which cities/levels spawn Hare Krishna lines and Elvis impersonators, spawn frequency/rules, walking formation, and exact bonus triggers/points (`GOURANGA!`, Elvis, cop kills) (`IMPLEMENTATION_PLAN.md`, `docs/PARITY.md`).
-  - **Probe scripts:** `tools/dosprobe/scripts/special_groups.probe` and `special_groups_walk.probe` (Director's Cut); `special_groups_london.probe` (London). The walking run records one frame per second for 100 seconds.
+  - **Probe scripts:** `tools/dosprobe/scripts/special_groups.probe` and `special_groups_walk.probe` (Director's Cut); `special_groups_london.probe` (London). The walking run records one frame per second for 100 seconds. `krishna_walk.probe` walks the same way and dumps guest RAM every 10 s for `tools/dosprobe/gta8.py krishna`.
   - **Measured:** The walking run on the original Liberty City map shows a seven-person orange-robed line, visually matching the Hare Krishna group, in frames `0054`–`0067` (`73,112`–`86,110` DOSBox-X PIC ticks; about 13 seconds). The clearest frame (`0065`) shows seven members in a single-file sidewalk formation. The earlier stationary Liberty City and London captures did not identify special groups.
-  - **Follow-up / status:** Partial. Repeat to estimate spawn frequency and verify the group's actor type; check Vice City for Elvises and measure the bonus trigger/points separately.
-  - **Bonus-trigger introspection:** `ENGLISH.FXT` key `8787` is `GOURANGA!`. The GFA port's `World::run_over` currently awards a multiplier-scaled `500` points when a generic civilian run-over streak reaches four; its synthetic test verifies that port behavior, not the original game. Original mission `[1]` separately declares seven `FUTUREPED`s (`382`–`388`), enables them at command labels `1281`–`1293`, then checks their deaths; text key `1049` says `You were meant to kill 'em all`. No explicit `GOURANGA` command appears in this mission script. A DOSBox drive attempt entered a Bulldog but got stuck against a building without hitting pedestrians, so the original bonus trigger remains unverified.
+  - **Read from `GTA8.EXE`'s code (2026-11-27, `tools/dosprobe/gta8.py`; addresses as the LE objects load, code at `0x10000`, data at `0x130000`):**
+    - **Only Hare Krishnas.** There are no Elvises: no text, no remap and no code. `ENGLISH.FXT` has `8787` `GOURANGA!` and no Elvis text; Carnage3D's remap list has none.
+    - **The score event** (`0xca4c0`):
+      - The reason picks the base, as in AmiGTA1: 2 → 3, 3/7/8 → 10, 4 → 7, 5/6 → 2, else 1.
+      - The same type again extends the streak, and the timer restarts at 13. The timer counts down once a game frame and clears the streak the frame after it reaches 0. It runs inline in the per-player frame update (`0xd17d0`, in `0xd1410`). `0xcd0c0` is an identical copy that nothing calls.
+      - **Type 1 (a passer-by) pays count × base. Every other type pays base doubled (count − 1) times, even with a base of 1.** AmiGTA1, and so gfa-sim's `Score::event`, read a base of 1 as the bare count. In the code the `<= 1` test comes after the doubling.
+      - Each award is × 100 × the multiplier. Only type 7 has a bonus: when its streak count reaches **7**, the game shows `8787` (`0xcaddd`) and adds **12,300** × the multiplier (`0x300c`).
+    - **Which peds are type 7** (the ped-death scoring, `0xf2540`): a ped of kind 0 scores by its AI type (`ped+0x62`).
+      - Types **21, 22 and 42 → type 7.** 23 → 8, 24/26–30 → 9, 31–33/39/40/50/51/55 → 2.
+      - 41/43–47/49 pay through `0xca230` with 10000. 25 (a plain passer-by) and the rest → 1.
+      - The script cannot make them: `CHANGE_PED_TYPE` translates its numbers (21 → 24, 22 → 26, 42 → 44, measured), and `PED_ON` gives 25. So types 21, 22 and 42 are only ever Krishnas.
+    - **The line** (`0xb69b0`, the passer-by spawner):
+      - Every passer-by it makes counts (`0x3ba424`). The **100th**, while no group exists (`0x3971c0`), becomes the **leader**: AI type 21, mode 2 (walking), remap **143**.
+      - **6 followers** (type 22, mode 4) spawn on his spot (`0xb7240`), each following the one made before it (`ped+0x7c`). They form a group record of up to 13 (`0x3971aa`).
+      - The count is cleared when the level starts and when the leader dies.
+      - Every passer-by placed is counted (`0xb6f9d`), whether a line exists or not, and every one reaches the `== 100` check (`0xb706d`): no branch skips it. While a leader lives the count runs past 100, so no second line can start until he dies and the count restarts.
+    - **A Krishna's death** (`0xb1dc0`, from every death path):
+      - **A follower:** leaves the group, and the one behind follows the one in front.
+      - **The leader:** each one left becomes type 42, mode 1 (AmiGTA1's "flee"), aimed at the ped being updated at that moment. The group is gone and the count starts again.
+  - **Measured headless** (`krishna_walk.probe`, RAM read with `gta8.py krishna`):
+    - **Liberty City (no overlay):** the count reached 100 at 52 s on foot, and the line of 7 appeared on screen beside the player.
+      - **Spacing:** they spawn on one spot and peel off one at a time, settling to about **0.3 blocks** apart in single file (frames `f053`, `f060`).
+      - **Persistence:** all 7 were still there 52 s later, though off screen at times, and no second line appeared.
+    - **San Andreas [102] and Vice City [202]** (staged with `level_overlay.py`): the same line, with the same types and remap, between 50 and 60 s.
+    - **Synthetic `arena`:** passers-by spawn about 4 times faster there (31 at the start, 82 at 10 s), and the line appeared by 20 s.
+      - The rate swings, between 27 and 86 passers-by per 10 s while walking (`arena_walk`, 12 dumps). The count reached 632 by the last dump with the line alive.
+  - **Measured by the owner** (`docs/M6B_KRISHNA_TEST_PLAN.md`, K1–K5, 2026-11-27, arena):
+    - **K1:** the line walks slowly, single file, behind the leader.
+    - **K2:** run over, the popups went 100, 200, 400, 800, 1600 …. **The doubling is confirmed**, and gfa-sim's linear base-1 rule is wrong.
+    - **K3:** GOURANGA! shows only when all 7 go in one streak, and the streak breaks after a gap of a couple of seconds, as the 13-frame window (about 0.56 s) says.
+    - **K4:** with the leader dead first, the others scattered at once (type 42, flee).
+    - **K5:** the gap before the next line varied a lot. It looked random, but the code has no chance roll: the spread is the passer-by rate above, a line starting out of view, and a living leader holding the next line back.
+    - **K6 (weapons):** every weapon doubles, and its first popup gives the base its kills report.
+      - Machine gun: 200, 400, 800 …, shot. GOURANGA! appeared, so it comes from any weapon.
+      - Rocket: 300, 600, 1200 …, blown up, not burnt. gfa-sim already reports a rocket so.
+      - Flamethrower: 1000, 2000, 4000 …, burnt.
+      - Not tested: GOURANGA! by rocket or by fire, since neither could catch all 7 at once.
+      - **Taken as an educated guess** (with the owner, 2026-11-27): both give it, as the machine gun did. The check (`0xcad25`) counts the type-7 streak and never reads the reason. Each death must come within the window of the one before; how long the whole streak takes doesn't matter. gfa-sim does the same (`a_line_of_krishnas_run_over_pays_25000_with_gouranga`: 50,400 by rocket, 139,300 by fire, at ×1).
+      - **Someone a rocket's blast sets alight** without killing him pays as burnt (base 10) when he dies (the owner's play of the game, 2026-11-27). Ported: `Peds::burn`'s `owed`, paid by `World::run_peds` (`Peds::take_owed`), a Krishna as type 7. Synthetic check in `weapon_fire_rates_projectile_speed_and_splat_lifetime_match_original`: nothing when he catches fire, 1000 when he dies 100 ticks later.
+    - **K7 (the total):** from 0 at ×1, a line run over in one pass gave exactly **25,000**, confirming the 12,300 bonus.
+    - **K9 (corners, synthetic `corners` arena):** the followers trace the leader's path. They keep to the pavement, turn where he turned, don't snag on buildings, and keep the same gap through a corner.
+    - **Seen in K9:** when the owner stood near the leader, he started to follow the player.
+      - **Read from the code** (`0xbb2e6`, the AI types' switch at `0xbb260`, type 21 only): each tick the leader searches a box `0x20` of `0x40` (half a block) either side of himself for people (`0x63f50`, `0x64f30`). If the first he finds is the player's ped (`0x3ba420`), he takes mode 4 (follow) with the player as his target (`ped+0x7c`).
+      - A follower drops a target that has gone (`0xbb527`, `0xbb876`: target `+0x46 < 0`) and walks again (mode 2).
+  - **From the owner's play of the game:** traffic stops when a line crosses the road, and a Krishna killed by traffic pays the player nothing.
+  - **Manual test plan:** `docs/M6B_KRISHNA_TEST_PLAN.md` (the `arena` and `corners` overlays). All its checks have been run.
+  - **Deferred to M8:** the line's timing, which comes from the passer-by spawner (K5, and K7's timing).
+  - **Follow-up / status:** **Ported (2026-11-27).**
+    - **The line** (`gfa_sim::peds`, `Peds::make_line`):
+      - the 100th passer-by made (`Peds::made`) becomes the leader, remap 143, with 6 followers on his spot;
+      - one line at a time, never let go while the leader lives;
+      - the followers take free slots or new ones beyond the crowd's, so nobody vanishes for them.
+    - **Walking** (`mode::FOLLOW`): each follower walks the trail of the one in front, 10 px behind, onto the road too if that is where it goes.
+    - **The player:** the leader takes up after him when the player is the nearest person within 16 px of him, on foot. Ours: he lets the player go when the player gets into a car.
+    - **Deaths:** a follower's gap closes. The leader's death scatters the rest (`line::LEADERLESS`, flee) and clears the count.
+    - **The score:** type 7 (`score::kind::KRISHNA`) for all of them, by any weapon. Every type but the passer-by doubles from a base of 1 too, rams and cars included, in gfa-sim (and in the oracle's `score_streak.pl`, until the score was retired from it the same day). GOURANGA! is the 7th in a streak, +12,300 × the multiplier, logged by `World::gouranga`.
+    - **Removed:** gfa-sim's +500 for 4 people run over.
+    - **The oracle:** AmiGTA1 has no Krishnas, so the oracle's runs turn the line off (`Peds::krishnas`, `replay::level_world`).
+    - **Tests:**
+      - unit test `a_line_of_krishnas_run_over_pays_25000_with_gouranga`;
+      - synthetic tests `a_hare_krishna_line_run_over_pays_25000_with_gouranga`, `the_hundredth_passer_by_starts_a_hare_krishna_line`, `a_hare_krishna_line_keeps_to_its_leaders_path` (a staircase like the `corners` arena) and `the_krishna_leader_follows_the_player_who_stands_by_him`.
+    - **In Liberty City** (`gfa-tool run`, on foot): the line came at the 100th passer-by, at 51 s. The original's headless walk had one at 52 s; the timing is M8's.
+    - **Left for M8:** the GOURANGA! text and sound, and the score popups.
+    - **Left, not read:** traffic stopping for the line. gfa-sim's fleet already stops for anyone on foot in its way.
+  - **Bonus-trigger introspection (before the code was read):** `ENGLISH.FXT` key `8787` is `GOURANGA!`. The GFA port's `World::run_over` currently awards a multiplier-scaled `500` points when a generic civilian run-over streak reaches four; its synthetic test verifies that port behavior, not the original game. Original mission `[1]` separately declares seven `FUTUREPED`s (`382`–`388`), enables them at command labels `1281`–`1293`, then checks their deaths; text key `1049` says `You were meant to kill 'em all`. No explicit `GOURANGA` command appears in this mission script. A DOSBox drive attempt entered a Bulldog but got stuck against a building without hitting pedestrians, so the original bonus trigger remains unverified.
 
 - [ ] **Gang roles state machine (for M7)**
   - Document the original state machine for script-spawned gang AI types (`gta_peds.c:1111`; AmiGTA1 only decoded police roles) (`IMPLEMENTATION_PLAN.md`, `docs/PARITY.md`).
@@ -298,14 +389,49 @@ Because `tools/dosprobe/run.py` mounts the owner's game folder under DOSBox-X wi
   - **Measured:** Captured the default Liberty City campaign at `19,006`, `24,000`, `29,008`, `34,002` and `39,010` DOSBox-X PIC ticks, plus a 1 MiB RAM sample. No scripted gunman role or state transition was visible in the sampled frames.
   - **Follow-up / status:** Keep pending. Drive a mission that spawns gang peds and decode the corresponding actor state from RAM.
 
-- [ ] **Ped anti-pileup departures comparison**
+- [x] **Ped anti-pileup departures comparison**
   - Compare AmiGTA1's four anti-bunching departures against `GTA8.EXE` street behaviour: spread corner targets across pavement, ped-ped separation/relax pass, no resting near corners, and per-ped coin flip at T-junctions (`IMPLEMENTATION_PLAN.md` decision log, `docs/PARITY.md`).
-  - **Probe script:** `tools/dosprobe/scripts/ped_anti_pileup.probe` (run on the original city map, without a synthetic overlay)
-  - **Measured:** Walked the player through the default Liberty City area and captured frames at `19,006`, `28,808`, `39,010` and `44,003` DOSBox-X PIC ticks. The camera/player moved, but these captures do not isolate ped corner choices or separation.
-  - **Follow-up / status:** Keep pending. Need a reproducible busy intersection and tracked pedestrian positions across repeated runs.
+  - **Probe:** `tools/dosprobe/scripts/ped_anti_pileup.probe` and `tools/dosprobe/analyze_peds.py`. The player stands at `(159,66,4)` on the original Liberty City map. A mission overlay changes only the spawn. At 150,000 cycles, the analyzer reads the first 15 actor slots every 43 ms from DOSBox-X physical page `0x69a000` and filters for ordinary on-foot civilians. Coordinates are 22-bit fractions of a block. The page address is specific to this DOSBox-X and Director's Cut setup.
+  - **Corner targets.** DOS places the target 32 world pixels to the chosen side and adds a forward offset from a shared four-step cycle (5, 13, 20, 0 px, `0xb14ec..0xb18cc`, selector `0x28a43b`). The 1,500-sample run recorded four corner assignments along the sidewalk at y=62, all 32 px sideways, with 5 or 20 px forward. The earlier run independently captured the same offsets. AmiGTA1 draws a forward offset from 0–20 px and an additional lateral offset from −10 to +10 px.
+  - **Separation.** The DOS run recorded 28 same-height pavement pair samples closer than 4 px, with a minimum of 0.99 px at `ped_1471` (slots 1 and 5). DOS has local contact checks in the individual update (`0xb03e3..0xb0529`) and advances the actor loop directly to spawning (`0xb28ae..0xb2a1a`). AmiGTA1 adds crowd steering and a post-move pass that pushes overlapping pairs apart.
+  - **Resting.** The original's gait wheel selects a timed rest on step 20 (`0xabb9b → 0xabb5d`) without checking pavement ahead. Its corner check skips walkers already resting (`0xb0e52..0xb0e58`). The street captures logged ordinary rests but none with non-pavement 24 px ahead, so this distinction comes from read-only code inspection. AmiGTA1 substitutes a short walk when the pavement ends within its 24 px look-ahead.
+  - **Two open exits.** DOS alternates the side on successive choices using a shared level-wide toggle (`0xb1656..0xb1697`, byte `0x28a43c`). The y=62 capture shows three left choices and one right when both lateral probes land on pavement. The capture samples nearby actors, while the shared toggle also advances at other corners. AmiGTA1 uses an independent coin flip for each decision.
+  - **Status:** Compared all four. Keep the port's current crowd behaviour. The synthetic `nobody_spins_on_the_spot` check and `oracle_walk_scripts` pass.
 
-- [ ] **Cheats (for M8)**
-  - Verify Director's Cut and London name-entry cheats against AmiGTA1's table (`gta_career.c:223`) (`IMPLEMENTATION_PLAN.md`).
-  - **Probe script:** `tools/dosprobe/scripts/cheats.probe` (`buckfast`), `tools/dosprobe/scripts/cheats_control.probe` (Director's Cut default-name control), `tools/dosprobe/scripts/cheats_london.probe` (`buckfast`) and `tools/dosprobe/scripts/cheats_london_control.probe` (London default-name control)
-  - **Measured:** In the Director's Cut, entering `buckfast` then pressing keypad `*` changed the visible ammunition count to `99`; the default-name control did not. In London 1969 and 1961, the name was accepted and gameplay started, but keypad `*` did not show `99`; the corresponding no-name controls were also unchanged.
-  - **Follow-up / status:** Test remaining AmiGTA1 names and decode the London-specific cheat behavior. The probe runner mounts the edition's CD image automatically.
+  Reproduce the 1,500-sample run from the repository root.
+
+  ```sh
+  python3 tools/dosprobe/level_overlay.py --section 1 --player 159,66,4 --out /tmp/ped-corner-overlay
+  python3 tools/dosprobe/analyze_peds.py prepare /tmp/ped-corner.probe
+  python3 tools/dosprobe/run.py --cycles 150000 --timeout 240 --overlay /tmp/ped-corner-overlay --script /tmp/ped-corner.probe --out /tmp/ped-corner --run-name ped_corner
+  python3 tools/dosprobe/analyze_peds.py measure /tmp/ped-corner
+  ```
+
+- [x] **Cheats (for M8)**
+  - **Method.** Compared AmiGTA1's `gta_career.c:223` with the name comparisons and their success branches in Director's Cut `GTA8.EXE` and London `gta8_uk.exe` (1969) and `Gta24_61.exe` (1961). Each executable stores the typed name in the even bytes of an interleaved string. The comparisons require an exact, case-sensitive match including spaces. The name tables start at loaded addresses `0x1324e4`, `0x1327e0` and `0x14162c` respectively. Representative names were entered through the character menu under DOSBox-X and checked against default-name controls using the chapter menu, HUD and RAM.
+  - **Director's Cut.** All 16 AmiGTA1 names are present. London 1969 and 1961 share a 21-name table. Of the 16 Director's Cut names, only `super well` is also in the London table.
+
+  | Effect | Director's Cut | London 1969 and 1961 |
+  | --- | --- | --- |
+  | Unlock chapters for the selected character | `nineinarow`, `super well`, `itsgallus` | `flashmotor`, `super well`, `travelcard` |
+  | Endless lives (signed byte `-1` instead of `4`) | `6031769`, `itstantrum` | `6661970`, `haveagoflower` |
+  | Disable police | `iamthelaw`, `stevesmates` | `iamfilth`, `tithead` |
+  | Keypad `*` gives 99 rounds for each of the four guns | `callmenigel`, `buckfast` | `deathtoall`, `asawindow` |
+  | Enable debug keys, including the keypad ammo shortcut | `porkcharsui` | `pieandmash` |
+  | Mark cutscenes as seen, enabling Space at chapter select | `Heart of Gold` | `ohmatron` |
+  | Set the special language override to 99 or clear it to `-1` | `iamgarypenn`, `iamnotgarypenn` | `tourettes`, `notourettes` |
+  | Start with multiplier ×10 | `hate machine` | `iamgod` |
+  | Start with 999,999,999 points | `itcouldbeyou` | `averyrichman` |
+  | Start with 99 rounds per gun, armor 3 and a jail card | `suckmyrocket` | `uaintnuffin` |
+
+  - **London extras from code.** `psychadelic` cycles vehicle remaps through 0–12. `silence` sets one digital sample channel's initial volume to 0 (normally 90, London 1969 `0xe4881`). `driveby` sets the drive-by flag used by the two side-fire paths. `rommel` combines drive-by, cycling remaps, debug keys, chapter unlock and cutscenes seen. `herc` adds silence, endless lives, no police, ×10 and 999,999,999 points to that bundle. Its debug flag makes keypad `*` work. The direct starting loadout remains a separate cheat. The 1961 mission pack exposes only one single-player chapter.
+  - **Language assets.** `iamgarypenn` selects `SPECIAL.FXT`. London 1969's `tourettes` selects `UK/SPEUK.FXT`, byte-identical to `SPECIAL.FXT` in the local archive. The native 1961 executable requests `UK/SPEUKE.FXT`, which is absent from that archive. Implement the language override with the actual edition assets.
+  - **Observed checks.** In Director's Cut, `buckfast` and `callmenigel` filled all four ammo slots after keypad `*`. The default name, `BUCKFAST` and `buckfastx` left them empty. The chapter screen showed all three cities with `nineinarow` and the Space cutscene prompt with `Heart of Gold`. HUD and RAM confirmed the start values above. In both London packs, `asawindow` filled all four ammo slots with keypad `*`, the default name and `buckfast` left them empty, and `uaintnuffin` granted the starting loadout. In 1969, `flashmotor` exposed all four chapters, `ohmatron` added the Space prompt, and RAM confirmed the combination flags in `rommel` and `herc`. The individual debug shortcuts beyond keypad `*` and the London audio, remap and side-fire effects were traced in code.
+  - **M8 scope.** The edition can select the table. The current unconditional ammo shortcut belongs behind the keypad and debug flags once name entry is wired up.
+
+  Generate a probe at the repository root. Omit `--name` for a default-name control. Use `dc` with `GTA8.EXE` or `london61` with `Gta24_61.exe` for the other editions. The runner mounts the corresponding CD image.
+
+  ```sh
+  python3 tools/dosprobe/cheat_name.py london69 /tmp/asawindow.probe --name asawindow
+  python3 tools/dosprobe/run.py --exe gta8_uk.exe --cycles 150000 --script /tmp/asawindow.probe --out /tmp/asawindow --png
+  ```

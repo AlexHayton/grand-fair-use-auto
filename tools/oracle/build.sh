@@ -8,8 +8,15 @@
 # into this repo; only our own harness lives here, and the patches it
 # applies to copies under build/ (ped_sidestep.pl, ped_counterpunch.pl, traffic_giveup.pl,
 # traffic_lights.pl, traffic_corner.pl, traffic_rejoin.pl, traffic_fits.pl,
-# traffic_follow.pl, traffic_spawn.pl, traffic_stopline.pl, weapons_clock.pl,
-# weapons_wallfire.pl, weapons_chain.pl, score_streak.pl).
+# traffic_follow.pl, traffic_spawn.pl, traffic_stopline.pl, traffic_contact.pl).
+#
+# The oracle is a regression net, not the reference (IMPLEMENTATION_PLAN.md,
+# decision log, 2026-11-27): no new patches. Where gfa-sim leaves AmiGTA1 on
+# purpose, that comparison is turned off rather than AmiGTA1 patched to
+# follow, and a subsystem that is mostly ours is retired. The weapons and
+# the score are retired: their AmiGTA1 code is linked unpatched, so the
+# street around the player is AmiGTA1's whole street, and nothing of it is
+# compared.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
@@ -29,10 +36,11 @@ cc=${CC:-clang}
 # the crossing check); zero them so every run agrees.
 # The crowd is AmiGTA1's with gfa-sim's sidestep fix (ped_sidestep.pl), and
 # the fleet AmiGTA1's with gfa-sim's dead-end rule (traffic_giveup.pl), its
-# lights timed by the crossing (traffic_lights.pl), its corners
+# lights timed as in DOS (traffic_lights.pl), its corners
 # (traffic_corner.pl), a shoved car's lane (traffic_rejoin.pl), long
 # vehicles at corners (traffic_fits.pl), following (traffic_follow.pl),
-# spawning (traffic_spawn.pl) and stopping for a light (traffic_stopline.pl),
+# spawning (traffic_spawn.pl), stopping for a light (traffic_stopline.pl)
+# and overlap correction (traffic_contact.pl),
 # applied to copies in build/: the game's rules, not AmiGTA1's spin, a bus
 # vanishing in view, both roads of a crossing green at once, a car driving
 # off the road past a corner, one stranded a pixel over a lane line, a bus
@@ -42,13 +50,6 @@ patched=$here/build/patched
 mkdir -p "$patched"
 perl "$here/ped_sidestep.pl" < "$src/gta_peds.c" |
     perl "$here/ped_counterpunch.pl" > "$patched/gta_peds.c"
-# The weapons and the score keep the original's clock, wall fire, chain
-# reaction and wreck pay (weapons_clock.pl, weapons_wallfire.pl,
-# weapons_chain.pl, score_streak.pl).
-perl "$here/weapons_clock.pl" < "$src/gta_weapon.c" |
-    perl "$here/weapons_wallfire.pl" |
-    perl "$here/weapons_chain.pl" > "$patched/gta_weapon.c"
-perl "$here/score_streak.pl" < "$src/gta_score.c" > "$patched/gta_score.c"
 perl "$here/traffic_giveup.pl" < "$src/gta_traffic.c" |
     perl "$here/traffic_lights.pl" |
     perl "$here/traffic_corner.pl" |
@@ -56,8 +57,9 @@ perl "$here/traffic_giveup.pl" < "$src/gta_traffic.c" |
     perl "$here/traffic_fits.pl" |
     perl "$here/traffic_follow.pl" |
     perl "$here/traffic_spawn.pl" |
-    perl "$here/traffic_stopline.pl" > "$patched/gta_traffic.c"
-street="$patched/gta_traffic.c $src/gta_route.c $src/gta_car.c $src/gta_train.c $patched/gta_peds.c $patched/gta_weapon.c $patched/gta_score.c"
+    perl "$here/traffic_stopline.pl" |
+    perl "$here/traffic_contact.pl" > "$patched/gta_traffic.c"
+street="$patched/gta_traffic.c $src/gta_route.c $src/gta_car.c $src/gta_train.c $patched/gta_peds.c $src/gta_weapon.c $src/gta_score.c"
 $cc -std=c89 -O1 -w -ftrivial-auto-var-init=zero -I"$src" -I"$here" \
     -o "$here/build/walktrace" "$here/walktrace.c" "$src/gta_map.c" \
     "$src/gta_nav.c" "$src/gta_player.c" "$src/gta_trig.c" \

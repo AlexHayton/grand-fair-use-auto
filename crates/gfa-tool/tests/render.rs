@@ -281,13 +281,13 @@ fn the_lights_stand_on_the_corners() {
         yaw: 0.0,
     };
     let bare = scene.render(&view, DebugView::Normal, 0.0);
-    let tick = world.traffic.light_tick();
+    let show = |lamp| world.traffic.lamp_light(lamp);
     let sprites: Vec<_> = lamps
         .iter()
         .filter_map(|l| {
             let (x, y) = l.pos();
             let pos = [x, y, world.map.ground_z(x, y, l.z)];
-            scene.lamp_sprite(l.light(tick).sprite(), pos, l.toward)
+            scene.lamp_sprite(show(l).sprite(), pos, l.toward)
         })
         .collect();
     assert_eq!(sprites.len(), lamps.len());
@@ -339,7 +339,7 @@ fn the_lights_stand_on_the_corners() {
         );
         // Its lit lens is the colour of its light.
         let [r, g, bl] = [b[0], b[1], b[2]].map(i32::from);
-        let is_lens = match lamps[i].light(tick) {
+        let is_lens = match show(&lamps[i]) {
             Light::Red => r > 150 && g < 100 && bl < 100,
             Light::Green => g > 150 && r < 140 && bl < 140,
             Light::Amber => r > 200 && (60..180).contains(&g) && bl < 60,
@@ -362,7 +362,7 @@ fn the_lights_stand_on_the_corners() {
             l.by,
             l.road,
             l.toward,
-            l.light(tick)
+            show(l)
         );
         assert!(n > 40, "lamp at ({},{}) not drawn", l.bx, l.by);
         assert!(lens >= 4, "lamp at ({},{}): no lit lens", l.bx, l.by);
@@ -378,7 +378,7 @@ fn the_lights_stand_on_the_corners() {
         let shown: Vec<_> = lamps
             .iter()
             .filter(|l| l.along_x == axis)
-            .map(|l| l.light(tick))
+            .map(show)
             .collect();
         assert!(shown.windows(2).all(|w| w[0] == w[1]), "{shown:?}");
     }

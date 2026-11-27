@@ -1,0 +1,86 @@
+# Walk a level for 2 minutes, dumping guest RAM every 10 s, to watch the Hare
+# Krishna line spawn (docs/M6B_KRISHNA_TEST_PLAN.md). Read the dumps with
+#     python3 tools/dosprobe/gta8.py krishna OUT/r*.bin
+# The walk is special_groups_walk.probe's: 8 s up, a quarter-second right, again.
+# Liberty City (no overlay): the line spawned at 52 s; San Andreas [102] and
+# Vice City [202] (level_overlay.py --section N): between 50 and 60 s; the
+# synthetic `arena`: by 20 s. Each dump is 10 MB, which holds the page tables.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+19000 shot start
+19100 down up
+19200 memdump r00 0 a00000
+19201 shot f00
+27100 up up
+27200 down right
+27456 up right
+27556 down up
+29200 memdump r01 0 a00000
+29201 shot f01
+35556 up up
+35656 down right
+35912 up right
+36012 down up
+39200 memdump r02 0 a00000
+39201 shot f02
+44012 up up
+44112 down right
+44368 up right
+44468 down up
+49200 memdump r03 0 a00000
+49201 shot f03
+52468 up up
+52568 down right
+52824 up right
+52924 down up
+59200 memdump r04 0 a00000
+59201 shot f04
+60924 up up
+61024 down right
+61280 up right
+61380 down up
+69200 memdump r05 0 a00000
+69201 shot f05
+69380 up up
+69480 down right
+69736 up right
+69836 down up
+77836 up up
+77936 down right
+78192 up right
+78292 down up
+79200 memdump r06 0 a00000
+79201 shot f06
+86292 up up
+86392 down right
+86648 up right
+86748 down up
+89200 memdump r07 0 a00000
+89201 shot f07
+94748 up up
+94848 down right
+95104 up right
+95204 down up
+99200 memdump r08 0 a00000
+99201 shot f08
+103204 up up
+103304 down right
+103560 up right
+103660 down up
+109200 memdump r09 0 a00000
+109201 shot f09
+111660 up up
+111760 down right
+112016 up right
+112116 down up
+119200 memdump r10 0 a00000
+119201 shot f10
+120116 up up
+120216 down right
+120472 up right
+120572 down up
+129200 memdump r11 0 a00000
+129201 shot f11
+130000 quit

@@ -1,0 +1,20 @@
+# How far a wreck's blast reaches another car (docs/M6B_TANK_TEST_PLAN.md, D7),
+# on the tank_blast_reach and tank_blast_reach_15 overlays from
+# tank_scenarios.sh. Get in, fire one shell at the middle car, capture the
+# screen every 21 ms (about two per 42.86 ms game frame) for 3 s, then once at
+# 6.5 s and 12.5 s in case a fire gets the lone car later.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+17000 shot start
++50 tap enter 70
++4000 shot frenzy
++4000 shot ready
++100 tap lctrl 120
++0 burst reach 150 21
++3500 shot after3s
++3000 shot after6s
++6000 shot after12s
++100 quit

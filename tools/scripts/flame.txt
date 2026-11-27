@@ -9,7 +9,6 @@
 # 15 to its damage and is spent. Seven write it off; it burns for 120
 # ticks and blows up, too far away to hurt him.
 #
-# oracle: walk
 # section: 1
 # expect: weapons: flame caught ped
 # expect: (model 0) blew up

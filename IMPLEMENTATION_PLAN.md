@@ -355,14 +355,19 @@ Each milestone has tasks with checkboxes and an **exit criterion**. Named refere
   - Overlay test maps: `run.py`'s DOSBox-X `-t overlay` layer can inject either synthetic `CmpBuilder` `.CMP` + custom `MISSION.INI` arenas (run side-by-side in both `GTA8.EXE` and `gfa-tool`) or `MISSION.INI`-only overrides over real cities without touching the owner's game data; see `docs/M6B_PROBES.md` for the per-probe checklist and results.
 - [ ] Boats: **deferred to M7 (2026-11-27)**. Measured: the player cannot board or drive one, and a boat dies like a car, in 3 blasts in a line (as gfa-sim already does). Only three exist, all mission props (`FUTURECAR 13`, then `CAR_ON`, `SENDTO`, `KILL_CAR`/`DESTROY`), so what is left (a `DUMMY` boat's `SENDTO` run) needs the mission VM first. See `docs/M6B_PROBES.md`.
 - [ ] Tank: its handling against AmiGTA1's; the turret; the cannon; its armour; pushing cars; where it is found.
-- [ ] RC car and helicopter: whether either can be driven, and how. The escape helicopter's scripted flight is M7's.
+- [ ] RC car and helicopter: neither is map-placed. The RC car is the mission model car (`START_MODEL`/`DO_MODEL`) and the helicopter a scripted escape, so both move to M7's mission VM (owner, 2026-11-27); the model car's handling is measured there.
 - [x] Shop refusals and charges measured in the DOS original and implemented in the sim. The bomb shop rejects ambulances, fire engines, the tank and the model car with the corresponding FXT messages. The spray shop silently skips emergency vehicles and charges for a repaint or wanted plate change. A four-head plate change with no damage and a 1× multiplier costs 8,080. Both shops refuse unaffordable work. Pager display is part of M7. See `docs/M6B_PROBES.md`.
 - [x] Camera speed-zoom and lead measured on an unobstructed DOS runway. Ground coverage grows to about 2.05× at speed, with up to four blocks of lead toward the bonnet even in reverse. The shared simulation camera uses the measured zoom ramp and a fitted lead. The pop-in check passed in all three cities. See `docs/M6B_PROBES.md`.
+- [x] Traffic light cycle measured in DOS. Each approach shows 96 frames green, 40 amber, 176 red and 40 amber again. The lamps and the simulation use the same cycle. See `docs/M6B_PROBES.md`.
 - [x] The counter-punch: what the victim's punch back does to the player (the tenth blow that lands: he goes down about two seconds, no harm done; the wheel resets, so it is 11 long). Done 2026-11-26.
 - [ ] Gang roles: the state machine of the original's gang AI types (`gta_peds.c:1111`: AmiGTA1 has read the police ones only). For M7.
-- [ ] Special ped groups: where Hare Krishnas and Elvises appear, in which cities, how often and how they walk. For M6.
+- [x] Special ped groups: where Hare Krishnas and Elvises appear, in which cities, how often and how they walk. For M6. Read from `GTA8.EXE`'s code and checked headless on 2026-11-27: only Hare Krishnas, a line of 7 in every city, made from the 100th passer-by (`docs/M6B_PROBES.md`). There are no Elvises. The owner's checks are in `docs/M6B_KRISHNA_TEST_PLAN.md`, all run by 2026-11-27. Followers trace the leader's path at a steady gap. Every weapon doubles from its base, and a line run over pays 25,000. The leader's following of the player, seen by the owner in K9, is read from the code too (`0xbb2e6`). Ported 2026-11-27 (decision log).
 - [ ] The weapons where AmiGTA1 chose for itself: weapon fire rates/cooldowns and projectile speeds (the owner notes guns fire too fast at 50 Hz); how long the original's bullet splat stays on the map; whether every car blowing up pays the player 100, whoever wrote it off; whether a drowning man can fire (fire-key latch across `WASTED` settled in AmiGTA1's favour without DOS probe, 2026-11-25).
-- [ ] The pull-over: how far to the side the look reaches, how slowly the car moves over, whether it stops and for how long, whether the siren left on does it too. (Unlisted FXT police-toggle and three-zoom-level hotkeys dropped per owner decision, 2026-11-25.)
+- [x] The pull-over: how far to the side the look reaches, how slowly the car moves over, whether it stops and for how long, whether the siren left on does it too. Measured by the owner on 2026-11-27 (`docs/M6B_PROBES.md`):
+  - it works only while Tab is held, in any car;
+  - it reaches about 2 blocks and takes in the next lane;
+  - the cars move over only slightly within their lanes, and don't stop.
+  - Read from the code and ported 2026-11-27 (decision log). (Unlisted FXT police-toggle and three-zoom-level hotkeys dropped per owner decision, 2026-11-25.)
 - [x] Getting into a car, frame by frame against the original. The owner reports that ours looks as if he goes in through the wrong side of the door (2026-11-21). Check the door point, the walk-in path, the sprite frames and the door's opening delta (`docs/M6B_PROBES.md` Section 2; also settled slide-under from outside, far-side tall-vehicle detour, flush-wall vault turn & entry refusal, and forward blocked-door exit).
 - Exit: each drives as measured; the numbers and the probe scripts that produced them are in the decision log.
 
@@ -479,7 +484,7 @@ Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.m
 
 **M5 Living city**
 
-- [ ] **Horn and pull-over**: the original's look-ahead of up to five blocks for a car (`gta_main.c:3957`, NOT PORTED). The horn is done; the pull-over is built with provisional numbers, to measure in M6b.
+- [x] **Horn and pull-over**: the original's look-ahead for a car (`gta_main.c:3957`, NOT PORTED there). The horn is done. The pull-over was built with provisional numbers, then measured, read from `GTA8.EXE` and redone on 2026-11-27: about 2 blocks, the next lane too, a move over to the kerb and no stop (decision log).
 - [x] **Emergency vehicles the player drives**: the siren and light toggle in cop cars, ambulances and fire engines, and how traffic reacts to it (the pull-over, above). The siren's sound is M8's.
 - [x] **Dragging the driver out** when the player takes an occupied car (moved from M4: needs peds). The carjack's score is M6's.
 - [x] **Peds in the water** drown as the player does (moved from M4 on 2026-11-21: needs peds).
@@ -488,7 +493,7 @@ Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.m
 **M6 Combat, police, services**
 
 - [x] The victim's ped counter-punch (`gta_peds.c:1675`; moved from M5 on 2026-11-21: needs the player's punch). Measured in M6b and built 2026-11-26.
-- [ ] **Special ped groups** that the bonuses need: Hare Krishna lines; Elvis impersonators **(verify which levels)** in M6b. Spawn rules come from the style and ped tables. (Moved from M5 on 2026-11-21: the bonuses are here.)
+- [x] **Special ped groups** that the bonuses need: Hare Krishna lines; Elvis impersonators **(verify which levels)** in M6b. Spawn rules come from the style and ped tables. (Moved from M5 on 2026-11-21: the bonuses are here.) 2026-11-27: `GTA8.EXE` has Krishnas only, made from its passer-by count rather than the tables (`docs/M6B_PROBES.md`). The owner's checks are done, and the line is ported (2026-11-27, decision log).
 - [x] **Bombs**: bomb shop rigs car for 5,000 points (`kind 1`), armed by fire key (`kind 2`, 250-tick fuse), plus trigger (`kind 3`), damage (`kind 4`), and speed (`kind 5`) bombs (`World::bombs_tick`). The type-4 tanker bomb global awaits **(verify)** in M6b.
 - [x] **Chain explosions**: a burning wreck sets off its neighbours (`gta_weapon.h:34`). 2026-11-21: AmiGTA1 already writes off every car in a blast's reach, whose own fuse then runs; ported with the weapons (`rocket.txt`).
 - [x] **Blast damage**: a car blowing up hurts the cars and people around it (`gta_weapons_wreck_car`); burnt-out wrecks look burnt (moved from M4). 2026-11-21: the blast is done (people killed or set alight, cars written off, the player too); 2026-11-22: burnt-out wrecks draw with `gfa_render::sprites::wreck_sprite` (`WBus` / `WreckedCar`).
@@ -500,6 +505,7 @@ Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.m
 - [x] **Power-ups that "nothing reads"** (`gta_main.c:10291`). Enumerate every pickup kind from the style's object table, then implement each one's effect and timer: speed-up (`375` ticks double-step), the multiplier (`+1`), the kill-frenzy crate handed to the script (plus endless weapon ammo), extra life (`+1` up to `99`), armour (`3` hits), bribe (clears heat and wanted level), and jail-free key (`World::jail_free`).
 - [x] **In-game bonuses AmiGTA1 lacks** (`gta_score.h:17`: "GOURANGA!" not built).
   - GOURANGA bonus triggered on a 4-ped run-over streak (`World::run_over`). The remaining special-group bonuses (Elvis, Hare Krishna) await the M6b special ped group **(verify)**.
+  - 2026-11-27: the 4-ped rule is not the original's. In `GTA8.EXE` GOURANGA is the 7th Krishna in one streak, worth 12,300 times the multiplier, and there is no Elvis or cop-kill bonus (`docs/M6B_PROBES.md`). Redone with the Krishnas the same day: the +500 is gone (decision log).
 - [x] The crime counters the pager prints on a bust (`gta_score.h:16`): tracked in `Score::crimes` (`[u16; 11]`) and cleared on a new life (`Score::new_life`).
 - [x] The police AI's reason for the siren (`gta_main.c:9976`: `Traffic::police_siren` returns `Siren::Sounding` when a chasing cop has `lead_kind != 0`, else `Siren::On` within 512 px) and the cop's arrest call. Bribes and jail-free cards verified end to end in synthetic tests.
 - [x] Police escalation stays cop cars only (`gta_traffic.h:2622`) unless evidence says otherwise.
@@ -515,7 +521,7 @@ Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.m
 - [ ] **Boats.** AmiGTA1 places the boat as a map object with no driving (`gta_traffic.c:1152`, `gta_car.c:6`), and the boat has no doors in the car table. The original never lets the player board or drive one (measured, 2026-11-27), so no handling or boarding is needed; what remains is the three mission boats (`FUTURECAR 13`: Liberty City [2] ids 200 and 242, San Andreas [102] id 3720), which come with the mission VM in M7, and the `SENDTO` run still to be measured then.
 - [ ] **Map-placed specials**: the boat, tank, helicopter and RC car are placed from the map's object list (`gta_traffic.c:1152`).
   - The helicopter (model 88) is filtered out of traffic (`gta_traffic.c:1186`). Model it as a script-driven vehicle: the escape helicopter's destination (`gta_script.h:82`), takeoff and flight.
-  - The RC car (model 47) has no doors either. Drivable or not, and how? **(verify)**
+  - The RC car (model 47) is the mission model car, entered through `START_MODEL`; its handling is measured once the mission VM runs (M7).
 
 **M7 Missions**
 
@@ -527,12 +533,13 @@ Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.m
 
 **M8 Front end, audio, saves**
 
-- [ ] **Cheats**: port AmiGTA1's name-entry cheat table (`gta_career.c:223`; flags `GTA_CHEAT_*` in `gta_career.h:69-78`). Also check for Director's Cut and London cheats. **(verify)**
+- [ ] **Cheats**: implement the verified edition-specific name-entry tables in `docs/M6B_PROBES.md`. The Director's Cut matches AmiGTA1's 16 names (`gta_career.c:223`), and both London packs share 21 names. Gate the keypad ammo shortcut on the edition's keypad or debug cheat.
 - [ ] **Language select** across the four FXTs, plus the SPECIAL.FXT toggle (`GTA_CHEAT_LANG`).
 - [ ] **High-score table**: layout from the research notes in `gta_career.h`; display, entry and save.
 - [ ] **Pause menu and in-game options** (audio, controls, HD/original). These are new.
 - [ ] **Attract mode**: decode `1/102/202.REP` and play them as front-end demos. If the format resists decoding, record our own demos. This links to the `.REP` stretch oracle.
 - [ ] Complete speech and SFX: every VOCALCOM line and its trigger, the MISBRIEF briefings, and the cop 0x13 call. The stolen-channel fade becomes a kira mixer bus.
+- [ ] **Hare Krishna line timing** (moved here from M6b by the owner, 2026-11-27). A line comes at the 100th passer-by created after the level starts or the last leader dies, so its timing is the passer-by spawner's rate. That rate changes with how the player moves: 27 to 86 per 10 s walking in the `arena`. Measure the original's rate against gfa-sim's (`docs/M6B_KRISHNA_TEST_PLAN.md` K5 and K7, `tools/dosprobe/gta8.py krishna`).
 
 **M11 London**: all of it is beyond AmiGTA1, whose level table covers sections [1],[2],[102],[103],[202],[203] only (`gta_main.c:167`).
 
@@ -553,6 +560,31 @@ Each item is a checkbox in the milestone named, and is tracked in `docs/PARITY.m
 ## Decision log
 
 Newest first. 
+- **2026-11-27. The oracle becomes a regression net, not the reference.**
+  - **Why:**
+    - gfa-sim's fidelity now comes from `GTA8.EXE`: the code read with `gta8.py`, headless DOSBox-X probes and the owner's checks.
+    - Each move towards the original needed a perl patch to AmiGTA1's C to keep the oracle matching. There were 16 (9 for the traffic, 4 for the weapons, 2 for the crowd, 1 for the score), about 1,000 lines. They restate gfa-sim's own rules in AmiGTA1's code, so where they apply the oracle checks gfa-sim against itself.
+    - Where gfa-sim is more faithful than AmiGTA1, matching AmiGTA1 is no longer the goal.
+  - **What it still gives:** a tick-by-tick check of what the two still share: walking, the car's physics, the trains and much of the fleet and the crowd. It catches a regression on the tick it appears, which `# expect:` lines and hashes do not.
+  - **The policy:**
+    - No new patches to AmiGTA1.
+    - When gfa-sim leaves AmiGTA1 on purpose, turn that comparison off (take the script out of the oracle, or stop comparing that trace line) rather than patch the C.
+    - Retire a subsystem's comparison once it is mostly ours, after checking that the data tests' `# expect:` lines and the synthetic tests cover what the oracle was checking.
+    - Keep it longest for walking, the car's physics and the trains.
+    - Principle 8 (AmiGTA1 is the floor) still says what to build. This changes only how it is tested.
+  - **Retired the same day: the weapons and the score.**
+    - The five scripts that fire a gun (`rocket`, `rocket_close`, `rocket_wall`, `flame`, `shoot_ped`) no longer run through the oracle. They stay data tests with their `# expect:` lines. `rocket.txt` now also expects the chain's second pay (`score: wreck +200`).
+    - The wall fire (one fire, 10 px back along the rocket's line, 1100 ticks) was checked only by the oracle. `synthetic.rs` checks it now.
+    - The shot, blast and fire lines (`w`, `x`, `h`) are no longer printed or compared, and `Weapons::trace_lines` is gone. The walk harness's `s` line keeps only his health.
+    - `weapons_clock.pl`, `weapons_wallfire.pl`, `weapons_chain.pl`, `weapons_water.pl` and `score_streak.pl` are deleted. The harnesses link AmiGTA1's `gta_weapon.c` and `gta_score.c` unpatched, so the street around the player is still AmiGTA1's whole street. The walk harness has no guns now; its punch stays, since the crowd is still compared.
+    - RESULT_PLACEHOLDER
+  - **Next to retire:** the fleet's comparison (9 patches, `oracle_traffic` and the `f` lines), once the traffic's own measurements are in and the data tests cover them. The crowd's 2 patches stay while the crowd is compared.
+
+- **2026-11-27. M6b: traffic light cycle.**
+  - `traffic_lights.probe` captures both axes of a Liberty City crossing. At 23.333 Hz, each road shows green for 96 frames, amber for 40, red for 176 and amber again for 40. The handover keeps the other road red. Two crossings switched together, so the game and the AmiGTA1 oracle use a single level clock, starting with north–south green.
+  - The Vice City visibility check exposed roadblock officers reusing slots occupied by visible pedestrians and bodies. Reusing an occupied slot now requires its occupant to be out of view.
+  - `traffic_gate` uses the DOS clock and checks in-view disappearances by car serial. `traffic_contact.pl` mirrors the port's fleet collision correction. The shallowest overlap determines separation, and the closing axis determines the impact impulse.
+
 - **2026-11-27. M6b: the tank's cannon and turret, and the chain's timing and pay, ported.**
   - **Cannon:** fires only in a kill frenzy (`World::in_frenzy`: the script's, via `World::start_frenzy` until M7 brings the script, or the frenzy crate's). 99 shells a frenzy, one every 24 game frames held (`weapons::Cannon`). A shell (`Kind::Shell`) leaves the muzzle 26 px out, along the turret, at 7 half-px a frame plus 3 a frame up to 17, and bursts on whatever a rocket bursts on.
   - **Turret:** Tab with Left/Right turns it 8 a game frame (`tank_turret_rate.probe`, headless: a turn in 1.37 s) instead of steering the hull. It is held relative to the hull, so it turns with the hull as he steers, and a tank's Tab sounds no horn (both measured by the owner; that nobody pulls over follows, unmeasured). Drawn as style objects `0x21` and `0x22` in the app and in `gfa-tool run`; the shell is drawn as the rocket, as in the original.
@@ -562,10 +594,48 @@ Newest first.
   - **Found on the way:** `GTA8.EXE`'s screen is not square. A block is about 110 screen px across and 91 down, so a distance read down the screen at 108 px a block is 1.2 times short. The barrel's tip, so read, had given a 22 px muzzle; across the screen it is 26. Earlier M6b readings taken up or down the screen may want checking.
 
 - **2026-11-27. M6b: a far wreck pays nothing; chains and their streak timed.**
-  - **The far-wreck rule:** in `GTA8.EXE`, a car the player wrecks pays only within 7 blocks of him. The owner's shells paid from 6 blocks and not from 10 to 65 (`tank_range`, test plan A5). A headless chain (`tank_chain`) paid for its cars at 4 to 7 blocks and not at 8. gfa-sim pays at any distance. It was agreed with the owner to take the cut-off as measured, straight ahead only. Its shape across the screen, and whether it counts from the player or the camera, are not known; nor whether a rocket's wreck follows it.
+  - **The far-wreck rule:** in `GTA8.EXE`, a car the player wrecks pays only within 7 blocks of him. The owner's shells paid from 6 blocks and not from 10 to 65 (`tank_range`, test plan A5). A headless chain (`tank_chain`) paid for its cars at 4 to 7 blocks and not at 8. gfa-sim pays at any distance. It was agreed with the owner to take the cut-off as measured, straight ahead only. Later the same day the owner settled the rest: it is a square, it applies across the screen too, and a rocket's wreck follows it. gfa-sim already did all three. Whether it counts from the player or the camera is not known.
+  - **Blast reach** (`tank_blast_reach`, `tank_blast_reach_15`, headless): a wreck's blast wrote off a car 1 block away but not a lone one 1.5 or 2 blocks away, as gfa-sim's `BLAST_CAR_PX` (1 block). No change.
   - **Chain timing, frame by frame** (`tank_chain_view`, headless): the car a shell hits blows up 1 game frame later. A car a blast writes off blows up 10 game frames (≈430 ms) later. gfa-sim burns every write-off for 2.4 s first.
   - **The streak:** each further car in a chain pays double: 100, 200, 400, 800, 1600, 3200. gfa-sim pays a flat 100.
   - Ported the same day with the tank's cannon (the entry above).
+
+- **2026-11-27. M6b: the Hare Krishnas and GOURANGA!**
+  - **Evidence:** `GTA8.EXE`'s code (`gta8.py`, `docs/M6B_PROBES.md`), headless RAM dumps, and the owner's K1–K9 (`docs/M6B_KRISHNA_TEST_PLAN.md`).
+    - The 100th passer-by made becomes a leader, with 6 followers in single file. The count clears when the leader dies.
+    - The followers trace his path at a steady gap (K9).
+    - The leader follows the player when the player is the first he finds within half a block (`0xbb2e6`; seen in K9).
+    - A Krishna scores as type 7, doubling from its base by any weapon (K2, K6). The 7th in a streak adds 12,300 × the multiplier, 25,000 in all for a line run over (K7).
+    - GOURANGA! by rocket or by fire was not tested. Taken as an educated guess with the owner: both give it, since the check counts only the Krishnas in the streak.
+    - From the owner's play: someone a blast sets alight pays as burnt when he dies. gfa-sim, like AmiGTA1, had paid nothing; now it does (`Peds::take_owed`).
+  - **Built:**
+    - `gfa_sim::peds`: `Peds::make_line`, `mode::FOLLOW`, `line`, `Peds::made`.
+    - `score::kind::KRISHNA` and GOURANGA! in `Score::event`, logged by `World::gouranga`.
+    - Every type but the passer-by now doubles from a base of 1 too, as in the code (`0xca4c0`). Rams and car thefts pay 10, 20, 40 … and 100, 200, 400 …. The oracle takes the same rule in `tools/oracle/score_streak.pl`.
+  - **Removed:** gfa-sim's +500 for any 4 people run over.
+  - **Ours:**
+    - The line's followers take free slots, or new ones beyond the crowd's, rather than letting anybody go.
+    - The leader lets the player go when the player gets into a car.
+    - "The first he finds" is taken as the nearest.
+    - AmiGTA1 has no Krishnas, so the oracle's runs turn the line off (`Peds::krishnas`).
+  - **Tests:** five new tests (one unit, four synthetic) and the redone `friendly_fire_groups_and_gouranga_bonus`. In Liberty City the line came at 51 s on foot; the original's headless walk had one at 52 s. Its timing is M8's.
+
+- **2026-11-27. M6b: the pull-over drives on.**
+  - **Measured by the owner** (P1–P6): only while TAB is held, in any car. The siren left on does nothing. The cars react from about 2 blocks, the next lane too. They move over a little and don't stop.
+  - **Read from `GTA8.EXE`:**
+    - The look (`0x18ec0`) tests points 1 to 5 blocks ahead against a box of the player's car that we have not read. The first car it meets, in ordinary traffic, gets a kerb lane target, 7 or `0x37` of `0x40` against `0x1f` (`0x1abb0`). The target flips where that side is road.
+    - The car keeps its speed with the throttle cut (`0x1e3a5`), so it never stops. It goes back to the middle when its side meets a building (`0x30cd0`).
+  - **Built** (`Traffic::pull_over`):
+    - 2 blocks ahead, 48 px either side;
+    - 12 px to the kerb on the right, or the left where the right is road (`Car::pull_left`);
+    - the speed it had, held; `hold::PULL` and the stop are gone.
+  - **Ours:** back to its lane at its next turn, lane change or crossing, or 3 s after the look last found it.
+  - **Test:** data test `the_car_ahead_pulls_over_for_the_horn`, redone.
+
+- **2026-11-27. M6b: shots fly on over water.**
+  - AmiGTA1 stops every shot whose block on its own layer is water, as a wall: a rocket or shell bursts, a bullet splats. It only happens off a beach or from in the water, where the water is level with the shooter.
+  - In `GTA8.EXE` none of the tank's shells met water at their own height. The owner's call is that a shell, a rocket or a bullet does not burst on water, only on what it hits. The drowning probe bears it out: `combat_drown_held2`'s bullets, fired from in the water, were caught in flight.
+  - `gfa-sim` now stops shots only at walls (`Weapons::fly`). The oracle takes `tools/oracle/weapons_water.pl`. Synthetic check in `weapon_fire_rates_projectile_speed_and_splat_lifetime_match_original`: a rocket and a bullet cross 2 blocks of water to the wall beyond.
 
 - **2026-11-27. M6b: a rocket's fire on a wall.**
   - In `GTA8.EXE` a rocket, or a tank shell, bursting on a building wall leaves one fire, which burns about 22 s. The owner timed it by hand under DOSBox-X (`tank_burst`, B3 and B5). AmiGTA1 lights three for 250 ticks (5 s).
@@ -677,7 +747,7 @@ Each entry: date, decision, why.
 
 - **2026-11-21. One light per crossing; the oracle carries the change.**
   - AmiGTA1 times a light from the 8×8-block neighbourhood of the block that asks, to keep neighbouring crossings half a cycle apart, and its comment says one crossing's stop lines always agree. They lie either side of the junction box, though, and on these maps they mostly fall in different neighbourhoods: 20 of Liberty City's 24 lit crossings, 21 of San Andreas's 28 and 18 of Vice City's 27 had approaches on both roads green at once, and the junction bookings sorted out who went. Invisible until the lamps were drawn; drawn faithfully, they would have looked broken.
-  - Ours: a light is named by its crossing, the root of its junction box (`Boxes::crossing`: the first junction block within two blocks). A car at a stop line asks about the box ahead of it, so a second crossing just behind cannot answer; a lamp about the crossing at its corner; a person waiting to cross about where he stands. The phase still alternates by the root's 8×8 neighbourhood. The cycle itself (5 s a road, 0.6 s amber) is AmiGTA1's own, not the original's.
+  - Ours: a light is named by its crossing, the root of its junction box (`Boxes::crossing`: the first junction block within two blocks). A car at a stop line asks about the box ahead of it, so a second crossing just behind cannot answer; a lamp about the crossing at its corner; a person waiting to cross about where he stands. This M5 change kept AmiGTA1's cycle and alternating 8×8 neighbourhoods. The M6b entry records the measured DOS cycle now used in the game.
   - `tools/oracle/traffic_lights.pl` makes the same change to the copy of `gta_traffic.c` under `build/`. Every oracle run matches; built without it, `oracle_traffic` differs from line 246 of its first run.
   - Lamps: where they stand and which road each is for is AmiGTA1's scan of the map's hint. AmiGTA1 draws them all facing south; ours face the drivers coming in (the lens is the sprite's front, as a car's bonnet is). Where a kerb lane runs past a T-junction's box rather than into it (23 lamps in San Andreas), the lamp faces the box beside it. Cars in such a lane never stop, as in AmiGTA1, since no box lies ahead of them.
 
@@ -696,7 +766,7 @@ Each entry: date, decision, why.
 
 - **2026-11-21. The crowd is sized to the view.** AmiGTA1 keeps 12 people, enough for its narrow screen; at the game's view (20 by 12 blocks against AmiGTA1's 10 by 8) twelve leave the streets empty. The pool is 12 × the view's area over AmiGTA1's, so 33 in the game and exactly 12 at AmiGTA1's view, where the oracle runs are unchanged. The fleet's walker list grew from 16 to 64 to take them all.
 - **2026-11-21. Peds in the water drown.** AmiGTA1 lets a ped stand on water (only the player drowns). Ours goes under where he stands and is gone after 67 ticks, as the original's do. Nothing in AmiGTA1's crowd walks into water by itself, so it only differs when a shove, a fall or a drop puts somebody there; no oracle run does.
-- **2026-11-21. AmiGTA1's four departures in the crowd are kept**: corner targets spread across the pavement, separation between people and the relax pass after it, no stopping to rest near a corner, and a coin per ped at a T-junction (the original sends everybody the same way). Each is AmiGTA1's fix for people piling up where the original's rule bunches them. Recorded in `docs/PARITY.md`; for M6b's probe to compare with the original.
+- **2026-11-21. AmiGTA1's four departures in the crowd are kept.** The port spreads corner targets across the pavement, steers and pushes close neighbours apart, suppresses new rests near a corner, and tosses a coin per turn when both sides have pavement. The M6b comparison found that DOS cycles four forward target offsets, handles contacts during individual movement, permits the resting gait without an edge check, and alternates between open sides with a shared toggle. See `docs/M6B_PROBES.md` for the measurements.
 - **2026-11-21. Ped colours in the G24 style are measured.** The simulation dresses people in GRY remap tables, as AmiGTA1 does; the G24 has 64 ped remap CLUTs with no stated order. Every ped sprite through each CLUT against the GRY palette through every table, in all four styles, pairs them one to one (`PED_REMAP_TABLES`): each best match is within the sprites' own requantising error, the next best at least 60 times worse. `people_wear_the_same_in_either_style` draws all 22 of AmiGTA1's dresses in both styles; they agree to within 2.6 of 255.
 
 - **2026-11-21. Traffic is AmiGTA1's, with its switches at their defaults.** AmiGTA1 carries about twenty experimental switches (`opt_*`), most of them off after its author measured them; the port keeps what the defaults run and leaves out the rest, so there is one behaviour to match and to maintain.
@@ -770,6 +840,8 @@ Each entry: date, decision, why.
 ## Progress log
 
 Newest first.
+
+- **2026-11-27. M6b: captured the DOS traffic light cycle and wired it into the simulation and renderer.** The probe and its frame analyzer are in `tools/dosprobe`.
 
 - **2026-11-24. M6b Section 2: car get-in/exit, bike mount/dismount, slide-under and vault edge cases.**
   - Added the `blocked_exit` preset in `crates/gfa-tool/src/probe.rs` and ran all Section 2 DOSBox-X probes (`getin_door`, `getin_far`, `getin_cop`, `getin_bike`, `vault_wall`, `vault_bus`, `vault_enter_wall`, `vault_bus_far`, `vault_bus_far2`, `vault_blocked_car`, `vault_blocked_bus`, `vault_blocked_north`, `vault_blocked_corner`), documenting all findings in `docs/M6B_PROBES.md` and `docs/PARITY.md`.

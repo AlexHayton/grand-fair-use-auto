@@ -10,6 +10,15 @@
 //! player, and the whole fleet is compared after every tick. Needs the game data,
 //! the AmiGTA1 checkout and a C compiler, so these are ignored by plain
 //! `cargo test`: run them with `cargo oracle-test`.
+//!
+//! The oracle is a regression net, not the reference (decision log,
+//! 2026-11-27): gfa-sim follows `GTA8.EXE`, and a subsystem that is now
+//! mostly ours is retired from it rather than patched into AmiGTA1. The
+//! weapons and the score are retired: no script that fires a gun runs
+//! here, and neither the shots, blasts and fires nor the score are
+//! compared (their scripts' `# expect:` lines and `synthetic.rs` check
+//! them). Still compared: the player on foot and in his car, the fleet,
+//! the crowd, the trains and his health.
 
 mod common;
 
@@ -84,31 +93,20 @@ fn our_lines(script: &Script, prefix: &str) -> Vec<String> {
             lines.push(l);
             lines.extend(w.traffic.trace_lines(u64::from(w.tick)));
             lines.extend(w.peds.trace_lines(w.tick));
-            lines.extend(w.weapons.trace_lines(w.tick));
-            // The walk harness restates the score and his guns too.
+            // The walk harness restates his health too.
             if prefix == "t " {
-                let a = &w.arms;
-                let s = &w.score;
-                lines.push(format!(
-                    "s {} {} {} {} {} {} {}",
-                    w.tick, s.score, s.heat, s.level, w.health, a.weapon, a.ammo[a.weapon]
-                ));
+                lines.push(format!("s {} {}", w.tick, w.health));
             }
         }
     });
     lines
 }
 
-/// The harness's lines for the player (`prefix`), the fleet, the crowd,
-/// the weapons and the score, in order.
+/// The harness's lines for the player (`prefix`), the fleet, the crowd and
+/// his health, in order.
 fn their_lines(harness: &str, args: &[&Path], prefix: &str) -> Vec<String> {
     let mut lines = oracle_lines(harness, args, &[], "");
-    lines.retain(|l| {
-        l.starts_with(prefix)
-            || ["f ", "p ", "w ", "x ", "h ", "s "]
-                .iter()
-                .any(|p| l.starts_with(p))
-    });
+    lines.retain(|l| l.starts_with(prefix) || ["f ", "p ", "s "].iter().any(|p| l.starts_with(p)));
     lines
 }
 
@@ -332,7 +330,8 @@ fn check_traffic(section: u32, bx: i32, by: i32, ticks: u64, seed: u64, view: i3
 
 /// AmiGTA1's traffic gate (`fullgate.sh`): its four sites on Liberty City,
 /// seeds 1 to 3, 12,000 ticks each, with the fleet's view `gtadump drive`
-/// gives it (6 blocks). What the runs do is `traffic_gate`'s (data.rs).
+/// gives it (6 blocks). Both fleets use DOS light timing. `traffic_gate`
+/// in data.rs checks how the cars behave in these same scenarios.
 #[test]
 #[ignore = "needs game data and ../AmiGTA1 (cargo oracle-test)"]
 fn oracle_traffic() {

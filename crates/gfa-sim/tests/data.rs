@@ -269,13 +269,13 @@ fn the_lamps_face_their_crossings() {
         assert!(lamps.len() > 100 && lit.len() > 20);
         assert!(unfaced.is_empty());
         // Two cycles of the lights, with the city running.
-        for _ in 0..1000 {
+        for _ in 0..1600 {
             world.step(TickInput::default());
             let tr = &world.traffic;
-            let tick = tr.light_tick();
+            let tick = tr.tick;
             let mut shown: HashMap<(usize, bool), Light> = HashMap::new();
             for (l, c) in lamps.iter().zip(&of) {
-                let light = l.light(tick);
+                let light = tr.lamp_light(l);
                 // A car on its road at the stop line, heading in, asks
                 // about the box ahead. (Past a T-junction's box a kerb lane
                 // has none ahead, and does not stop.)
@@ -284,7 +284,7 @@ fn the_lamps_face_their_crossings() {
                 if tr.is_junction(ax, ay, l.z) {
                     assert_eq!(
                         light == Light::Green,
-                        tr.light_green(ax, ay, l.along_x),
+                        tr.light_green(l.along_x),
                         "tick {tick}: the lamp at ({},{}) is not what its cars obey",
                         l.bx,
                         l.by
@@ -325,7 +325,7 @@ const AFTER_TURN_TICKS: i32 = 40;
 /// 3 for 12,000 ticks, with its fleet and view): every car on the road and
 /// none inside another on every tick, none vanishing from in front of the
 /// camera, the fleet moving, and no car stuck. `oracle_traffic` shows the
-/// same runs are AmiGTA1's car for car; this checks what they do.
+/// same runs match the patched C harness car for car with DOS light timing.
 #[test]
 #[ignore = "needs game data (cargo data-test)"]
 fn traffic_gate() {
@@ -445,7 +445,11 @@ fn traffic_gate() {
                 *n += 1;
             };
             for tick in 1..=ticks {
-                let before: Vec<(i64, i64)> = t.live().map(|c| (c.x, c.y)).collect();
+                let before: Vec<_> = t
+                    .live()
+                    .filter(|c| shown(&(c.x, c.y)))
+                    .map(|c| (c.serial, c.x, c.y))
+                    .collect();
                 t.step(map, cars, cam_x, cam_y);
                 let live: Vec<&Car> = t.live().collect();
                 if let Some(c) = live.iter().find(|c| !on_road(c)) {
@@ -470,16 +474,14 @@ fn traffic_gate() {
                     );
                 }
                 // Nothing in the picture before the tick is gone after it.
-                let lost = before.iter().filter(|p| shown(p)).find(|p| {
-                    !live
-                        .iter()
-                        .any(|c| (c.x - p.0).abs() + (c.y - p.1).abs() < 8 * PX)
-                });
-                if let Some(p) = lost {
-                    let at = (p.0 >> 21, p.1 >> 21);
+                if let Some(&(serial, x, y)) = before
+                    .iter()
+                    .find(|(serial, _, _)| !live.iter().any(|c| c.serial == *serial))
+                {
+                    let at = (x >> 21, y >> 21);
                     note(
                         &mut gone,
-                        format!("tick {tick}: a car vanished in view at {at:?}"),
+                        format!("tick {tick}: car {serial} vanished in view at {at:?}"),
                     );
                 }
                 let mut now = HashMap::new();
@@ -515,8 +517,8 @@ fn traffic_gate() {
             }
             let flow = (moving_sum * 100 / moving_ticks.max(1)) as u32;
             // Stuck: a car standing a minute and more, nothing having moved
-            // it, is a jam that will not clear (a red light holds a car
-            // under six seconds, a queue behind one a few cycles).
+            // it, is a jam that will not clear (a queue at a light may
+            // take a few cycles).
             let stuck = stood_worst >= GATE_STUCK;
             let ok = off == 0 && ov == 0 && gone == 0 && moved > 0 && !stuck;
             println!(
@@ -834,7 +836,7 @@ fn film_gate() {
                 i64::from((lx >> 16) - x0 * 32),
                 i64::from((ly >> 16) - y0 * 32),
             );
-            let col = match l.light(t.light_tick()) {
+            let col = match t.lamp_light(l) {
                 Light::Red => [235, 40, 40],
                 Light::Green => [40, 220, 70],
                 Light::Amber => [250, 180, 20],
@@ -1022,14 +1024,13 @@ fn no_car_stops_at_a_dead_end() {
 }
 
 /// The special key held in a car behind a fleet car on a Liberty City
-/// street: the car moves over to the kerb on its right and stops there,
-/// and once the key has been let go a while, it drives on (the original's
-/// pull-over; decision log, 2026-11-21).
+/// street: the car moves over to the kerb and drives on without stopping,
+/// and once the key has been let go a while, it goes back to its lane (the
+/// original's pull-over, `GTA8.EXE` and the owner's P1-P6, M6b).
 #[test]
 #[ignore = "needs game data (cargo data-test)"]
 fn the_car_ahead_pulls_over_for_the_horn() {
     use gfa_sim::input::{Buttons, TickInput};
-    use gfa_sim::traffic::hold;
     let src = data();
     let lv = common::level(&src, 1);
     let script = gfa_sim::script::Script::parse("# section: 1\n").unwrap();
@@ -1070,58 +1071,50 @@ fn the_car_ahead_pulls_over_for_the_horn() {
         w.put_in_car(0, bx - 2 * dx, by - 2 * dy, c.lane_dir);
         w.drain_log();
         let tab = TickInput::new(Buttons::SPECIAL);
-        // Held until the car has stopped at the kerb, or four seconds.
+        // Held until the car is on the kerb line, or two seconds.
         let mut told = false;
-        let mut stopped = None;
-        for _ in 0..200 {
+        let mut over = None;
+        for _ in 0..100 {
             w.step(tab);
             told |= w
                 .drain_log()
                 .iter()
                 .any(|l| l.text == format!("traffic: car {serial} pulls over"));
-            if let Some(c) = car(&w).filter(|c| c.hold == hold::PULL) {
-                stopped = Some(c);
+            let Some(c) = car(&w).filter(|c| c.pull > 0) else {
+                continue;
+            };
+            // The kerb on its right, 28 px into the block heading north or
+            // east, 4 heading south or west; the other side where that is
+            // road.
+            let across = if c.lane_dir & 127 == 64 { c.y } else { c.x };
+            let into = ((across >> 16) & 31) as i32;
+            let far = (c.lane_dir == 0 || c.lane_dir == 64) != c.pull_left;
+            if (into - if far { 28 } else { 4 }).abs() <= 2 {
+                over = Some(c);
                 break;
             }
         }
         tried += 1;
-        // A car with another in front may queue short of the kerb.
-        let Some(c) = stopped else {
+        // A car with another close in front may be held short of it.
+        let Some(c) = over else {
             continue;
         };
-        assert!(told, "car {serial} stopped without being told");
-        assert_eq!(c.speed, 0);
-        // The kerb on its right: 28 px into the block heading north or
-        // east, 4 heading south or west.
-        let across = if c.lane_dir & 127 == 64 { c.y } else { c.x };
-        let into = ((across >> 16) & 31) as i32;
-        let want = if c.lane_dir == 0 || c.lane_dir == 64 {
-            28
-        } else {
-            4
-        };
-        assert!(
-            (into - want).abs() <= 2,
-            "car {serial} heading {} stopped {into} px into its block",
-            c.lane_dir
-        );
-        // Let go: it stands three seconds, then drives on.
-        for _ in 0..140 {
+        assert!(told, "car {serial} pulled over without being told");
+        assert!(c.speed > 0, "car {serial} stopped at the kerb");
+        // Let go: a while on, it is back to its lane.
+        let mut back = false;
+        for _ in 0..300 {
             w.step(TickInput::default());
-        }
-        let still = car(&w).unwrap();
-        assert_eq!(still.hold, hold::PULL, "still over after 140 ticks");
-        let mut moved = false;
-        for _ in 0..200 {
-            w.step(TickInput::default());
-            let c = car(&w).unwrap();
-            if c.pull == 0 && c.speed > 0 {
-                moved = true;
+            let Some(c) = car(&w) else {
+                break;
+            };
+            if c.pull == 0 {
+                back = true;
                 break;
             }
         }
-        assert!(moved, "car {serial} never drove on");
-        println!("car {serial} pulled over (tried {tried})");
+        assert!(back, "car {serial} never went back to its lane");
+        println!("car {serial} pulled over and drove on (tried {tried})");
         return;
     }
     panic!("no car pulled over in {tried} tries");

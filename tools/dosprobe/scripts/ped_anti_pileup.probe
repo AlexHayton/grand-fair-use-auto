@@ -1,19 +1,9 @@
-# Compare street pedestrian behaviour in GTA8.EXE on the selected city level.
-# Run against the original city map; do not pass the synthetic peds overlay.
+# Liberty City street observation. Leave the player standing still.
+# Use analyze_peds.py prepare to expand the final sample into a dense capture.
 3500 tap esc 80
 +2000 tap enter 80
 +3000 tap enter 80
 +1500 tap enter 80
-+9000 shot peds_start
-+200 down left
-+400 up left
-+200 down up
-+4000 up up
-+5000 shot peds_after_walk
-+200 down right
-+800 up right
-+200 down up
-+4000 up up
-+5000 shot peds_after_turn
-+5000 shot peds_tjunction
-+100 quit
+17000 shot junction
+17100 memdump ped_0000 69a000 1000
+17300 quit

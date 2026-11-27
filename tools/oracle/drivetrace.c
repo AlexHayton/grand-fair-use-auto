@@ -179,7 +179,7 @@ static void one_tick(int up, int down, int steer, int hb)
         int hits;
         fleet_tick(veh.ox, veh.oy, avx > avy ? avx : avy,
                    gta_veh_angle(&veh), layer, veh.len / 2, veh.wid / 2, 0,
-                   veh.vx || veh.vy, fleet_weapons_clock_step());
+                   veh.vx || veh.vy);
         hits = crowd_ram(veh.ox, veh.oy, gta_veh_angle(&veh), veh.len / 2,
                          veh.wid / 2, layer, veh.vx, veh.vy);
         if (hits)

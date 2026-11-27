@@ -15,8 +15,9 @@
 //! - **The bullet** (pistol and machine gun) starts just behind the
 //!   shooter, moves 15 units a step and dies after 20 steps (~857 ms). Each
 //!   step it is tested first against flat faces (fences, railings, doors),
-//!   then people, then cars, then the block under it, where a wall or water
-//!   stops it.
+//!   then people, then cars, then the block under it, where a wall stops
+//!   it. No shot stops on water: it flies on over it (the owner's call in
+//!   M6b, where AmiGTA1 stops them there).
 //! - **The rocket** starts ahead of him, speeds up from 10 units to 15, has
 //!   no range limit and bursts on the first thing it meets. Against a wall
 //!   it leaves one fire, burning about 22 s.
@@ -392,7 +393,9 @@ pub const ROCKET_FRAMES: i32 = 3;
 pub const BLAST_FRAMES: i32 = 12;
 const BLAST_TICKS: i32 = 4;
 /// An explosion's reach, world px: it kills inside the first, sets alight
-/// out to the second, and writes off cars within the third.
+/// out to the second, and writes off cars within the third. The third is
+/// measured in M6b under DOSBox-X: a wreck's blast wrote off a car 1 block
+/// away but not one 1.5 or 2 blocks away (`tank_blast_reach`).
 const BLAST_KILL_PX: i64 = 17;
 const BLAST_BURN_PX: i64 = 30;
 const BLAST_CAR_PX: i64 = 32;
@@ -415,7 +418,8 @@ const FIRE_REACH_PX: i64 = 8;
 /// A car the player wrecked pays only when it blows up nearer him than this
 /// along both axes: 8 blocks. Measured in M6b under DOSBox-X straight up a
 /// road from a standing tank (`tank_range`, `tank_chain`): a wreck 7 blocks
-/// off paid, one 8 off did not. The shape across the screen is not known.
+/// off paid, one 8 off did not. Taken as a square, the same across the screen
+/// and for a rocket's wreck (the owner's call, 2026-11-27).
 const PAY_REACH_PX: i64 = 8 * 32;
 /// A car standing in it takes 5 points every this many ticks.
 const FIRE_CAR_EVERY: i32 = 4;
@@ -801,13 +805,16 @@ impl Weapons {
                 continue;
             }
             if dx <= BLAST_KILL_PX && dy <= BLAST_KILL_PX {
+                let kind = st.peds.p[i].score_kind();
                 st.peds.kill(i);
                 if by_player {
-                    st.score.event(score::kind::CIVILIAN, score::reason::BLOWN);
+                    st.score.event(kind, score::reason::BLOWN);
                     st.crime(crime::MURDER);
                 }
             } else {
-                st.peds.burn(i, x, y);
+                // Set alight: the player's blast is paid when he has burnt
+                // to death, as burnt (`GTA8.EXE`, the owner's play, M6b).
+                st.peds.burn(i, x, y, by_player);
             }
         }
         if self.target_within(x, y, layer, BLAST_KILL_PX) {
@@ -978,7 +985,7 @@ impl Weapons {
                 if ((p.x - f.x) >> FP).abs() <= FIRE_REACH_PX
                     && ((p.y - f.y) >> FP).abs() <= FIRE_REACH_PX
                 {
-                    st.peds.burn(i, f.x, f.y);
+                    st.peds.burn(i, f.x, f.y, false);
                 }
             }
             if self.target_within(f.x, f.y, f.layer, FIRE_REACH_PX) {
@@ -1116,38 +1123,28 @@ impl Weapons {
             return;
         }
 
-        // The block under it: a wall or water stops anything.
+        // The block under it: a wall stops anything. Water does not: a shot
+        // flies on over it until it meets something (the owner's call in
+        // M6b; AmiGTA1 stops every shot on water, as a wall).
         let g = st.map.nav_ground(bx, by, s.layer);
-        if g == ground::BUILDING || g == ground::WATER {
+        if g == ground::BUILDING {
             match s.kind {
                 Kind::Rocket | Kind::Shell => {
                     self.explode(st, s.x, s.y, s.layer, by_player);
                     (st.say)(format!(
-                        "weapons: {} burst on {} at block ({bx},{by},{})",
+                        "weapons: {} burst on a wall at block ({bx},{by},{})",
                         s.kind.name(),
-                        if g == ground::WATER {
-                            "water"
-                        } else {
-                            "a wall"
-                        },
                         s.layer
                     ));
                     // One fire this side of the wall, a step back along its
                     // line (GTA8.EXE; AmiGTA1 adds one either side).
-                    if g == ground::BUILDING {
-                        let (fx, fy, _, _) = axes(s.heading);
-                        self.light(ox - fx * 40, oy - fy * 40, s.layer, WALL_FIRE_TICKS);
-                    }
+                    let (fx, fy, _, _) = axes(s.heading);
+                    self.light(ox - fx * 40, oy - fy * 40, s.layer, WALL_FIRE_TICKS);
                 }
                 Kind::Bullet => {
                     self.splat(s.x, s.y, s.layer);
                     (st.say)(format!(
-                        "weapons: bullet {i} hit {} at ({},{}) block ({bx},{by},{})",
-                        if g == ground::WATER {
-                            "water"
-                        } else {
-                            "a wall"
-                        },
+                        "weapons: bullet {i} hit a wall at ({},{}) block ({bx},{by},{})",
                         s.x >> FP,
                         s.y >> FP,
                         s.layer
@@ -1216,9 +1213,11 @@ impl Weapons {
             if st.peds.p[pi].burn > 0 {
                 break;
             }
-            st.peds.burn(pi, ox, oy);
+            // The flame pays as it catches him.
+            st.peds.burn(pi, ox, oy, false);
             if by_player {
-                st.score.event(score::kind::CIVILIAN, score::reason::BURNED);
+                let kind = st.peds.p[pi].score_kind();
+                st.score.event(kind, score::reason::BURNED);
                 st.crime(crime::MURDER);
             }
             (st.say)(format!("weapons: flame caught ped {pi}"));
@@ -1270,10 +1269,10 @@ impl Weapons {
             } else {
                 st.peds.shoot(pi, s.heading);
                 let p = &st.peds.p[pi];
-                let (px, py, back) = (p.x, p.y, p.shot == 2);
+                let (px, py, back, kind) = (p.x, p.y, p.shot == 2, p.score_kind());
                 self.splat(px, py, s.layer);
                 if by_player {
-                    st.score.event(score::kind::CIVILIAN, score::reason::SHOT);
+                    st.score.event(kind, score::reason::SHOT);
                     st.crime(crime::MURDER);
                 }
                 (st.say)(format!(
@@ -1344,35 +1343,6 @@ impl Weapons {
         self.shots[i].alive = false;
         self.stats.car += 1;
         true
-    }
-
-    /// Every shot in flight, explosion and fire after tick `tick`, in the
-    /// oracle's format.
-    pub fn trace_lines(&self, tick: u32) -> Vec<String> {
-        let shots = self
-            .shots
-            .iter()
-            .enumerate()
-            .filter(|(_, s)| s.alive)
-            .map(|(i, s)| {
-                format!(
-                    "w {tick} {i} {} {} {} {} {} {} {}",
-                    s.x, s.y, s.layer, s.heading, s.kind as i32, s.speed, s.frame
-                )
-            });
-        let blasts = self
-            .blasts
-            .iter()
-            .enumerate()
-            .filter(|(_, b)| b.frame != 0)
-            .map(|(i, b)| format!("x {tick} {i} {} {} {}", b.x, b.y, b.frame));
-        let fires = self
-            .fires
-            .iter()
-            .enumerate()
-            .filter(|(_, f)| f.ticks != 0)
-            .map(|(i, f)| format!("h {tick} {i} {} {} {}", f.x, f.y, f.ticks));
-        shots.chain(blasts).chain(fires).collect()
     }
 
     pub fn sim_hash(&self, h: &mut StateHasher) {

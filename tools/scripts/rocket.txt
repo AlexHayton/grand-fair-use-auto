@@ -8,12 +8,12 @@
 # frames after the burst (the chain GTA8.EXE shows, tank_chain_view), and
 # the wrecks stay. They pay 100 and then 200, one streak.
 #
-# oracle: walk
 # section: 1
 # expect: weapons: rocket burst on car
 # expect: (model 0) is a write-off - burning
 # expect: (model 0) blew up at (2050,1984)
 # expect: (model 0) blew up at (2079,1984)
+# expect: score: wreck +200
 # reject: no walkable layer
 start 64 60
 

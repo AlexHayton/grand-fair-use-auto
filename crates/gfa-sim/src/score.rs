@@ -8,6 +8,14 @@
 //!   reason picks a base. The same type again inside the streak window
 //!   (13 of the original's game frames) raises the streak, and the whole is
 //!   multiplied by the player's multiplier.
+//! - **A person pays the streak times the base; anything else doubles.**
+//!   Every type but the passer-by pays the base doubled for each repeat,
+//!   even with a base of 1 (`GTA8.EXE` `0xca4c0`: the `<= 1` test comes
+//!   after the doubling). AmiGTA1 read a base of 1 as the bare count.
+//! - **GOURANGA!** A Hare Krishna is type 7 ([`kind::KRISHNA`]), doubling
+//!   like the rest: run over, 100, 200, 400 … The 7th in one streak adds
+//!   12,300 times the multiplier, so a line of 7 run over pays 25,000
+//!   (`GTA8.EXE` `0xcac0b`, the owner's play, M6b).
 //! - **A car he wrecked pays 100 when it blows up**, doubling for each more
 //!   inside the window, as a chain of them goes up: 100, 200, 400 …
 //!   (measured in `GTA8.EXE`, M6b). The far-off ones pay nothing; that is
@@ -28,6 +36,8 @@ use crate::hash::StateHasher;
 pub mod kind {
     /// A pedestrian.
     pub const CIVILIAN: u8 = 1;
+    /// A Hare Krishna (`GTA8.EXE` `0xf2540`: AI types 21, 22 and 42).
+    pub const KRISHNA: u8 = 7;
     /// A car rammed.
     pub const RAM: u8 = 0x18;
     /// A car taken off its driver.
@@ -76,6 +86,10 @@ pub const SCORE_CAP: i64 = 999_999_999;
 pub const STREAK_FRAMES: i32 = 13;
 /// What a wrecked car pays at the start of a streak.
 pub const WRECK_VALUE: i64 = 100;
+/// The Krishna in a streak that brings GOURANGA!, and what it adds before
+/// the multiplier (`GTA8.EXE` `0xcad2c`, `0x300c`).
+pub const GOURANGA_AT: i32 = 7;
+pub const GOURANGA_BONUS: i64 = 12_300;
 /// The highest wanted level.
 pub const WANTED_MAX: i32 = 4;
 
@@ -126,6 +140,9 @@ pub struct Score {
     pub last_award: i64,
     /// Every award of types 1..=9: the kills a frenzy counts.
     pub kills: u32,
+    /// GOURANGA! bonuses paid and not yet reported, multiplier included:
+    /// the world takes them for its log ([`Score::take_gouranga`]).
+    gouranga: i64,
     pub heat: i32,
     /// 0..=4, read off the heat at every change.
     pub level: i32,
@@ -150,6 +167,7 @@ impl Score {
             streak_timer: 0,
             last_award: 0,
             kills: 0,
+            gouranga: 0,
             heat: 0,
             level: 0,
             no_police: false,
@@ -203,17 +221,25 @@ impl Score {
             self.kills += 1;
         }
         self.streak(kind);
-        // A person: the streak times the base. Anything else with a base
-        // above 1 doubles for each repeat (at most 19 times); with base 1
-        // it is the streak.
+        // A person: the streak times the base. Anything else doubles for
+        // each repeat (at most 19 times), a base of 1 too.
         let factor = if kind == kind::CIVILIAN {
             i64::from(self.streak_count) * base
-        } else if base > 1 {
-            base << (self.streak_count - 1).clamp(0, 19)
         } else {
-            i64::from(self.streak_count)
+            base << (self.streak_count - 1).clamp(0, 19)
         };
-        self.add(factor * kind_value(kind))
+        let award = self.add(factor * kind_value(kind));
+        if kind == kind::KRISHNA && self.streak_count == GOURANGA_AT {
+            let bonus = i64::from(self.multiplier) * GOURANGA_BONUS;
+            self.score = (self.score + bonus).min(SCORE_CAP);
+            self.gouranga += bonus;
+        }
+        award
+    }
+
+    /// The GOURANGA! bonuses paid since the last call, multiplier included.
+    pub fn take_gouranga(&mut self) -> i64 {
+        std::mem::take(&mut self.gouranga)
     }
 
     /// A car he wrecked blowing up: 100, doubling with each more inside the
@@ -306,6 +332,7 @@ impl Score {
         h.i32(self.streak_count);
         h.i32(self.streak_timer);
         h.u32(self.kills);
+        h.bytes(&self.gouranga.to_le_bytes());
         h.i32(self.heat);
         h.i32(self.level);
         h.bool(self.no_police);
@@ -367,14 +394,55 @@ mod tests {
     fn a_car_streak_doubles() {
         let mut s = Score::new(1);
         s.multiplier = 2;
-        // The car's reason 0 has base 1: the streak counts.
+        // The car's reason 0 has base 1, and doubles all the same.
         assert_eq!(s.event(kind::CAR, 0), 200);
         assert_eq!(s.event(kind::CAR, 0), 400);
+        assert_eq!(s.event(kind::CAR, 0), 800);
         // A blown-up car (base 3) doubles each time.
         let mut s = Score::new(1);
         assert_eq!(s.event(kind::CAR, reason::BLOWN), 300);
         assert_eq!(s.event(kind::CAR, reason::BLOWN), 600);
         assert_eq!(s.event(kind::CAR, reason::BLOWN), 1200);
+    }
+
+    #[test]
+    fn a_line_of_krishnas_run_over_pays_25000_with_gouranga() {
+        let mut s = Score::new(1);
+        let paid: Vec<i64> = (0..7)
+            .map(|_| s.event(kind::KRISHNA, reason::RUNOVER))
+            .collect();
+        assert_eq!(paid, [100, 200, 400, 800, 1600, 3200, 6400]);
+        assert_eq!(s.take_gouranga(), GOURANGA_BONUS);
+        assert_eq!(s.take_gouranga(), 0);
+        assert_eq!(s.score, 25_000);
+        // Any weapon: shot, base 2, at x2.
+        let mut s = Score::new(1);
+        s.multiplier = 2;
+        for _ in 0..7 {
+            s.event(kind::KRISHNA, reason::SHOT);
+        }
+        assert_eq!(s.take_gouranga(), 2 * GOURANGA_BONUS);
+        assert_eq!(s.score, 2 * (25_400 + GOURANGA_BONUS));
+        // A rocket's and the flamethrower's too: the bonus counts the
+        // Krishnas, not how they died (taken so with the owner, M6b; the
+        // test plan's K6 totals).
+        for (reason, total) in [(reason::BLOWN, 50_400), (reason::BURNED, 139_300)] {
+            let mut s = Score::new(1);
+            for _ in 0..7 {
+                s.event(kind::KRISHNA, reason);
+            }
+            assert_eq!(s.take_gouranga(), GOURANGA_BONUS);
+            assert_eq!(s.score, total);
+        }
+        // Broken by somebody else in between: no bonus.
+        let mut s = Score::new(1);
+        for k in 0..7 {
+            if k == 3 {
+                s.event(kind::CIVILIAN, reason::RUNOVER);
+            }
+            s.event(kind::KRISHNA, reason::RUNOVER);
+        }
+        assert_eq!(s.take_gouranga(), 0);
     }
 
     #[test]

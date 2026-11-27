@@ -190,7 +190,7 @@ At rest, the screen shows only about 2 blocks ahead of the tank. Anything furthe
 **Results (2026-11-27):**
 - **C1:** the near (east) edge is a wall-typed block. The shell bursts there and leaves the 22 s fire.
 - **C2 and C3:** the shell flew over the west railing (tile 102, on gfa-sim's shot-through list) with no bang.
-- **Water:** still untested.
+- **Water:** not tested. Taken by the owner's call (2026-11-27): like a bullet or a rocket, the shell does not burst on water, only on what it hits.
 
 ---
 
@@ -232,6 +232,24 @@ If you cannot see a target, drive forward until it is on screen, stop, then aim 
 - **D3 and D4:** neighbour 1 blew up shortly after the target, and neighbour 2 slightly after neighbour 1. That is a chain of 1-block reaches, as in gfa-sim.
 - **D6:** 100 for each vehicle.
 - **Optional check:** deferred.
+
+### D7. Blast reach, headless (`tank_blast_reach`, `tank_blast_reach_15`)
+
+D3 and D4 pointed to a 1-block reach, but neighbour 2 could have been caught by neighbour 1's blast rather than the target's. D7 removes the car in between.
+
+**Layout:** A7's road and tank. Three Itali GTBs in a row across the screen, 1.6 blocks ahead of the tank:
+- the target, straight ahead;
+- a control 1 block west of it;
+- a lone car east of it with nothing in between: **2 blocks** off in `tank_blast_reach`, **1.5** in `tank_blast_reach_15`.
+
+**Check:** `tools/dosprobe/scripts/tank_blast_reach.probe` gets in, fires one shell at the target, and captures the screen every 21 ms for 3 s, then once at 6.5 s and once at 12.5 s.
+
+**Result (2026-11-27):** the two runs played out frame for frame alike.
+- **The target** blew up from the shell at about 0.25 s, paying 100.
+- **The control (1 block)** blew up about half a second later, paying 200.
+- **The lone car** stood untouched at 12.5 s, both at 2 blocks and at 1.5. No fire reached it either.
+- **So a wreck's blast writes off a car between 1 and 1.5 blocks away, centre to centre.** That matches gfa-sim's 1 block (`BLAST_CAR_PX`). The 2 blocks read from the code are not borne out.
+- **Measured across the screen only.** The reach straight ahead or behind is assumed to be the same.
 
 **Optional, very last** (deferred; it may crash the game): a rocket at a tank crashed `GTA8.EXE` with "ADDING TWICE". If you want to know whether a shell does the same, drive to Vice City's other tank and shoot it.
 

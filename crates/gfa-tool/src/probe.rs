@@ -194,6 +194,61 @@ fn build_arena() -> Result<GeneratedOverlay> {
     })
 }
 
+/// Where a Hare Krishna line goes round corners, for the owner to eyeball
+/// (`docs/M6B_KRISHNA_TEST_PLAN.md`, K9).
+///
+/// Pavement one block wide runs in staircases from north-west to south-east,
+/// turning every 3 blocks, left and right in turn. 3 blocks of road part one
+/// staircase from the next: too far for a passer-by to cross, so the leader
+/// has to take every corner. North of the avenue, road fills the inside of
+/// each corner, so a follower who cuts it is seen on the road. South of it,
+/// a building does, as at a city block's corner, so one who cuts snags.
+///
+/// The player starts on foot on the avenue (y 127..=129, road) with a
+/// Bulldog beside him, as in `arena`.
+fn build_corners() -> Result<GeneratedOverlay> {
+    let mut b = fill_arena(|x, y| {
+        let (x, y) = (i32::from(x), i32::from(y));
+        if (127..=129).contains(&y) {
+            return Cell::Road;
+        }
+        let band = (x - y).div_euclid(STAIR_PERIOD);
+        let across = (x - y).rem_euclid(STAIR_PERIOD);
+        if across > STAIR_STEP {
+            return Cell::Road;
+        }
+        let along = x - band * STAIR_PERIOD;
+        if along % STAIR_STEP == 0 || y % STAIR_STEP == 0 {
+            Cell::Pavement
+        } else if y < 127 {
+            Cell::Road
+        } else {
+            Cell::Building
+        }
+    });
+
+    let (cmp_bytes, cmp) = finish_cmp(&mut b, "Probe Corners")?;
+    let ini_bytes = build_mission_ini(
+        "Probe Corners",
+        &[
+            "1 1 (129,128,4) PARKED 31 0",
+            "2 1 (127,128,4) PLAYER 1 256",
+        ],
+    )?;
+
+    Ok(GeneratedOverlay {
+        cmp_bytes,
+        ini_bytes,
+        cmp,
+    })
+}
+
+/// `corners`: a staircase turns every this many blocks.
+const STAIR_STEP: i32 = 3;
+/// `corners`: one staircase repeats this many blocks along a row; the 4 of
+/// a staircase's band and 3 of road.
+const STAIR_PERIOD: i32 = 7;
+
 fn build_shooting() -> Result<GeneratedOverlay> {
     let mut b = fill_arena(|x, y| {
         let target_wall = x == 130 && (127..130).contains(&y);
@@ -1042,6 +1097,7 @@ fn build_camera_runway() -> Result<GeneratedOverlay> {
 pub fn probe_overlay(preset: &str, out: &Path) -> Result<()> {
     let generated = match preset {
         "arena" => build_arena()?,
+        "corners" => build_corners()?,
         "shooting" => build_shooting()?,
         "getin" => build_getin()?,
         "vault" => build_vault()?,
@@ -1062,7 +1118,7 @@ pub fn probe_overlay(preset: &str, out: &Path) -> Result<()> {
         "tank_turn" => build_tank_turn()?,
         "camera_runway" => build_camera_runway()?,
         _ => bail!(
-            "unknown probe overlay preset {preset:?} (available: arena, shooting, getin, vault, blocked_exit, combat_water, combat_score, combat_score_nonplayer, combat_score_script, combat_score_npc, combat_score_npc_parked, combat_punch, combat_tanker, combat_tanker_drive, combat_tanker_npc, combat_tanker_bomb, combat_tank, tank_drive, tank_turn, camera_runway)"
+            "unknown probe overlay preset {preset:?} (available: arena, corners, shooting, getin, vault, blocked_exit, combat_water, combat_score, combat_score_nonplayer, combat_score_script, combat_score_npc, combat_score_npc_parked, combat_punch, combat_tanker, combat_tanker_drive, combat_tanker_npc, combat_tanker_bomb, combat_tank, tank_drive, tank_turn, camera_runway)"
         ),
     };
 
@@ -1102,6 +1158,33 @@ mod tests {
         assert_eq!(start.bx, 127);
         assert_eq!(start.by, 128);
         assert_eq!(start.angle, Some(64));
+    }
+
+    #[test]
+    fn corners_preset_turns_the_pavement_every_three_blocks() {
+        use gfa_formats::cmp::GroundType;
+        let g = build_corners().unwrap();
+        let sections = mission::parse(&g.ini_bytes).unwrap();
+        assert!(g.cmp.blocks.len() < 20, "blocks: {}", g.cmp.blocks.len());
+        let ground = |x, y| g.cmp.block(x, y, 2).unwrap().ground_type();
+        // One step of a staircase north of the avenue: east along y=120,
+        // a right turn south down x=123, a left turn east along y=123.
+        for (x, y) in [(120, 120), (121, 120), (122, 120), (123, 120)] {
+            assert_eq!(ground(x, y), GroundType::Pavement, "({x},{y})");
+        }
+        for (x, y) in [(123, 121), (123, 122), (123, 123), (124, 123)] {
+            assert_eq!(ground(x, y), GroundType::Pavement, "({x},{y})");
+        }
+        // Inside the right turn: road. Beyond the corner: the road between.
+        assert_eq!(ground(122, 121), GroundType::Road);
+        assert_eq!(ground(124, 120), GroundType::Road);
+        // The same step south of the avenue has a building inside the turn.
+        assert_eq!(ground(141, 138), GroundType::Pavement);
+        assert_eq!(ground(141, 139), GroundType::Pavement);
+        assert_eq!(ground(140, 139), GroundType::Building);
+        assert_eq!(ground(127, 128), GroundType::Road);
+        let start = Start::from_section(&sections[0]).unwrap();
+        assert_eq!((start.bx, start.by, start.angle), (127, 128, Some(64)));
     }
 
     #[test]

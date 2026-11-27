@@ -109,6 +109,9 @@ synchronize time=false
 fastbioslogo=true
 startbanner=false
 captures={captures_dir}
+# A probe's savestate must not stop to ask for a label: the dialog opens on
+# the desktop even headless, and the run waits on it.
+saveremark=false
 
 [cpu]
 core=normal

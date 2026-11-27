@@ -10,6 +10,7 @@
 //! | marks (blood, fires), trains   | 25 Hz     | [`Half`], first tick    |
 //! | vehicle physics                | 23.333 Hz | [`Ratio`] 7/15          |
 //! | weapons (gun cooldown, shots, splats) | 23.333 Hz | [`Ratio`] 7/15   |
+//! | traffic lights                 | 23.333 Hz | [`dos_frames`]         |
 //! | ped timers                     | 50 Hz     | [`ped_frames`] scales   |
 //!
 //! Vehicle physics runs at the original's own 23.333 Hz (three ticks of a
@@ -23,6 +24,16 @@
 pub const SIM_HZ: u32 = 50;
 /// Microseconds per tick.
 pub const TICK_US: u32 = 1_000_000 / SIM_HZ;
+
+const DOS_FRAME_NUM: u32 = 7;
+const DOS_FRAME_DEN: u32 = 15;
+
+/// DOS game frames elapsed since the start of the level.
+pub(crate) fn dos_frames(ticks: u64) -> u64 {
+    let num = u64::from(DOS_FRAME_NUM);
+    let den = u64::from(DOS_FRAME_DEN);
+    ticks / den * num + (ticks % den) * num / den
+}
 
 /// A subsystem that runs every other tick.
 ///
@@ -88,13 +99,13 @@ impl Ratio {
 
 /// The vehicle physics clock: the original's 23.333 Hz against our 50.
 pub const fn vehicle_physics() -> Ratio {
-    Ratio::new(7, 15)
+    Ratio::new(DOS_FRAME_NUM, DOS_FRAME_DEN)
 }
 
 /// The weapons clock (gun cooldowns, projectile flight, splats): the
 /// original's 23.333 Hz against our 50.
 pub const fn weapons() -> Ratio {
-    Ratio::new(7, 15)
+    Ratio::new(DOS_FRAME_NUM, DOS_FRAME_DEN)
 }
 
 /// A ped timer of `n` original frames (25 Hz) in our ticks:

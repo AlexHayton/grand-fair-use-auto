@@ -799,6 +799,9 @@ fn nobody_spins_on_the_spot() {
     let mut crowded = 0;
     for t in 0..3000 {
         w.step(TickInput::default());
+        // A Hare Krishna line may take slots beyond the crowd's.
+        last.resize(w.peds.p.len(), None);
+        turning.resize(w.peds.p.len(), 0);
         for (i, p) in w.peds.p.iter().enumerate() {
             let walking = p.alive && !p.corpse && p.down == 0 && p.speed > 0;
             let a = walking.then_some(p.angle);
@@ -1613,7 +1616,8 @@ fn friendly_fire_groups_and_gouranga_bonus() {
     );
     let _ = c1;
 
-    // Running over 4 pedestrians in a streak awards the GOURANGA! bonus.
+    // GOURANGA! is the 7th Hare Krishna in a streak (GTA8.EXE), not any 4
+    // people: 4 passers-by run over pay none.
     w.peds.clear();
     w.put_in_car(0, 15, 8, 128);
     run(&mut w, Buttons::UP, 60);
@@ -1623,7 +1627,223 @@ fn friendly_fire_groups_and_gouranga_bonus() {
             .drop_ped(v.ox, v.oy + ((36 + k * 4) << 16), 2, 0, -1, 0);
     }
     run(&mut w, Buttons::UP, 25);
-    assert!(log_has(&mut w, "score: GOURANGA!"));
+    let log = w.drain_log();
+    assert!(log.iter().any(|l| l.text.contains("car: ran over")));
+    assert!(!log.iter().any(|l| l.text.contains("GOURANGA")));
+}
+
+#[test]
+fn a_hare_krishna_line_run_over_pays_25000_with_gouranga() {
+    use gfa_sim::peds::KRISHNA_REMAP;
+    let mut b = CmpBuilder::new(1);
+    street(&mut b, 5..25, 5..30);
+    let mut w = world(&b, south(15, 10));
+    w.peds.clear();
+    w.put_in_car(0, 15, 8, 128);
+    run(&mut w, Buttons::UP, 60);
+    let v = w.driven.as_ref().unwrap().veh.clone();
+    assert_eq!(w.score.score, 0);
+    let leader = w.peds.spawn_line(v.ox, v.oy + (40 << 16), 2, 0).unwrap();
+    assert_eq!(w.peds.leader, Some(leader));
+    let line: Vec<_> = w.peds.p.iter().filter(|p| p.in_line()).collect();
+    assert_eq!(line.len(), 7);
+    assert!(line.iter().all(|p| p.remap == KRISHNA_REMAP));
+    assert!(
+        w.peds.spawn_line(v.ox, v.oy, 2, 0).is_none(),
+        "one line at a time"
+    );
+    run(&mut w, Buttons::UP, 30);
+    let log = w.drain_log();
+    let said = |t: &str| log.iter().any(|l| l.text.contains(t));
+    assert!(said("score: GOURANGA! +12300"), "{log:#?}");
+    assert!(said("the line scatters"));
+    // 100, 200, 400 … 6400, and 12,300 more.
+    assert_eq!(w.score.score, 25_000);
+    assert_eq!((w.peds.leader, w.peds.made), (None, 0));
+}
+
+/// A walled plaza of pavement 14..27 square in a sea of road: the crowd's
+/// spawn points, a view's width away, all fall on the road.
+fn plaza() -> CmpBuilder {
+    let mut b = CmpBuilder::new(1);
+    let floor = Block {
+        faces: [0, 0, 0, 0, 1],
+        ..Block::default()
+    };
+    for x in 0..60 {
+        for y in 0..60 {
+            let kind = if (14..27).contains(&x) && (14..27).contains(&y) {
+                PAVEMENT
+            } else {
+                ROAD
+            };
+            b.set(x, y, 1, floor).set(x, y, 2, block(kind));
+        }
+    }
+    b
+}
+
+#[test]
+fn the_hundredth_passer_by_starts_a_hare_krishna_line() {
+    use gfa_sim::peds::{KRISHNA_REMAP, line, mode};
+    use gfa_sim::score::kind;
+    let mut w = world(&pavements(), south(20, 25));
+    w.peds.made = 98;
+    let made = (0..300).find(|_| {
+        w.step(TickInput::default());
+        w.peds.leader.is_some()
+    });
+    assert!(made.is_some(), "no line by the 100th");
+    let l = w.peds.leader.unwrap();
+    assert_eq!(w.peds.made, 100);
+    // One chain, each after the one made before him, back to the leader.
+    let members: Vec<usize> = (0..w.peds.p.len())
+        .filter(|&i| w.peds.p[i].in_line())
+        .collect();
+    assert_eq!(members.len(), 7);
+    for &i in &members {
+        let p = &w.peds.p[i];
+        assert_eq!(p.remap, KRISHNA_REMAP);
+        assert_eq!(p.score_kind(), kind::KRISHNA);
+        let mut at = i;
+        for _ in 0..7 {
+            if at == l {
+                break;
+            }
+            at = w.peds.p[at].ahead as usize;
+        }
+        assert_eq!(at, l, "follower {i} is not in the leader's chain");
+    }
+    // No second line while he lives, and the line is never let go.
+    run(&mut w, Buttons::NONE, 400);
+    assert_eq!(w.peds.leader, Some(l));
+    assert!(w.peds.made > 100);
+    let line_now = w.peds.p.iter().filter(|p| p.in_line()).count();
+    assert_eq!(line_now, 7);
+    // With the leader dead the rest scatter, still Krishnas, and the count
+    // starts again.
+    w.peds.kill(l);
+    w.step(TickInput::default());
+    assert_eq!(w.peds.leader, None);
+    assert!(w.peds.made < 5);
+    let scattered: Vec<_> = w
+        .peds
+        .p
+        .iter()
+        .filter(|p| p.alive && p.line == line::LEADERLESS)
+        .collect();
+    assert_eq!(scattered.len(), 6);
+    assert!(scattered.iter().all(|p| p.mode == mode::FLEE));
+    assert!(scattered.iter().all(|p| p.score_kind() == kind::KRISHNA));
+}
+
+/// A staircase of pavement one block wide in a sea of road, turning every
+/// three blocks, right and left in turn (the `corners` arena's): from
+/// (10,10) east, south, east … to (22,19).
+fn staircase() -> CmpBuilder {
+    let mut b = CmpBuilder::new(1);
+    let floor = Block {
+        faces: [0, 0, 0, 0, 1],
+        ..Block::default()
+    };
+    for x in 0..70 {
+        for y in 0..70 {
+            b.set(x, y, 1, floor).set(x, y, 2, block(ROAD));
+        }
+    }
+    for k in 0..4u8 {
+        let (x0, y0) = (10 + 3 * k, 10 + 3 * k);
+        for d in 0..=3 {
+            b.set(x0 + d, y0, 2, block(PAVEMENT));
+            if k < 3 {
+                b.set(x0 + 3, y0 + d, 2, block(PAVEMENT));
+            }
+        }
+    }
+    b
+}
+
+#[test]
+fn a_hare_krishna_line_keeps_to_its_leaders_path() {
+    // The player well away, so nobody else comes on the path.
+    let mut w = world(&staircase(), south(55, 55));
+    w.peds.clear();
+    let at = |b: i64| (b * 32 + 16) << 16;
+    let l = w.peds.spawn_line(at(11), at(10), 2, 64).unwrap();
+    let mut worst_gap = 0;
+    // Every block the leader has stood on: the followers go nowhere else
+    // (the owner's K9: no corner cut, on the road or into a building).
+    let mut trail = std::collections::BTreeSet::new();
+    let mut corners = 0;
+    let mut heading = w.peds.p[l].angle & !63;
+    for t in 0..3000 {
+        w.step(TickInput::default());
+        assert_eq!(w.peds.leader, Some(l), "the leader was lost at tick {t}");
+        let q = &w.peds.p[l];
+        trail.insert((q.x >> 21, q.y >> 21));
+        let h = (q.angle + 32) & 255 & !63;
+        if h != heading {
+            corners += 1;
+            heading = h;
+        }
+        for (i, p) in w.peds.p.iter().enumerate() {
+            if !p.in_line() || p.line != gfa_sim::peds::line::FOLLOWER {
+                continue;
+            }
+            assert!(
+                trail.contains(&(p.x >> 21, p.y >> 21)),
+                "Krishna {i} at ({},{}) on a block the leader never stood on, tick {t}",
+                p.x >> 16,
+                p.y >> 16
+            );
+            if t > 100 && p.ahead >= 0 {
+                let a = &w.peds.p[p.ahead as usize];
+                let gap = ((a.x - p.x) >> 16).abs().max(((a.y - p.y) >> 16).abs());
+                worst_gap = worst_gap.max(gap);
+            }
+        }
+    }
+    // Round a good few of the corners, and nobody left behind.
+    assert!(
+        trail.len() >= 10 && corners >= 4,
+        "the leader turned {corners} times on {trail:?}"
+    );
+    assert_eq!(w.peds.p.iter().filter(|p| p.in_line()).count(), 7);
+    assert!(worst_gap <= 24, "a follower fell {worst_gap} px behind");
+}
+
+#[test]
+fn the_krishna_leader_follows_the_player_who_stands_by_him() {
+    let mut w = world(&plaza(), south(20, 20));
+    w.peds.clear();
+    let at = |b: i64| (b * 32 + 16) << 16;
+    let l = w.peds.spawn_line(at(17), at(17), 2, 64).unwrap();
+    run(&mut w, Buttons::NONE, 120);
+    assert!(!w.peds.p[l].on_player);
+    // The player steps up to him, nearer than the first behind him.
+    let p = w.peds.p[l];
+    w.player.x = (p.x + (5 << 16)) as i32;
+    w.player.y = p.y as i32;
+    w.player.layer = p.layer;
+    w.step(TickInput::default());
+    assert!(
+        w.peds.p[l].on_player,
+        "the leader did not take up after him"
+    );
+    assert!(log_has(&mut w, "follows the player"));
+    // He walks off; the leader keeps up.
+    w.player.x += 3 << 21;
+    run(&mut w, Buttons::NONE, 200);
+    let p = w.peds.p[l];
+    let d = ((i64::from(w.player.x) - p.x) >> 16)
+        .abs()
+        .max(((i64::from(w.player.y) - p.y) >> 16).abs());
+    assert!(d <= 16, "the leader is {d} px off");
+    // Into a car: he lets the player go.
+    w.put_in_car(0, 22, 22, 0);
+    run(&mut w, Buttons::NONE, 2);
+    assert!(!w.peds.p[l].on_player);
+    assert!(log_has(&mut w, "lets the player go"));
 }
 
 #[test]
@@ -1715,6 +1935,135 @@ fn weapon_fire_rates_projectile_speed_and_splat_lifetime_match_original() {
         (18..=22).contains(&flame_ticks),
         "flame puff lived {flame_ticks} sim ticks (expected ~19 = 9 visible steps @ 23.333 Hz)"
     );
+
+    // Shots fly on over water on their own layer, to the wall beyond it.
+    let over_water = || {
+        let mut b = CmpBuilder::new(1);
+        street(&mut b, 5..20, 5..20);
+        for x in 5..20 {
+            for y in 12..14 {
+                b.set(x, y, 2, block(0x10));
+            }
+        }
+        b.set(10, 14, 2, block(BUILDING));
+        let mut w = world(&b, south(10, 10));
+        w.peds.clear();
+        w.traffic.clear();
+        w
+    };
+    for (gun, hit) in [
+        (weapon::ROCKET, "rocket burst on a wall at block (10,14,"),
+        (weapon::PISTOL, "hit a wall at"),
+    ] {
+        let mut w = over_water();
+        w.give_weapon(gun as i32, 5);
+        let mut seen = Vec::new();
+        for t in 0..60 {
+            w.step(press(if t == 0 { Buttons::FIRE } else { Buttons::NONE }));
+            seen.extend(w.drain_log().into_iter().map(|l| l.text));
+        }
+        assert!(
+            seen.iter()
+                .any(|l| l.contains(hit) && l.contains("(10,14,")),
+            "weapon {gun}: {seen:?}"
+        );
+        assert!(!seen.iter().any(|l| l.contains("water")), "{seen:?}");
+    }
+
+    // A rocket into a wall leaves one fire on this side of it, 10 px back
+    // along its line, which burns for 1100 ticks (GTA8.EXE, the owner's
+    // play; AmiGTA1 lights three for 250).
+    let mut b = CmpBuilder::new(1);
+    street(&mut b, 5..20, 5..20);
+    b.set(10, 14, 2, block(BUILDING));
+    let mut w = world(&b, south(10, 10));
+    w.peds.clear();
+    w.traffic.clear();
+    w.give_weapon(weapon::ROCKET as i32, 1);
+    let burning = |w: &gfa_sim::world::World| {
+        w.weapons
+            .fires
+            .iter()
+            .filter(|f| f.ticks > 0)
+            .copied()
+            .collect::<Vec<_>>()
+    };
+    let mut lit = None;
+    for t in 0..1300u32 {
+        w.step(press(if t == 0 { Buttons::FIRE } else { Buttons::NONE }));
+        let fires = burning(&w);
+        match lit {
+            None if !fires.is_empty() => {
+                assert_eq!(fires.len(), 1, "one fire, not AmiGTA1's three");
+                let f = fires[0];
+                assert_eq!(f.ticks, 1100);
+                assert_eq!(f.layer, 2);
+                assert!(
+                    ((f.x >> 16) - (10 * 32 + 16)).abs() <= 1,
+                    "on the rocket's line: x {}",
+                    f.x >> 16
+                );
+                let back = 14 * 32 - (f.y >> 16);
+                // 10 px back from where the rocket was before the wall,
+                // up to one 7.5 px step short of it.
+                assert!((10..=18).contains(&back), "{back} px short of the wall");
+                lit = Some(t);
+            }
+            Some(at) if fires.is_empty() => {
+                assert_eq!(t - at, 1100, "burnt for {} ticks", t - at);
+                lit = None;
+                break;
+            }
+            _ => {}
+        }
+    }
+    assert!(lit.is_none(), "the fire never lit or never went out");
+
+    // A rocket's blast that sets a man alight without killing him pays when
+    // he has burnt to death, as burnt (GTA8.EXE, the owner's play): 1000 for
+    // a passer-by, nothing before.
+    let mut b = CmpBuilder::new(1);
+    street(&mut b, 5..20, 5..20);
+    b.set(10, 14, 2, block(BUILDING));
+    let mut w = world(&b, south(10, 10));
+    w.peds.clear();
+    w.traffic.clear();
+    // Lying 24 px to the side of the wall's face: past the blast's 17 px,
+    // inside its 30.
+    let at = ((336 + 24) << 16, 440 << 16);
+    assert!(w.peds.drop_ped(at.0, at.1, 2, 0, -1, 0));
+    let i = w
+        .peds
+        .p
+        .iter()
+        .position(|p| p.alive && (p.x, p.y) == at)
+        .unwrap();
+    w.peds.p[i].down = 10_000;
+    w.give_weapon(weapon::ROCKET as i32, 5);
+    let mut alight = None;
+    let mut paid = None;
+    for t in 0..300 {
+        w.step(press(if t == 0 { Buttons::FIRE } else { Buttons::NONE }));
+        let log = w.drain_log();
+        if alight.is_none() && w.peds.p[i].burn > 0 {
+            alight = Some(t);
+            assert_eq!(w.score.score, 0, "paid as he caught fire");
+        }
+        if log
+            .iter()
+            .any(|l| l.text.contains("burnt to death, 1000 points"))
+        {
+            paid = Some(t);
+            break;
+        }
+    }
+    let (alight, paid) = (
+        alight.expect("never caught fire"),
+        paid.expect("never paid"),
+    );
+    assert!(w.peds.p[i].corpse);
+    assert_eq!(paid - alight, gfa_sim::peds::BURN_TICKS as u32);
+    assert_eq!(w.score.score, 1000);
 
     // Bullet splat against a building wall lasts 5 weapon steps (~10-11 sim ticks / ~214 ms).
     let mut b = CmpBuilder::new(1);

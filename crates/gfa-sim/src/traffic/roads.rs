@@ -7,6 +7,7 @@
 //! AmiGTA1 reads the raw block's arrows ([`raw_dirs`]): those include
 //! railway blocks, which the grid zeroes.
 
+use crate::clock::dos_frames;
 use crate::map::{SimMap, ground, nav};
 
 /// Which way one block step goes for a road angle.
@@ -349,16 +350,7 @@ impl Boxes {
     /// The crossing a light at `(bx, by)` belongs to, named by its junction
     /// box's root: the first junction block within two blocks, nearest
     /// first (rings from the north-west, then the layers up). A block with
-    /// none near is its own name. A car at a stop line asks about the box
-    /// ahead of it, a lamp about its corner's, so neither is misled by a
-    /// second crossing close behind; a person waiting to cross asks about
-    /// where he stands.
-    ///
-    /// Ours: AmiGTA1 names a light by its own block, and since a crossing's
-    /// stop lines lie either side of its box they often fall in different
-    /// 8×8 neighbourhoods; then two approaches across each other are green
-    /// at once, which twenty of Liberty City's twenty-four lit crossings
-    /// did (decision log, 2026-11-21; `tools/oracle/traffic_lights.pl`).
+    /// none near is its own name.
     pub fn crossing(&self, bx: i32, by: i32) -> (i32, i32) {
         for r in 0..=2i32 {
             for dy in -r..=r {
@@ -438,23 +430,12 @@ pub const LANE_TARGET: i32 = 16;
 pub const LANE_KERB: i32 = 4;
 const LANE_STREET_SCAN: i32 = 4;
 
-/// Ticks of green for one axis.
-pub const LIGHT_PHASE: u32 = 250;
-/// The last ticks of a green that count as amber.
-pub const LIGHT_AMBER: u32 = 30;
-
-/// Is the light green on tick `tick` for traffic along x (`along_x`) or y
-/// at the crossing named `(kx, ky)` ([`Boxes::crossing`])?
-pub fn light_green(tick: u32, kx: i32, ky: i32, along_x: bool) -> bool {
-    light(tick, kx, ky, along_x) == Light::Green
-}
-
 /// What a traffic light shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Light {
     Red,
     Green,
-    /// The end of a green: traffic stops, as at red.
+    /// The transition to or from green. Traffic stops, as at red.
     Amber,
 }
 
@@ -469,22 +450,13 @@ impl Light {
     }
 }
 
-/// The light on tick `tick` for traffic along x or y at the crossing named
-/// `(kx, ky)` (AmiGTA1 `gta_traffic_light_state`): green for one axis while
-/// the other is red, amber for the last [`LIGHT_AMBER`] ticks of each green.
-/// Crossings in alternate 8×8 neighbourhoods run half a cycle apart, so the
-/// city does not change in unison.
-pub fn light(tick: u32, kx: i32, ky: i32, along_x: bool) -> Light {
-    let cycle = LIGHT_PHASE * 2;
-    let off = (((kx >> 3) + (ky >> 3)) as u32 & 1) * LIGHT_PHASE;
-    let p = tick.wrapping_add(off) % cycle;
-    let ew = p < LIGHT_PHASE;
-    if along_x != ew {
-        Light::Red
-    } else if p % LIGHT_PHASE >= LIGHT_PHASE - LIGHT_AMBER {
-        Light::Amber
-    } else {
-        Light::Green
+/// GTA8.EXE's citywide signal cycle, starting with north–south green.
+pub fn light(tick: u64, along_x: bool) -> Light {
+    let offset = if along_x { 176 } else { 0 };
+    match (dos_frames(tick) + offset) % 352 {
+        0..96 => Light::Green,
+        96..136 | 312..352 => Light::Amber,
+        _ => Light::Red,
     }
 }
 
@@ -513,11 +485,6 @@ impl Lamp {
         let (dx, dy) = (self.road.0 - self.bx, self.road.1 - self.by);
         let at = |b: i32, d: i32| (b * 32 + 16 + d * 10) << 16;
         (at(self.bx, dx), at(self.by, dy))
-    }
-
-    /// What it shows on tick `tick`: the light the cars on its road obey.
-    pub fn light(&self, tick: u32) -> Light {
-        light(tick, self.key.0, self.key.1, self.along_x)
     }
 }
 
@@ -647,31 +614,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn one_axis_at_a_time_with_amber_before_red() {
-        for (bx, by) in [(3, 3), (9, 3)] {
-            let mut was = (light(0, bx, by, true), light(0, bx, by, false));
-            for t in 1..LIGHT_PHASE * 4 {
-                let now = (light(t, bx, by, true), light(t, bx, by, false));
-                assert!(
-                    now.0 == Light::Red || now.1 == Light::Red,
-                    "tick {t}: {now:?}"
-                );
-                for (a, b) in [(was.0, now.0), (was.1, now.1)] {
-                    if a != b {
-                        // Green, amber, red, green.
-                        let next = match a {
-                            Light::Green => Light::Amber,
-                            Light::Amber => Light::Red,
-                            Light::Red => Light::Green,
-                        };
-                        assert_eq!(b, next, "tick {t}");
-                    }
-                }
-                assert_eq!(light_green(t, bx, by, true), now.0 == Light::Green);
-                was = now;
+    fn dos_signals_hold_the_measured_phases() {
+        use Light::{Amber, Green, Red};
+        // 50 Hz ticks at the first step of DOS frames 96, 136, 176, 272, 312 and 352.
+        for (ticks, (ew, ns)) in [
+            (0..206, (Red, Green)),
+            (206..292, (Red, Amber)),
+            (292..378, (Amber, Red)),
+            (378..583, (Green, Red)),
+            (583..669, (Amber, Red)),
+            (669..755, (Red, Amber)),
+            (755..756, (Red, Green)),
+        ] {
+            for tick in ticks {
+                assert_eq!(light(tick, true), ew);
+                assert_eq!(light(tick, false), ns);
             }
         }
-        // Neighbouring neighbourhoods run half a cycle apart.
-        assert_eq!(light(10, 3, 3, true), light(10, 9, 3, false));
     }
 }

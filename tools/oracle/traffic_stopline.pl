@@ -8,8 +8,7 @@
 # its nose, shoving it sideways a pixel at a time onto the pavement. gfa-sim
 # also holds a car once its nose would reach the box, as the box's own gate
 # does (within its stopping reach of the box), where the block before the
-# box is a stop line. This makes the same change to the C. Needs
-# traffic_lights.pl's light_green_ahead.
+# box is a stop line. This makes the same change to the C.
 #
 #     perl traffic_stopline.pl < gta_traffic.c > patched/gta_traffic.c
 #
@@ -40,7 +39,7 @@ static int light_red_ahead(const gta_traffic *tr, const gta_map *m,
     gta_block b;
 
     if (at_stop_line(m, c->hint_val, bx, by, c->layer, c->angle))
-        return !light_green_ahead(tr, bx, by, c->angle);
+        return !gta_traffic_light_green(tr, bx, by, (c->angle & 127) == 64);
     if (jbx < 0 || ej >= stopr)
         return 0;
     if (!gta_map_block(m, jbx - dxs, jby - dys, c->layer, &b) ||
@@ -54,7 +53,7 @@ once('the helper', qr/^(static void drive_one\(gta_traffic \*tr, const gta_map \
      sub { "$fn$1" });
 
 once('the light',
-     qr/^(\s*)at_stop_line\(m, c->hint_val, bx, by, c->layer, c->angle\) &&\n\s*!light_green_ahead\(tr, bx, by, c->angle\)\) \{\n/m,
+     qr/^(\s*)at_stop_line\(m, c->hint_val, bx, by, c->layer, c->angle\) &&\n\s*!gta_traffic_light_green\(tr, bx, by, \(c->angle & 127\) == 64\)\) \{\n/m,
      sub {
          my $i = $1;
          "${i}light_red_ahead(tr, m, c, bx, by, jbx, jby, ej, stopr, dxs, dys)) {\n"

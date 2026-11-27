@@ -393,6 +393,9 @@ pub fn level_world(
         world.load_section(section);
     } else {
         world.section = Some(section.clone());
+        // AmiGTA1 has no Hare Krishnas, so the oracle's crowd never makes
+        // a line.
+        world.peds.krishnas = false;
     }
     Ok(world)
 }

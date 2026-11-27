@@ -7,7 +7,6 @@
 # blocks. Then the machine gun, a round a tick, turning slowly through a
 # half circle, and running with it.
 #
-# oracle: walk
 # section: 1
 # expect: weapons: bullet 0 hit ped
 # expect: player: out of ammo - weapon 0

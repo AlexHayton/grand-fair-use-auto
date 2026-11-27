@@ -5,10 +5,12 @@
  * them, which is the order of AmiGTA1's main loop: after the player has
  * moved, the crowd and the fleet are told where he is, the people standing
  * on their feet go to the fleet as walkers, the fleet ticks with the view
- * on him, then the trains, then the score's streak clock (on the game
- * frame only), then the crowd,
+ * on him, then the trains, then the score's streak clock, then the crowd,
  * then the weapons (gta_weapon.c: fires, explosions, write-offs in the
- * fleet burning and blowing up, and every shot in flight). The glue
+ * fleet burning and blowing up, and every shot in flight). The weapons and
+ * the score are AmiGTA1's own, unpatched, and are not compared: they are
+ * retired from the oracle (decision log, 2026-11-27), and run only so the
+ * street around him is AmiGTA1's whole street. The glue
  * AmiGTA1 keeps in gta_main.c (a walker held off a car, the lights as the
  * crowd asks about them, and the fleet as seen by the player's car) is
  * restated here.
@@ -23,9 +25,6 @@
  *       <damage> <wrecked>
  *     p <tick> <slot> <x> <y> <layer> <angle> <mode> <sub> <speed> <frame>
  *       <corpse> <down> <pull> <shot> <fall> <burn>
- *     w <tick> <slot> <x> <y> <layer> <heading> <kind> <speed> <frame>
- *     x <tick> <slot> <x> <y> <frame>          (explosions)
- *     h <tick> <slot> <x> <y> <ticks>          (fires on the ground)
  *
  * Grand Fair Use Auto, MIT.
  */
@@ -79,8 +78,6 @@ int gta_render_add_sprite_r(gta_view *v, long wx, long wy, int layer, int grid,
 int gta_pickups_open_at(gta_pickups *pk, long x, long y, int layer, int radius)
 { (void)pk; (void)x; (void)y; (void)layer; (void)radius; return 0; }
 
-void gfa_weapons_set_step(int s);
-
 static gta_traffic fleet;
 static gta_trains fleet_trains;
 static gta_peds crowd;
@@ -88,16 +85,6 @@ static const gta_map *fleet_map;
 static const gta_nav *fleet_nav;
 static gta_weapons weapons;
 static gta_score score;
-static int weapons_acc = 0;
-
-static int fleet_weapons_clock_step(void)
-{
-    weapons_acc += 7;
-    if (weapons_acc < 15)
-        return 0;
-    weapons_acc -= 15;
-    return 1;
-}
 
 /* The crowd asks the fleet about the lights (gta_main.c). */
 static int crowd_light_green(void *ctx, int bx, int by, int along_x)
@@ -108,7 +95,6 @@ static int crowd_light_green(void *ctx, int bx, int by, int along_x)
 static void fleet_start(const gta_map *m, const gta_nav *nav,
                         const gta_tiles *t, int bx, int by)
 {
-    weapons_acc = 0;
     fleet_map = m;
     fleet_nav = nav;
     gta_weapons_init(&weapons, t);
@@ -175,10 +161,9 @@ static void fleet_hold_walker(long *x, long *y, int layer, long ox, long oy)
 /* One tick of the street, with the player at (x, y): his speed, heading,
  * layer and half size as the fleet sees him, whether he is on foot (for
  * the trains and the crowd) and whether he is moving (for where the crowd
- * spawns), and `gun_step` (23.333 Hz weapon clock gate). Returns 1 if a
- * train ran him over. */
+ * spawns). Returns 1 if a train ran him over. */
 static int fleet_tick(long x, long y, long speed, int face, int layer,
-                      int hl, int hw, int on_foot, int moving, int gun_step)
+                      int hl, int hw, int on_foot, int moving)
 {
     int hit, i;
     gta_traffic_set_player(&fleet, 1, x, y, speed, face, layer, hl, hw);
@@ -200,12 +185,9 @@ static int fleet_tick(long x, long y, long speed, int face, int layer,
     gta_trains_tick(&fleet_trains, &fleet, &crowd, x, y, layer, on_foot, NULL, 0);
     hit = fleet_trains.pl_hit;
     fleet_trains.pl_hit = 0;
-    /* The streak window counts game frames (score_streak.pl). */
-    if (gun_step)
-        gta_score_tick(&score);
+    gta_score_tick(&score);
     gta_peds_set_view(&crowd, FLEET_VIEW, CROWD_VIEW_H, face, moving);
     gta_peds_tick(&crowd, fleet_map, x, y);
-    gfa_weapons_set_step(gun_step);
     gta_weapons_tick(&weapons, fleet_nav, &crowd, &fleet, fleet.tiles, &score);
     return hit;
 }
@@ -240,22 +222,6 @@ static void fleet_dump(long tick)
                i, p->x, p->y, p->layer, p->angle, p->mode, p->sub, p->speed,
                p->frame, p->corpse ? 1 : 0, p->down, p->pull, p->shot,
                p->fall, p->burn);
-    }
-    for (i = 0; i < GTA_MAX_BULLETS; i++) {
-        const gta_bullet *b = &weapons.b[i];
-        if (b->alive)
-            printf("w %ld %d %ld %ld %d %d %d %d %d\n", tick, i, b->x, b->y,
-                   b->layer, b->heading, b->kind, b->speed, b->frame);
-    }
-    for (i = 0; i < GTA_MAX_EXPLOSIONS; i++) {
-        const gta_explosion *e = &weapons.x[i];
-        if (e->frame)
-            printf("x %ld %d %ld %ld %d\n", tick, i, e->x, e->y, e->frame);
-    }
-    for (i = 0; i < GTA_MAX_FIRES; i++) {
-        const gta_fire *f = &weapons.f[i];
-        if (f->ticks)
-            printf("h %ld %d %ld %ld %d\n", tick, i, f->x, f->y, f->ticks);
     }
 }
 

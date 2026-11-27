@@ -35,6 +35,27 @@
 //!
 //! The police on foot, the script's own people and gunmen are AmiGTA1's
 //! too; their brain is here, and what sets them going comes with M6 and M7.
+//!
+//! The Hare Krishnas are `GTA8.EXE`'s (AmiGTA1 has none; read from the
+//! code and checked by the owner, `docs/M6B_PROBES.md`, M6b):
+//!
+//! - **The line.** The 100th passer-by made since the level began or the
+//!   last leader died becomes a leader in orange (remap 143), and six
+//!   followers are made on his spot, each following the one made before
+//!   him. There is only ever one line, and while its leader lives it is
+//!   never let go.
+//! - **Walking.** The leader walks as any passer-by. Each follower walks
+//!   the trail of the one in front, about a third of a block behind, so
+//!   the line takes its corners where the leader did and keeps its gaps
+//!   (the owner's K9).
+//! - **The player.** When the first person within half a block of the
+//!   leader is the player on foot, the leader follows him instead, and the
+//!   line with him (`0xbb2e6`). He lets go when the player gets into a car
+//!   (ours).
+//! - **Deaths.** A follower who dies leaves a gap the one behind closes.
+//!   When the leader dies the rest scatter, and the count starts again.
+//!   Every one of them, scattered or not, scores as a Krishna
+//!   ([`crate::score::kind::KRISHNA`]).
 
 use gfa_fixed::fx::{BLOCK_SHIFT, FP};
 use gfa_fixed::trig::{cos, dir16, sin};
@@ -44,6 +65,7 @@ use crate::cars;
 use crate::hash::{SimHash, StateHasher};
 use crate::map::{SimMap, ground};
 use crate::player::{RUN_SPEED, frames};
+use crate::score;
 use crate::view::SimView;
 
 /// AmiGTA1's pool, at its view ([`SimView::AMIGTA1`]).
@@ -78,7 +100,37 @@ pub mod mode {
     pub const HUNT: i32 = 6;
     /// The script's: walking to a point.
     pub const SENDTO: i32 = 7;
+    /// A Hare Krishna after the one in front, or the leader after the
+    /// player (the original's mode 4 with a target).
+    pub const FOLLOW: i32 = 8;
 }
+
+/// A ped's part in the Hare Krishna line (the original's AI types).
+pub mod line {
+    pub const NONE: u8 = 0;
+    /// Type 21.
+    pub const LEADER: u8 = 1;
+    /// Type 22.
+    pub const FOLLOWER: u8 = 2;
+    /// Type 42: left when the leader died.
+    pub const LEADERLESS: u8 = 3;
+}
+
+/// The passer-by made that starts a line (`GTA8.EXE` `0xb706d`).
+pub const KRISHNA_AT: u32 = 100;
+/// Followers made on the leader's spot (`0xb7240`).
+pub const KRISHNA_FOLLOWERS: usize = 6;
+/// The orange robes (`GTA8.EXE`; Carnage3D's list names it too).
+pub const KRISHNA_REMAP: i32 = 143;
+/// How far a follower keeps behind the one in front, px: about a third of
+/// a block (`krishna_walk.probe`, frames `f053`, `f060`).
+const FOLLOW_GAP_PX: i64 = 10;
+/// The box either side of the leader, px, in which the first person he
+/// finds may be the player: the original's 0x20 of its 64.
+const LEADER_SEES_PX: i64 = 16;
+/// A line member's trail: a point every few px he walks, the last few.
+const CRUMB_PX: i32 = 4;
+const CRUMBS: usize = 4;
 /// How he walks.
 pub mod sub {
     pub const WANDER: i32 = 2;
@@ -232,6 +284,8 @@ pub struct Ped {
     pub burn: i32,
     pub burn_frame: i32,
     burn_tick: i32,
+    /// Set alight by the player's blast: his death pays as burnt.
+    burn_owed: bool,
     pub cop: bool,
     /// The police uniform without the police brain.
     pub uniform: bool,
@@ -252,6 +306,16 @@ pub struct Ped {
     pub blood_steps: i32,
     pub blood_x: i64,
     pub blood_y: i64,
+    /// His part in the Hare Krishna line ([`line`]).
+    pub line: u8,
+    /// The slot of the one he follows in the line, -1 for none.
+    pub ahead: i32,
+    /// The line's leader, following the player.
+    pub on_player: bool,
+    /// His trail, px: a point every [`CRUMB_PX`] he walks, the oldest at
+    /// `crumb_at`.
+    crumbs: [(i32, i32); CRUMBS],
+    crumb_at: u8,
 }
 
 impl Ped {
@@ -306,6 +370,31 @@ impl Ped {
     pub fn shown(&self) -> bool {
         self.alive && self.drown == 0
     }
+
+    /// A living leader or follower of the Hare Krishna line.
+    pub fn in_line(&self) -> bool {
+        self.alive && !self.corpse && matches!(self.line, line::LEADER | line::FOLLOWER)
+    }
+
+    /// What killing him scores as: a Hare Krishna, scattered or not, or a
+    /// passer-by.
+    pub fn score_kind(&self) -> u8 {
+        if self.line == line::NONE {
+            score::kind::CIVILIAN
+        } else {
+            score::kind::KRISHNA
+        }
+    }
+
+    /// Lay a point of his trail once he is [`CRUMB_PX`] past the last.
+    fn drop_crumb(&mut self) {
+        let here = ((self.x >> FP) as i32, (self.y >> FP) as i32);
+        let last = self.crumbs[(usize::from(self.crumb_at) + CRUMBS - 1) % CRUMBS];
+        if (here.0 - last.0).abs().max((here.1 - last.1).abs()) >= CRUMB_PX {
+            self.crumbs[usize::from(self.crumb_at)] = here;
+            self.crumb_at = ((usize::from(self.crumb_at) + 1) % CRUMBS) as u8;
+        }
+    }
 }
 
 /// Counts for the log and the tests; nothing reads them back.
@@ -357,6 +446,21 @@ pub struct Peds {
     gang_aim: i32,
     gang_side: bool,
     pub stats: PedStats,
+    /// The crowd's size: the spawner fills the pool up to here. A line
+    /// may take a few slots more ([`Peds::spawn_line`]).
+    cap: usize,
+    /// Passers-by made since the level began or the last leader died
+    /// (`GTA8.EXE` `0x3ba424`).
+    pub made: u32,
+    /// The line's leader while he lives.
+    pub leader: Option<usize>,
+    /// Whether the 100th passer-by starts a line. The AmiGTA1 oracle has
+    /// no Krishnas, so its runs turn this off.
+    pub krishnas: bool,
+    /// What each death the player is owed for since the last
+    /// [`Peds::take_owed`] scores as: those his blast set alight, burnt
+    /// to death.
+    owed: Vec<u8>,
 }
 
 /// What a tick needs from the world.
@@ -365,8 +469,8 @@ pub struct TickCtx<'a> {
     pub cars: &'a [CarInfo],
     /// The view's centre: the player, or his car.
     pub cam: (i64, i64),
-    /// Is the light at `(bx, by)` green for traffic along x (or y)?
-    pub green: &'a dyn Fn(i32, i32, bool) -> bool,
+    /// Is the light green for traffic along x (or y)?
+    pub green: &'a dyn Fn(bool) -> bool,
 }
 
 fn ground_at(map: &SimMap, x: i64, y: i64, z: i32) -> u8 {
@@ -463,7 +567,19 @@ impl Peds {
             gang_aim: 0,
             gang_side: false,
             stats: PedStats::default(),
+            cap,
+            made: 0,
+            leader: None,
+            krishnas: true,
+            owed: Vec::new(),
         }
+    }
+
+    /// The deaths the player is owed for since the last call, as score
+    /// kinds, in turn: people his blast set alight who have burnt to death
+    /// (`GTA8.EXE` pays them as burnt then, the owner's play, M6b).
+    pub fn take_owed(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.owed)
     }
 
     /// The pool for a view: AmiGTA1's twelve at its view, and as many more
@@ -579,6 +695,7 @@ impl Peds {
         p.burn = 0;
         p.burn_frame = 0;
         p.burn_tick = 0;
+        p.burn_owed = false;
         p.cop = false;
         p.uniform = false;
         p.weapon = 0;
@@ -593,6 +710,11 @@ impl Peds {
         p.blood_steps = 0;
         p.blood_x = 0;
         p.blood_y = 0;
+        p.line = line::NONE;
+        p.ahead = -1;
+        p.on_player = false;
+        p.crumbs = [((x >> FP) as i32, (y >> FP) as i32); CRUMBS];
+        p.crumb_at = 0;
     }
 
     /// An empty slot, or failing that the body out of sight longest that
@@ -602,7 +724,7 @@ impl Peds {
             return Some(i);
         }
         let mut best = None;
-        let mut off = -1;
+        let mut off = 0;
         for (i, p) in self.p.iter().enumerate() {
             if p.corpse && !p.mission && p.svc_q != 2 && p.offscreen > off {
                 best = Some(i);
@@ -619,9 +741,9 @@ impl Peds {
             return Some(i);
         }
         let mut best = None;
-        let mut off = -1;
+        let mut off = 0;
         for (i, p) in self.p.iter().enumerate() {
-            if p.alive && !p.mission && p.offscreen > off {
+            if p.alive && !p.mission && !p.in_line() && p.offscreen > off {
                 best = Some(i);
                 off = p.offscreen;
             }
@@ -690,7 +812,56 @@ impl Peds {
         self.reset(i, x, y, 2, heading, -1);
         self.stats.spawned += 1;
         self.spawned_since_retire = true;
+        // Every passer-by made counts, line or no line; the 100th starts
+        // one. While a leader lives the count runs past 100.
+        self.made += 1;
+        if self.krishnas && self.made == KRISHNA_AT && self.leader.is_none() {
+            self.make_line(i);
+        }
         true
+    }
+
+    /// A Hare Krishna line at `(x, y)` (16.16) heading `angle`, as the
+    /// 100th passer-by makes one: the leader in slot `i`'s place, or
+    /// anywhere free. Returns the leader's slot, or `None` while a line
+    /// lives or when there is no slot for him.
+    pub fn spawn_line(&mut self, x: i64, y: i64, layer: i32, angle: i32) -> Option<usize> {
+        if self.leader.is_some() {
+            return None;
+        }
+        let i = self.free_slot_forced()?;
+        self.reset(i, x, y, layer, angle, -1);
+        Some(self.make_line(i))
+    }
+
+    /// Ped `i` becomes the leader, and six followers are made on his spot,
+    /// each after the one made before him. Each takes an empty slot or an
+    /// old body, or a new slot beyond the crowd's: nobody is let go for
+    /// them.
+    fn make_line(&mut self, i: usize) -> usize {
+        let lp = self.p[i];
+        let p = &mut self.p[i];
+        p.line = line::LEADER;
+        p.remap = KRISHNA_REMAP;
+        self.leader = Some(i);
+        let mut prev = i;
+        for _ in 0..KRISHNA_FOLLOWERS {
+            let j = match self.free_slot() {
+                Some(j) => j,
+                None => {
+                    self.p.push(Ped::default());
+                    self.p.len() - 1
+                }
+            };
+            self.reset(j, lp.x, lp.y, lp.layer, lp.angle, KRISHNA_REMAP);
+            let f = &mut self.p[j];
+            f.line = line::FOLLOWER;
+            f.ahead = prev as i32;
+            f.mode = mode::FOLLOW;
+            f.speed = 0;
+            prev = j;
+        }
+        i
     }
 
     /// The driver of the car at `(cx, cy)` is dragged out of its door: put
@@ -790,7 +961,9 @@ impl Peds {
         if p.cop {
             self.stats.cops_killed += 1;
         }
+        // Killed some other way first: that way pays.
         p.burn = 0;
+        p.burn_owed = false;
         p.speed = 0;
         p.down = 0;
         p.fall = 0;
@@ -869,6 +1042,8 @@ impl Peds {
         p.shot_dir = heading & 255;
         p.shot_step = 0;
         p.shot_tick = 0;
+        // The shot pays for him, burning or not.
+        p.burn_owed = false;
         p.speed = 0;
         p.down = 0;
         p.fall = 0;
@@ -963,14 +1138,16 @@ impl Peds {
     }
 
     /// Ped `i` is set alight by a fire at `(fx, fy)`: he runs from it and
-    /// burns to death in [`BURN_TICKS`].
-    pub fn burn(&mut self, i: usize, fx: i64, fy: i64) {
+    /// burns to death in [`BURN_TICKS`]. `owed`: the player's blast did
+    /// it, and his death is paid then, as burnt ([`Peds::take_owed`]).
+    pub fn burn(&mut self, i: usize, fx: i64, fy: i64, owed: bool) {
         let Some(p) = self.p.get_mut(i) else {
             return;
         };
         if !p.alive || p.corpse || p.shot != 0 || p.pull >= 0 || p.burn > 0 {
             return;
         }
+        p.burn_owed = owed;
         p.burn = BURN_TICKS;
         p.burn_frame = 0;
         p.burn_tick = 0;
@@ -992,8 +1169,8 @@ impl Peds {
     /// The player's car against the crowd, centred at `(px, py)` facing
     /// `pface` with half extents in px. At `speed` five units or more
     /// (16.16 px a physics step) a ped in the box is killed where he
-    /// stands; slower, he is shoved along his own heading. Returns how
-    /// many were killed standing.
+    /// stands; slower, he is shoved along his own heading. Returns what
+    /// each one killed standing scores as ([`Ped::score_kind`]), in turn.
     #[allow(clippy::too_many_arguments)]
     pub fn ram(
         &mut self,
@@ -1004,12 +1181,12 @@ impl Peds {
         phw: i32,
         layer: i32,
         speed: i64,
-    ) -> u32 {
+    ) -> Vec<u8> {
         let (fx, fy) = (i64::from(sin(pface)), -i64::from(cos(pface)));
         let (rx, ry) = (i64::from(cos(pface)), i64::from(sin(pface)));
         let (phl, phw) = (i64::from(phl), i64::from(phw));
         let fast = speed >= 5 * 32768 || speed <= -5 * 32768;
-        let mut hits = 0;
+        let mut hits = Vec::new();
         for p in &mut self.p {
             if !p.alive || p.corpse || p.pull >= 0 || p.layer != layer || p.drown > 0 {
                 continue;
@@ -1034,6 +1211,7 @@ impl Peds {
             }
             if fast {
                 p.corpse = true;
+                p.burn_owed = false;
                 if p.cop {
                     self.stats.cops_killed += 1;
                 }
@@ -1043,7 +1221,7 @@ impl Peds {
                     p.ty = 0;
                     self.stats.killed += 1;
                     self.stats.runover += 1;
-                    hits += 1;
+                    hits.push(p.score_kind());
                 }
             } else if p.down == 0 {
                 p.x += i64::from(sin(p.angle)) * 2;
@@ -1243,6 +1421,7 @@ impl Peds {
     /// spawner and the push apart.
     pub fn tick(&mut self, ctx: &TickCtx, say: &mut dyn FnMut(String)) {
         let (cbx, cby) = ((ctx.cam.0 >> 21) as i32, (ctx.cam.1 >> 21) as i32);
+        self.line_tick(say);
         let mut alive = 0;
         for i in 0..self.p.len() {
             if !self.p[i].alive {
@@ -1261,7 +1440,9 @@ impl Peds {
             } else {
                 p.offscreen += 1;
                 let far = bx < cbx - 24 || bx > cbx + 24 || by < cby - 24 || by > cby + 24;
+                // The line is never let go while its leader lives.
                 if !p.mission
+                    && !p.in_line()
                     && ((p.corpse && p.offscreen > CORPSE_TICKS)
                         || (!p.corpse && p.pull < 0 && p.offscreen > RETIRE_TICKS)
                         || far)
@@ -1276,11 +1457,154 @@ impl Peds {
             let p = self.think(i, p, ctx, say);
             self.p[i] = p;
         }
-        if alive < self.p.len() && !self.spawn_one(ctx.map, cbx, cby) && !self.spawned_since_retire
-        {
+        self.line_tick(say);
+        let had_line = self.leader.is_some();
+        if alive < self.cap && !self.spawn_one(ctx.map, cbx, cby) && !self.spawned_since_retire {
             self.spawn_one(ctx.map, cbx, cby);
         }
+        if let Some(l) = self.leader.filter(|_| !had_line) {
+            let p = &self.p[l];
+            say(format!(
+                "ped: a Hare Krishna line, leader {l} at ({},{}), passer-by {}",
+                p.x >> 21,
+                p.y >> 21,
+                self.made
+            ));
+        }
         self.relax(ctx.map);
+    }
+
+    /// The line after its deaths. With the leader dead, the rest scatter
+    /// from where he fell (the original's type 42, mode 1) and the count
+    /// starts again. Otherwise each follower whose man in front has died
+    /// follows the next one up.
+    fn line_tick(&mut self, say: &mut dyn FnMut(String)) {
+        let Some(l) = self.leader else {
+            return;
+        };
+        let lp = self.p[l];
+        if !lp.in_line() || lp.line != line::LEADER {
+            for p in &mut self.p {
+                if p.line != line::FOLLOWER {
+                    continue;
+                }
+                p.ahead = -1;
+                if !p.alive || p.corpse {
+                    p.line = line::NONE;
+                    continue;
+                }
+                p.line = line::LEADERLESS;
+                p.mode = mode::FLEE;
+                p.gx = lp.x;
+                p.gy = lp.y;
+                p.flee_aim = 0;
+                p.panic = PANIC_TICKS;
+                p.speed = 4;
+                p.tx = 0;
+                p.ty = 0;
+                if (p.x >> FP) != (lp.x >> FP) || (p.y >> FP) != (lp.y >> FP) {
+                    p.angle = angle_to(lp.x, lp.y, p.x, p.y);
+                }
+            }
+            if self.p[l].line == line::LEADER {
+                self.p[l].line = line::NONE;
+            }
+            self.leader = None;
+            self.made = 0;
+            say(format!(
+                "ped: Krishna leader {l} is dead - the line scatters"
+            ));
+            return;
+        }
+        for j in 0..self.p.len() {
+            if !self.p[j].in_line() || self.p[j].line != line::FOLLOWER {
+                continue;
+            }
+            let mut a = self.p[j].ahead;
+            for _ in 0..=KRISHNA_FOLLOWERS {
+                match usize::try_from(a).ok().and_then(|k| self.p.get(k)) {
+                    Some(q) if q.in_line() => break,
+                    Some(q) if q.line == line::FOLLOWER => a = q.ahead,
+                    _ => {
+                        a = l as i32;
+                        break;
+                    }
+                }
+            }
+            self.p[j].ahead = a;
+        }
+        for p in &mut self.p {
+            if p.line == line::FOLLOWER && !p.in_line() {
+                p.line = line::NONE;
+            }
+        }
+    }
+
+    /// The leader's look round (`0xbb2e6`): the first person within half
+    /// a block of him is the player, on foot. Ours: the first is the
+    /// nearest.
+    fn leader_sees_player(&self, i: usize, p: &Ped) -> bool {
+        if self.pl_in_car || self.pl_layer != p.layer {
+            return false;
+        }
+        let d = ((self.pl_x - p.x) >> FP)
+            .abs()
+            .max(((self.pl_y - p.y) >> FP).abs());
+        if d > LEADER_SEES_PX {
+            return false;
+        }
+        !self.p.iter().enumerate().any(|(k, o)| {
+            k != i
+                && o.alive
+                && !o.corpse
+                && o.layer == p.layer
+                && ((o.x - p.x) >> FP).abs().max(((o.y - p.y) >> FP).abs()) < d
+        })
+    }
+
+    /// A follower's aim and pace: along the trail of the one in front (or
+    /// at the player, for a leader after him), a gap behind, and faster
+    /// when he falls back.
+    fn follow(&self, p: &mut Ped) {
+        p.mode = mode::FOLLOW;
+        p.tx = 0;
+        p.ty = 0;
+        let (gx, gy, pace, trail) = if p.on_player {
+            (self.pl_x >> FP, self.pl_y >> FP, 1, None)
+        } else {
+            let Some(a) = usize::try_from(p.ahead).ok().and_then(|k| self.p.get(k)) else {
+                p.speed = 0;
+                return;
+            };
+            (a.x >> FP, a.y >> FP, a.speed, Some((a.crumbs, a.crumb_at)))
+        };
+        let (px, py) = (p.x >> FP, p.y >> FP);
+        let cheb = |x: i64, y: i64, tx: i64, ty: i64| (tx - x).abs().max((ty - y).abs());
+        let d = cheb(px, py, gx, gy);
+        if d <= FOLLOW_GAP_PX {
+            p.speed = 0;
+            return;
+        }
+        // The oldest point of his trail still nearer him than we are.
+        let mut aim = (gx, gy);
+        if let Some((crumbs, at)) = trail {
+            for k in 0..CRUMBS {
+                let (cx, cy) = crumbs[(usize::from(at) + k) % CRUMBS];
+                let (cx, cy) = (i64::from(cx), i64::from(cy));
+                if cheb(cx, cy, gx, gy) < d && cheb(px, py, cx, cy) >= 2 {
+                    aim = (cx, cy);
+                    break;
+                }
+            }
+        }
+        p.angle = angle_to(px << FP, py << FP, aim.0 << FP, aim.1 << FP);
+        p.speed = if d > 3 * FOLLOW_GAP_PX {
+            4
+        } else if d > FOLLOW_GAP_PX + 6 {
+            (pace + 1).clamp(2, 4)
+        } else {
+            pace.clamp(1, 4)
+        };
     }
 
     /// One ped's tick after the view check.
@@ -1335,6 +1659,9 @@ impl Peds {
             }
             p.burn -= 1;
             if p.burn == 0 {
+                if std::mem::take(&mut p.burn_owed) {
+                    self.owed.push(p.score_kind());
+                }
                 p.corpse = true;
                 p.bled = true;
                 if p.cop {
@@ -1428,6 +1755,31 @@ impl Peds {
         // heading from tick to tick sees his own and not the bent one.
         p.angle = (p.angle - bent) & 255;
         let here = ground_at(map, p.x, p.y, p.layer);
+        // The Hare Krishnas: the leader may take up after the player; a
+        // follower, or the leader after him, keeps to the one ahead.
+        if p.line == line::LEADER {
+            if p.on_player && self.pl_in_car {
+                p.on_player = false;
+                p.mode = mode::IDLE;
+                p.sub = sub::WANDER;
+                p.speed = 1;
+                p.timer = 0;
+                say(format!("ped: Krishna leader {i} lets the player go"));
+            } else if !p.on_player && p.burn <= 0 && self.leader_sees_player(i, &p) {
+                p.on_player = true;
+                say(format!("ped: Krishna leader {i} follows the player"));
+            }
+        }
+        if (p.line == line::FOLLOWER || p.on_player) && p.burn <= 0 {
+            self.follow(&mut p);
+            if p.speed > 0 {
+                self.step(&mut p, here, map, i, say);
+            }
+            p.drop_crumb();
+            Self::block_clock(&mut p);
+            Self::cadence(&mut p);
+            return p;
+        }
         if p.cop {
             if !self.cop_brain(&mut p, say) {
                 return p;
@@ -1438,8 +1790,7 @@ impl Peds {
             let (dx, dy) = ((p.tx - p.x) >> 16, (p.ty - p.y) >> 16);
             let d = dx.abs().max(dy.abs());
             if p.sub == sub::STAND {
-                let (bx, by) = ((p.x >> 21) as i32, (p.y >> 21) as i32);
-                if (ctx.green)(bx, by, p.cross_axis_x) {
+                if (ctx.green)(p.cross_axis_x) {
                     p.sub = sub::JOG;
                     p.speed = 4;
                     self.stats.crossings += 1;
@@ -1689,8 +2040,16 @@ impl Peds {
         if p.speed > 0 {
             self.step(&mut p, here, map, i, say);
         }
+        if p.line != line::NONE {
+            p.drop_crumb();
+        }
         Self::block_clock(&mut p);
-        // The cadence: the run cycle from speed 3.
+        Self::cadence(&mut p);
+        p
+    }
+
+    /// The cadence: the run cycle from speed 3.
+    fn cadence(p: &mut Ped) {
         if p.speed > 0 {
             p.frame_tick += 1;
             if p.frame_tick >= if p.speed >= 3 { RUN_TICKS } else { WALK_TICKS } {
@@ -1698,7 +2057,6 @@ impl Peds {
                 p.frame = (p.frame + 1) & 7;
             }
         }
-        p
     }
 
     /// The step along his heading, and what refuses it.
@@ -1728,7 +2086,9 @@ impl Peds {
         if map.wall_cross(p.layer, p.x as i32, p.y as i32, nx as i32, ny as i32) {
             there = ground::BUILDING;
         }
-        let steered = p.cop || p.mode == mode::HUNT || p.mode == mode::SENDTO;
+        // A follower goes where the one in front went, the road included.
+        let steered =
+            p.cop || p.mode == mode::HUNT || p.mode == mode::SENDTO || p.mode == mode::FOLLOW;
         let blocked = if matches!(there, ground::BUILDING | ground::AIR | ground::WATER)
             || (there == ground::FIELD && here != ground::FIELD && !steered)
         {
@@ -2361,13 +2721,26 @@ impl SimHash for Ped {
             self.exit_wait,
             self.pulling,
             self.drown,
+            self.ahead,
         ] {
             h.i32(v);
         }
+        for (cx, cy) in self.crumbs {
+            h.i32(cx);
+            h.i32(cy);
+        }
         h.bytes(&self.serial.to_le_bytes());
-        for v in [self.svc_q, self.gang, self.gang_miss, self.weapon] {
+        for v in [
+            self.svc_q,
+            self.gang,
+            self.gang_miss,
+            self.weapon,
+            self.line,
+            self.crumb_at,
+        ] {
             h.u8(v);
         }
+        h.bool(self.on_player);
         for v in [
             self.alive,
             self.mission,
@@ -2382,6 +2755,7 @@ impl SimHash for Ped {
             self.execute,
             self.post,
             self.cross_axis_x,
+            self.burn_owed,
         ] {
             h.bool(v);
         }
@@ -2430,10 +2804,18 @@ impl SimHash for Peds {
             self.pl_in_car,
             self.pl_slow,
             self.gang_side,
+            self.krishnas,
         ] {
             h.bool(v);
         }
         h.i32(self.last.map_or(-1, |i| i as i32));
+        h.u32(self.made);
+        h.u32(self.cap as u32);
+        h.i32(self.leader.map_or(-1, |i| i as i32));
+        h.u32(self.owed.len() as u32);
+        for &k in &self.owed {
+            h.u8(k);
+        }
     }
 }
 

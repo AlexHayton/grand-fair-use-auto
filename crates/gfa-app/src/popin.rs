@@ -45,8 +45,15 @@ struct Thing {
 /// Everybody and every car but the player's, by a key that stays the same
 /// while it is the same thing: a car's serial, or a person's slot and the
 /// tick he came on.
-fn things(game: &Game, born: &mut [u32], last: &mut [Option<Vec3>]) -> HashMap<(u8, u64), Thing> {
+fn things(
+    game: &Game,
+    born: &mut Vec<u32>,
+    last: &mut Vec<Option<Vec3>>,
+) -> HashMap<(u8, u64), Thing> {
     let w = &game.world;
+    // A Hare Krishna line may take slots beyond the crowd's.
+    born.resize(w.peds.p.len(), 0);
+    last.resize(w.peds.p.len(), None);
     let px = |x: i64, y: i64| Vec3::new(x as f32, y as f32, 0.0) / 65536.0 * 2.0;
     let mut out = HashMap::new();
     for c in w.traffic.live() {

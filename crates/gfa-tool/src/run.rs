@@ -180,11 +180,10 @@ pub fn world_sprites(
 ) -> Vec<gfa_render::sprites::SpriteInstance> {
     let mut out = Vec::new();
     // The lights first: on the pavement, under whoever passes.
-    let tick = world.traffic.light_tick();
     for l in world.traffic.lamps(&world.map) {
         let (x, y) = l.pos();
         let pos = [x, y, world.map.ground_z(x, y, l.z)];
-        out.extend(scene.lamp_sprite(l.light(tick).sprite(), pos, l.toward));
+        out.extend(scene.lamp_sprite(world.traffic.lamp_light(&l).sprite(), pos, l.toward));
     }
     let at = |x: i64, y: i64, layer: i32, lift: i32| {
         let (x, y) = (x as i32, y as i32);

@@ -120,6 +120,23 @@ lo --out "$out/tank_chain_view" --player 96,96,4 --decl "$(tank_at 97 96 4)" \
   "${LONG[@]}" "${CALM[@]}" "${row[@]}"
 python3 "$here/cmp_patch.py" --map MIAMI.CMP --field 96-99,26-98 --out "$out/tank_chain_view"
 
+# D7: how far a wreck's blast reaches another car, timed on screen. A7's road,
+# tank and row height, with three cars: the shell's target straight ahead
+# (x=97), a control 1 block west of it, which a 1-block reach writes off (as in
+# A7), and a lone car east of it with nothing in between, 2 blocks off in
+# tank_blast_reach and 1.5 in tank_blast_reach_15. gfa-sim's blast writes off
+# a car within 1 block (BLAST_CAR_PX); GTA8.EXE's code suggested 2.
+blast_reach() { # overlay lone_car_x_px
+  lo --out "$out/$1" --player 96,96,4 --decl "$(tank_at 97 96 4)" \
+    "${LONG[@]}" "${CALM[@]}" \
+    --add-decl "28200 1 (6176,6074,256) PARKED_PIXELS $CAR $NORTH" \
+    --add-decl "28201 1 (6240,6074,256) PARKED_PIXELS $CAR $NORTH" \
+    --add-decl "28202 1 ($2,6074,256) PARKED_PIXELS $CAR $NORTH"
+  python3 "$here/cmp_patch.py" --map MIAMI.CMP --field 96-99,26-98 --out "$out/$1"
+}
+blast_reach tank_blast_reach 6368
+blast_reach tank_blast_reach_15 6336
+
 # B: what makes it burst. Tank at (221,103) facing north. Ahead: a car at
 # (221,99). Behind: a ped held still at (221,106). East (Tab+Right): the solid
 # west wall of the five-storey block at x=224, 2.5 blocks away. A start
@@ -160,4 +177,4 @@ lo --out "$out/tank_damage" --player 218,107,4 --decl "$(tank_at 219 107 4)" \
 # so the tank lasts long enough to watch.
 lo --out "$out/tank_turret" --player 248,132,4 "${LONG[@]}" --donowt 604-610
 
-echo "tank_scenarios: built tank_range, tank_chain, tank_chain_view, tank_burst, tank_fence, tank_damage, tank_turret in $out"
+echo "tank_scenarios: built tank_range, tank_chain, tank_chain_view, tank_blast_reach, tank_blast_reach_15, tank_burst, tank_fence, tank_damage, tank_turret in $out"

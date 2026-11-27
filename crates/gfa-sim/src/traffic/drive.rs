@@ -254,13 +254,15 @@ impl Traffic {
     }
 
     /// The line car `c` steers along: its lane, or while it is pulled over,
-    /// the kerb on its right (right-hand traffic) in the same block.
+    /// the kerb in the same block, on its right (right-hand traffic) or,
+    /// where that is road, its left.
     fn lane_line(c: &Car) -> i64 {
         if c.pull == 0 {
             return c.lane_off;
         }
-        let right = c.lane_dir == 0 || c.lane_dir == 64;
-        let off = LANE_TARGET + if right { PULL_KERB } else { -PULL_KERB };
+        // Heading north or east, the right is the far side of the block.
+        let plus = (c.lane_dir == 0 || c.lane_dir == 64) != c.pull_left;
+        let off = LANE_TARGET + if plus { PULL_KERB } else { -PULL_KERB };
         ((c.lane_off >> BS) * 32 + i64::from(off)) << FP
     }
 
@@ -1054,8 +1056,8 @@ impl Traffic {
             return;
         }
         let (bx, by) = self.lane_block(map, idx);
-        // Pulled over: standing at the kerb is not a jam, so no waiting
-        // counts; a turn, a lane change or a booking ends it.
+        // Pulled over: held at its speed by the kerb, which is not a jam, so
+        // no waiting counts; a turn, a lane change or a booking ends it.
         if self.cars[idx].pull > 0 {
             let c = &mut self.cars[idx];
             c.pull = if c.turn != 0 || c.swap != 0 || c.crossing {
@@ -1759,15 +1761,11 @@ impl Traffic {
                 want = want.min(eased);
             }
         }
-        // Pulled over: slowly to the kerb line, then stop on it.
+        // Pulled over: on along the kerb line at the speed it had, its
+        // throttle cut (`GTA8.EXE` `0x1e3a5`): no faster, and no stop of its
+        // own; what is in its way still stops it.
         if c.pull > 0 {
-            let cross = if c.lane_axis != 0 { c.y } else { c.x };
-            if (cross - Self::lane_line(c)).abs() <= PULL_BAND << FP {
-                want = 0;
-                new_hold = Some(hold::PULL);
-            } else {
-                want = want.min(SPEED_PULL * SPEED_UNIT);
-            }
+            want = want.min(c.speed.max(0));
         }
         if let Some(h) = new_hold {
             self.cars[idx].hold = h;
@@ -1805,25 +1803,18 @@ impl Traffic {
             }
         };
         let (crossing, cop) = (self.cars[idx].crossing, self.cars[idx].cop);
-        // The light is the crossing's ahead (traffic_lights.pl).
-        let ahead = heading_step(self.cars[idx].angle);
         let ew = (self.cars[idx].angle & 127) == 64;
         // Ours: the light holds a car once its nose would reach the box, as
         // the box's own gate does, where the block before the box is a stop
         // line. AmiGTA1 asks only when its middle is on the stop line, and a
         // bus is then half a block into the crossing, where the traffic
         // across clips it (decision log, 2026-11-21; traffic_stopline.pl).
-        let light_ahead = !at_stop_line
-            && jbx >= 0
+        let light_ahead = jbx >= 0
             && ej < stopr
             && map
                 .block(jbx - dxs, jby - dys, layer)
                 .is_some_and(|b| b.type_map_ext & 0x07 == 1);
-        let red = if at_stop_line {
-            !self.light_green(bx + ahead.0, by + ahead.1, ew)
-        } else {
-            light_ahead && !self.light_green(jbx, jby, ew)
-        };
+        let red = (at_stop_line || light_ahead) && !self.light_green(ew);
         if cop != 2 && !crossing && red {
             want = 0;
             let c = &mut self.cars[idx];
