@@ -391,7 +391,7 @@ fn nothing_pops_in_or_out_in_sight() {
             }
             assert!(f.checked > 100, "too little came and went to say");
             if drive {
-                assert!(f.zoom > 1.4, "the drive never got up to speed");
+                assert!(f.zoom > 2.0, "the drive never reached the top zoom band");
             }
             all.extend(f.bad);
         }

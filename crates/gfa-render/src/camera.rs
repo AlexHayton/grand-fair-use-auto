@@ -162,9 +162,8 @@ pub fn max_depth(half_w: i32, half_h: i32, aspect: f32) -> f32 {
 /// zooms.
 ///
 /// The target already carries the simulation's lead, and the zoom passed
-/// in is the simulation's speed zoom, so the camera adds no smoothing of
-/// its own across the ground: whatever it lagged by would show ground the
-/// simulation does not count as on screen. Only the height eases.
+/// in is the simulation's eased speed zoom. The renderer eases scroll
+/// height and target elevation independently.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FollowCamera {
     /// Point followed, map pixels.
@@ -172,6 +171,8 @@ pub struct FollowCamera {
     /// The player's choice: the eye's height above the target at rest, map
     /// pixels.
     pub height: f32,
+    eased_height: f32,
+    eased_target_z: f32,
     /// The highest `height` the cap let through on the last update.
     room: f32,
     eye: Vec3,
@@ -189,6 +190,8 @@ impl FollowCamera {
         FollowCamera {
             target,
             height: Self::DEFAULT_HEIGHT,
+            eased_height: Self::DEFAULT_HEIGHT,
+            eased_target_z: target.z,
             room: Self::MAX_HEIGHT,
             eye: target + Vec3::Z * Self::DEFAULT_HEIGHT,
         }
@@ -205,8 +208,8 @@ impl FollowCamera {
         self.height = h.clamp(Self::MIN_HEIGHT, Self::MAX_HEIGHT);
     }
 
-    /// Over `target` (map pixels) at `zoom` times the player's height,
-    /// eased over `dt` seconds. The eye stays below `ceiling` when there is
+    /// Over `target` (map pixels) at `zoom` times the player's eased height.
+    /// The eye stays below `ceiling` when there is
     /// one (the zoom cap, in normal play) and above `min_eye_z` (the
     /// roofs).
     pub fn update(
@@ -220,8 +223,9 @@ impl FollowCamera {
         self.target = target;
         let zoom = zoom.max(1e-3);
         let k = 1.0 - (-Self::EASE * dt).exp();
-        let want = target.z + self.height * zoom;
-        let mut z = self.eye.z + (want - self.eye.z) * k;
+        self.eased_height += (self.height - self.eased_height) * k;
+        self.eased_target_z += (target.z - self.eased_target_z) * k;
+        let mut z = self.eased_target_z + self.eased_height * zoom;
         self.room = Self::MAX_HEIGHT;
         if let Some(c) = ceiling {
             z = z.min(c);
@@ -232,6 +236,8 @@ impl FollowCamera {
 
     /// Jump straight to the target, without easing.
     pub fn snap(&mut self, min_eye_z: f32) {
+        self.eased_height = self.height;
+        self.eased_target_z = self.target.z;
         self.eye = self.target + Vec3::Z * self.height;
         self.eye.z = self.eye.z.max(min_eye_z);
     }
@@ -334,7 +340,8 @@ mod tests {
         assert_eq!((eye.x, eye.y), (500.0, 0.0));
         assert!((eye.z - (128.0 + FollowCamera::DEFAULT_HEIGHT)).abs() < 1.0);
         // The speed zoom raises it; the cap stops it.
-        let eye = step(&mut fc, 500.0, 1.5, None);
+        fc.update(fc.target, 1.5, None, 1.0 / 60.0, 0.0);
+        let eye = fc.camera().eye;
         assert!((eye.z - (128.0 + 1.5 * FollowCamera::DEFAULT_HEIGHT)).abs() < 1.0);
         let eye = step(&mut fc, 500.0, 1.5, Some(700.0));
         assert_eq!(eye.z, 700.0);

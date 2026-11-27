@@ -50,9 +50,19 @@ pub const VAULT_HOLD_MAX: i32 = 30;
 pub const VAULT_MAX_VERT: i16 = 20;
 /// Maximum ticks spent sliding under a tall vehicle.
 pub const SLIDE_MAX_TICKS: i32 = 80;
-/// Damage at which a car is a write-off, and how long it then burns.
+/// Damage at which a car is a write-off.
 pub const WRECKED: i32 = 100;
+/// How long the player's own car burns once it is a write-off, in ticks:
+/// time to get out (AmiGTA1's; not measured in `GTA8.EXE`).
 pub const FUSE: i32 = 120;
+/// A car in the street that is written off blows up on the next game frame
+/// (23.333 Hz), unless a blast wrote it off: then [`BLAST_FUSE`] frames after
+/// that blast. Measured in M6b under DOSBox-X: a car the pistol or a tank
+/// shell writes off goes up one frame later, and each car the blasts catch
+/// along a chain ten frames after the one before (`tank_chain_view`,
+/// `docs/M6B_PROBES.md`). AmiGTA1 burns every one 120 ticks.
+pub const HIT_FUSE: i32 = 1;
+pub const BLAST_FUSE: i32 = 10;
 /// The style's damage deltas on a car sprite: front right, back left,
 /// middle left, front left, back right, middle right, and the windscreen.
 pub const DELTA_FR: u32 = 0;
@@ -425,7 +435,18 @@ pub struct Driven {
     /// The special key held down in a car without a siren: the horn (the
     /// original's `car+0x12d`).
     pub horn: bool,
+    /// A tank's turret, against its hull (0..256, 0 straight ahead), so it
+    /// turns with the hull as he steers (owner, under DOSBox-X). The special
+    /// key held with left or right turns it ([`TURRET_STEP`]).
+    pub turret: i32,
 }
+
+/// The tank's turret turns this much a game frame (23.333 Hz) while the
+/// special key and left or right are held: a turn in 32 frames, 1.37 s,
+/// either way, starting and reversing at once; the hull does not steer
+/// meanwhile. Measured in M6b under DOSBox-X (`tank_turret_rate.probe`:
+/// six turns in 8.26 s).
+pub const TURRET_STEP: i32 = 8;
 
 /// The player's siren (AmiGTA1 `special_key`, from the original's
 /// routine): the first press of the special key puts it on and it stays
@@ -464,6 +485,7 @@ impl SimHash for Driven {
         h.bool(self.mission);
         h.u8(self.siren as u8);
         h.bool(self.horn);
+        h.i32(self.turret);
         match self.air {
             Some(a) => {
                 h.bytes(&a.z.to_le_bytes());

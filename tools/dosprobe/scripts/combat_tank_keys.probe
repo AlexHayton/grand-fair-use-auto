@@ -1,0 +1,28 @@
+# combat_tank: boarded tank; try drive keys one by one and watch for motion / turret / shell.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+17000 shot start
++50 tap enter 70
++4500 shot boarded
++100 down up
++2500 shot up_2s
++100 up up
++100 down down
++2500 shot down_2s
++100 up down
++100 down left
++2000 shot left_2s
++100 up left
++100 down right
++2000 shot right_2s
++100 up right
++100 tap ctrl 200
++300 shot fire_a
++1500 shot fire_b
++100 down ctrl
++2000 shot fire_held
++100 up ctrl
++100 quit

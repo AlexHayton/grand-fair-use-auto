@@ -55,6 +55,12 @@ enum Command {
         /// Dump the column at block X,Y.
         #[arg(long, value_parser = parse_xy)]
         at: Option<(usize, usize)>,
+        /// Tally the startup objects by kind (with --kind, list that kind's).
+        #[arg(long)]
+        objects: bool,
+        /// With --objects: list the objects of this kind.
+        #[arg(long)]
+        kind: Option<u8>,
     },
     /// Summarise a .GRY or .G24 style file.
     Style {
@@ -221,7 +227,12 @@ fn main() -> Result<()> {
     match cli.command {
         Command::Archive { .. } | Command::ProbeOverlay { .. } => unreachable!("handled above"),
         Command::Info { files } => info(&data, src, files),
-        Command::Map { path, at } => map(src, &path, at),
+        Command::Map {
+            path,
+            at,
+            objects,
+            kind,
+        } => map(src, &path, at, objects.then_some(kind)),
         Command::Style { path, cars } => style(src, &path, cars),
         Command::Mission {
             path,
@@ -583,7 +594,12 @@ fn style(src: &dyn AssetSource, path: &str, cars: bool) -> Result<()> {
     Ok(())
 }
 
-fn map(src: &dyn AssetSource, path: &str, at: Option<(usize, usize)>) -> Result<()> {
+fn map(
+    src: &dyn AssetSource,
+    path: &str,
+    at: Option<(usize, usize)>,
+    objects: Option<Option<u8>>,
+) -> Result<()> {
     use gfa_formats::cmp::{Cmp, Face};
     let m = Cmp::parse(&src.read(path)?).with_context(|| format!("parsing {path}"))?;
     if let Some((x, y)) = at {
@@ -607,6 +623,23 @@ fn map(src: &dyn AssetSource, path: &str, at: Option<(usize, usize)>) -> Result<
                 if b.is_flat() { " flat" } else { "" },
                 if b.is_railway() { " rail" } else { "" },
             );
+        }
+        return Ok(());
+    }
+    if let Some(kind) = objects {
+        let mut tally = std::collections::BTreeMap::<u8, usize>::new();
+        for o in &m.objects {
+            match kind {
+                None => *tally.entry(o.kind).or_default() += 1,
+                Some(k) if o.kind == k => println!(
+                    "  kind {k} at ({},{},{}) rot {} remap {} pitch {} roll {}",
+                    o.x, o.y, o.z, o.rotation, o.remap, o.pitch, o.roll
+                ),
+                Some(_) => {}
+            }
+        }
+        for (k, n) in tally {
+            println!("  kind {k:3}: {n}");
         }
         return Ok(());
     }

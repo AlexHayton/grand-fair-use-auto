@@ -255,6 +255,9 @@ pub fn world_sprites(
                 c.face + 128,
                 c.dmg_bits | lights,
             );
+            if world.is_tank(c.model) {
+                push_turret(scene, &mut out, c.x, c.y, pos[2], c.face);
+            }
         }
         if c.cop == 4 {
             use gfa_sim::gfa_fixed::trig::{cos, sin};
@@ -285,6 +288,9 @@ pub fn world_sprites(
             v.angle() + 128,
             deltas,
         );
+        if world.is_tank(v.model) {
+            push_turret(scene, &mut out, v.ox, v.oy, z, v.angle() + d.turret);
+        }
     }
     for c in world.carriages() {
         let z = world
@@ -298,6 +304,35 @@ pub fn world_sprites(
     }
     push_weapons(scene, world, &mut out);
     out
+}
+
+/// A tank's turret on the hull centred at `(x, y)`, height `z`, its barrel
+/// pointing `heading` (as the app draws it): the barrel, its centre
+/// `BARREL_PX` ahead, then the dome over its base.
+fn push_turret(
+    scene: &render::Scene,
+    out: &mut Vec<gfa_render::sprites::SpriteInstance>,
+    x: i64,
+    y: i64,
+    z: i32,
+    heading: i32,
+) {
+    use gfa_sim::gfa_fixed::trig::{cos, sin};
+    use gfa_sim::weapons::{BARREL_PX, OBJ_BARREL, OBJ_TURRET};
+    let bx = x + i64::from(sin(heading)) * BARREL_PX * 4;
+    let by = y - i64::from(cos(heading)) * BARREL_PX * 4;
+    out.extend(scene.object_sprite(
+        OBJ_BARREL,
+        0,
+        [bx as i32, by as i32, z + (1 << 15)],
+        heading,
+    ));
+    out.extend(scene.object_sprite(
+        OBJ_TURRET,
+        0,
+        [x as i32, y as i32, z + (1 << 16)],
+        heading + 128,
+    ));
 }
 
 /// What the weapons leave in the picture: the splats on the ground, and in
@@ -319,7 +354,7 @@ fn push_weapons(
     for s in w.shots.iter().filter(|s| s.alive) {
         let (object, frame, angle) = match s.kind {
             Kind::Bullet => (0x4a, 0, s.heading + 128),
-            Kind::Rocket => (0x1f, s.frame - 1, s.heading),
+            Kind::Rocket | Kind::Shell => (0x1f, s.frame - 1, s.heading),
             Kind::Flame => (0x4b, s.frame - 1, s.heading),
         };
         let frame = usize::try_from(frame).unwrap_or(0);

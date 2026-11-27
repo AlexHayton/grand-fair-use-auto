@@ -1,0 +1,15 @@
+# Check tank_chain: get in, one shell at the nearest car, then watch the
+# chain's bangs go up the lane and the score.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+17000 shot start
++50 tap enter 70
++4000 shot frenzy
++4000 shot ready
++100 tap lctrl 120
++0 burst chain 60 500
++31000 shot after
++100 quit

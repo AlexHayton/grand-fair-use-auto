@@ -18,7 +18,7 @@ use crate::traffic::{self, Traffic};
 use crate::trains::{Carriage, TrainEvent, Trains};
 use crate::vehicle::{CLASS_BIKE, Pedals, Veh};
 use crate::view::{SimCamera, SimView};
-use crate::weapons::{self, Arms, Street, Target, Trigger, Weapons};
+use crate::weapons::{self, Arms, Cannon, Street, Target, Trigger, Weapons};
 use gfa_fixed::fx::{BLOCK_SHIFT, FP, block_centre};
 use gfa_fixed::trig::{cos, sin, step_dir};
 use gfa_formats::mission::Section;
@@ -62,6 +62,22 @@ pub struct BombShop {
     pub bx: i32,
     pub by: i32,
     pub used: bool,
+}
+
+fn emergency_vehicle(model: u8) -> bool {
+    matches!(model, 4 | 5 | 15 | 16 | 32 | 42)
+}
+
+/// GTA8.EXE 0xe5f30. A plate change or paint job pays for repairs and
+/// doubles the police fee at each wanted level. The multiplier adds a
+/// percentage surcharge. Paint alone has a flat minimum service price.
+fn spray_cost(car: &CarInfo, damage: i32, level: i32, multiplier: i32) -> i64 {
+    let repairs = i64::from(damage.max(0)) * i64::from(car.value[0] as u16) * 10;
+    if repairs == 0 && level == 0 {
+        return 500;
+    }
+    let police = if level > 0 { 1000 << (level - 1) } else { 0 };
+    (repairs + police) * (100 + i64::from(multiplier)) / 100
 }
 
 /// About two seconds at `50 Hz` (the counter-punch knockdown, `GTA8.EXE`).
@@ -277,6 +293,11 @@ pub struct World {
     pub arms: Arms,
     /// Everything in flight, every explosion and fire.
     pub weapons: Weapons,
+    /// The tank's cannon, loaded by a kill frenzy.
+    pub cannon: Cannon,
+    /// A kill frenzy the script started (M7's `KF_PROCESS` to `RESET_KF`);
+    /// the pickup's runs on its endless weapon ([`World::in_frenzy`]).
+    pub frenzy: bool,
     /// Weapon cooldown, projectile flight, and splat clock: 23.333 Hz against 50.
     weapons_clock: crate::clock::Ratio,
     pub pickups: Pickups,
@@ -363,6 +384,8 @@ impl World {
             burning: 0,
             arms: Arms::default(),
             weapons: Weapons::default(),
+            cannon: Cannon::default(),
+            frenzy: false,
             weapons_clock: crate::clock::weapons(),
             pickups: Pickups::new(),
             marks: Marks::new(),
@@ -463,7 +486,17 @@ impl World {
             input.buttons
         };
         let pressed = b.pressed_since(self.prev);
-        let was = (self.player.x, self.player.y);
+        let gun_step = self.weapons_clock.step();
+        // In a tank the special key held turns the turret with left and
+        // right, on the game frames, and the hull does not steer.
+        let aiming = self.aiming(b);
+        if aiming
+            && gun_step
+            && let Some(d) = self.driven.as_mut()
+        {
+            let turn = i32::from(b.contains(Buttons::RIGHT)) - i32::from(b.contains(Buttons::LEFT));
+            d.turret = (d.turret + turn * cars::TURRET_STEP) & 255;
+        }
         if self.foot_arrest > 0 {
             self.player.anim = Anim::SlideUnder;
             self.player.frame = 0;
@@ -531,7 +564,7 @@ impl World {
             pressed.contains(Buttons::SPECIAL),
             released.contains(Buttons::SPECIAL),
         );
-        if b.contains(Buttons::SPECIAL) {
+        if b.contains(Buttons::SPECIAL) && !aiming {
             self.pull_over();
         }
         match self.doing {
@@ -563,16 +596,23 @@ impl World {
                 Pedals {
                     throttle: b.contains(Buttons::UP),
                     brake: b.contains(Buttons::DOWN),
-                    steer: i32::from(b.contains(Buttons::RIGHT))
-                        - i32::from(b.contains(Buttons::LEFT)),
+                    steer: if aiming {
+                        0
+                    } else {
+                        i32::from(b.contains(Buttons::RIGHT)) - i32::from(b.contains(Buttons::LEFT))
+                    },
                     handbrake: b.contains(Buttons::HANDBRAKE),
                 }
             };
             self.drive(pedals);
         }
-        let gun_step = self.weapons_clock.step();
         self.trigger(gun_step);
-        self.follow(was);
+        self.cannon_tick(gun_step);
+        // The DOS camera and weapons share the 23.333 Hz game-frame cadence.
+        if gun_step {
+            let car = self.in_car().map(|d| (d.veh.speed(), d.veh.ang16 as i32));
+            self.camera.follow(self.view, car);
+        }
         let centre = self.run_traffic();
         self.run_trains();
         if self.live_city {
@@ -594,7 +634,7 @@ impl World {
         self.explode_proc_tick();
         self.peds_view();
         self.burn();
-        self.score.tick();
+        self.score.tick(gun_step);
         self.run_peds(centre);
         // The shots fly after the people have moved.
         self.street(|w, st| w.tick(st, gun_step));
@@ -622,7 +662,10 @@ impl World {
                     return;
                 };
                 let id = d.veh.model_id;
-                if cars::has_siren(id) {
+                if id == crate::vehicle::TANK_MODEL {
+                    // The turret's key in a tank (see `aiming`): no horn
+                    // (owner, under DOSBox-X).
+                } else if cars::has_siren(id) {
                     let was = d.siren;
                     d.siren = match d.siren {
                         cars::Siren::Off if down => cars::Siren::On,
@@ -765,6 +808,61 @@ impl World {
         }
     }
 
+    /// Is he in a tank with the special key held: aiming its turret?
+    fn aiming(&self, b: Buttons) -> bool {
+        b.contains(Buttons::SPECIAL)
+            && self.doing == Doing::Driving
+            && self
+                .driven
+                .as_ref()
+                .is_some_and(|d| d.veh.model_id == crate::vehicle::TANK_MODEL)
+    }
+
+    /// Is a kill frenzy on: the script's, or the pickup's endless weapon?
+    pub fn in_frenzy(&self) -> bool {
+        self.frenzy || self.arms.inf_ticks > 0
+    }
+
+    /// A kill frenzy starts (the script's; a test's): the cannon is loaded.
+    pub fn start_frenzy(&mut self) {
+        self.frenzy = true;
+        self.cannon.load();
+        self.say("frenzy: started".into());
+    }
+
+    /// The cannon's tick: in a tank during a frenzy, fire sends a shell
+    /// along the turret.
+    fn cannon_tick(&mut self, gun_step: bool) {
+        let tank = self.doing == Doing::Driving
+            && self
+                .driven
+                .as_ref()
+                .is_some_and(|d| d.veh.model_id == crate::vehicle::TANK_MODEL);
+        let can = tank && self.in_frenzy();
+        if !self.cannon.tick(can, self.arms.fire_held, gun_step) {
+            return;
+        }
+        let Some(d) = self.driven.as_ref() else {
+            return;
+        };
+        let angle = (d.veh.angle() + d.turret) & 255;
+        let (x, y, layer) = (d.veh.ox, d.veh.oy, d.layer);
+        if self.weapons.fire_shell(x, y, layer, angle) {
+            self.peds.panic(x, y, layer);
+            let left = self.cannon.shells;
+            self.say(format!("tank: shell fired at angle {angle} ({left} left)"));
+        }
+    }
+
+    /// Is car model `m` (an index into the style's cars) the tank, which
+    /// carries a turret? The player's points where he aimed it
+    /// ([`Driven::turret`], from the hull); any other along its hull.
+    pub fn is_tank(&self, m: usize) -> bool {
+        self.cars
+            .get(m)
+            .is_some_and(|c| c.model == crate::vehicle::TANK_MODEL)
+    }
+
     /// The weapons' call, with the street they act on.
     fn street<R>(&mut self, f: impl FnOnce(&mut Weapons, &mut Street) -> R) -> R {
         let mut lines = Vec::new();
@@ -838,25 +936,6 @@ impl World {
         self.driven
             .as_ref()
             .filter(|_| self.doing == Doing::Driving || matches!(self.doing, Doing::Exiting(_)))
-    }
-
-    /// The view after this tick's move: it leads him by his velocity and
-    /// widens with his speed. In a car the velocity is the car's (it moves
-    /// on 7 ticks in 15); on foot, how far he went since `was`, unless that
-    /// was a jump no walk makes.
-    fn follow(&mut self, was: (i32, i32)) {
-        let (vx, vy) = match self.in_car() {
-            Some(d) => (d.veh.vx * 7 / 15, d.veh.vy * 7 / 15),
-            None => {
-                let (dx, dy) = (self.player.x - was.0, self.player.y - was.1);
-                if dx.abs().max(dy.abs()) > 4 << FP {
-                    (0, 0)
-                } else {
-                    (i64::from(dx), i64::from(dy))
-                }
-            }
-        };
-        self.camera.follow(self.view, vx, vy);
     }
 
     /// The view now: the view at rest at the camera's zoom.
@@ -2013,6 +2092,7 @@ impl World {
             mission: e.mission,
             siren: cars::Siren::Off,
             horn: false,
+            turret: 0,
         });
         self.player.anim = Anim::Stand;
         self.player.frame = 0;
@@ -2540,6 +2620,7 @@ impl World {
             mission: false,
             siren: cars::Siren::Off,
             horn: false,
+            turret: 0,
         });
         self.player.x = x;
         self.player.y = y;
@@ -2762,6 +2843,7 @@ impl World {
                 }
                 pickups::kind::FRENZY => {
                     self.arms.give_endless(weapons::weapon::MACHINE_GUN, 1500);
+                    self.cannon.load();
                     self.say("pickups: took kill frenzy".into());
                 }
                 _ => {}
@@ -2789,8 +2871,9 @@ impl World {
         let cbx = (d.veh.ox >> 21) as i32;
         let cby = (d.veh.oy >> 21) as i32;
         let mut sprayed = None;
+        let mut spray_refusal = None;
         for sp in &mut self.sprays {
-            let inside = (sp.bx - cbx).abs() <= 1 && (sp.by - cby).abs() <= 1;
+            let inside = sp.bx == cbx && sp.by == cby;
             if !inside {
                 sp.used = false;
                 continue;
@@ -2799,30 +2882,63 @@ impl World {
                 continue;
             }
             sp.used = true;
+            let ci = &self.cars[d.veh.model];
+            if emergency_vehicle(ci.model) {
+                continue;
+            }
+            // The colour branch requires a mission-linked car (car+0x12b).
+            // The plate-only path still works on unlinked vehicles.
+            if d.mission && ci.model == 47 {
+                spray_refusal = Some("no_modelcar_respray");
+                break;
+            }
+            let paint = match u8::try_from(sp.color) {
+                Ok(0) => Some(None),
+                Ok(color)
+                    if ci
+                        .remap8
+                        .get(usize::from(color - 1))
+                        .is_some_and(|&r| r != 0) =>
+                {
+                    Some(Some(color))
+                }
+                _ => None,
+            };
+            let repaint = paint.filter(|&remap| d.mission && remap != d.veh.remap);
+            if repaint.is_none() && self.score.level == 0 {
+                continue;
+            }
+            let cost = spray_cost(ci, d.veh.damage, self.score.level, self.score.multiplier);
+            if self.score.score < cost {
+                spray_refusal = Some("no_respray");
+                break;
+            }
+            self.score.score -= cost;
             d.veh.damage = 0;
             d.veh.dmg_bits = 0;
             d.veh.fuse = 0;
-            let ci = &self.cars[d.veh.model];
-            let ok: Vec<u8> = (0..ci.remap8.len() as u8)
-                .filter(|&r| ci.remap8[r as usize] != 0)
-                .collect();
-            if sp.color > 0 {
-                d.veh.remap = Some(sp.color as u8);
-            } else if !ok.is_empty() {
-                let idx = ((self.tick as usize) + (cbx as usize)) % ok.len();
-                d.veh.remap = Some(ok[idx] + 1);
+            if let Some(remap) = repaint {
+                d.veh.remap = remap;
             }
-            sprayed = Some((sp.bx, sp.by, d.veh.remap));
+            let key = if repaint.is_some() {
+                "respray_done"
+            } else {
+                "clean_done"
+            };
+            sprayed = Some((sp.bx, sp.by, d.veh.remap, key, cost));
             break;
         }
-        if let Some((bx, by, remap)) = sprayed {
+        if let Some(key) = spray_refusal {
+            self.say(format!("shop: {key}"));
+        }
+        if let Some((bx, by, remap, key, cost)) = sprayed {
             if let Some(l) = self.score.clear_heat() {
                 self.say(l);
             }
             self.traffic.police_reset();
             self.peds.clear_cops();
             self.say(format!(
-                "shop: resprayed car at ({bx},{by}) remap {remap:?} - damage & wanted cleared"
+                "shop: {key} at ({bx},{by}) remap {remap:?} for {cost} points"
             ));
         }
 
@@ -2830,8 +2946,9 @@ impl World {
             return;
         };
         let mut rigged = None;
+        let mut refused = None;
         for bs in &mut self.bombshops {
-            let inside = (bs.bx - cbx).abs() <= 1 && (bs.by - cby).abs() <= 1;
+            let inside = bs.bx == cbx && bs.by == cby;
             if !inside {
                 bs.used = false;
                 continue;
@@ -2840,15 +2957,40 @@ impl World {
                 continue;
             }
             bs.used = true;
+            refused = match self.cars[d.veh.model].model {
+                37 => Some("no_tank_respray"),
+                47 => Some("no_modelcar_respray"),
+                model if emergency_vehicle(model) && !matches!(model, 4 | 32) => {
+                    Some("no_emerg_respray")
+                }
+                _ => None,
+            };
+            if refused.is_some() {
+                break;
+            }
+            if d.serial != 0
+                && self
+                    .bombs
+                    .iter()
+                    .any(|bomb| bomb.serial == d.serial && bomb.kind != 0)
+            {
+                break;
+            }
+            let cost = i64::from(self.bomb_cost.max(0));
+            if self.score.score < cost {
+                refused = Some("no_respray");
+                break;
+            }
             if d.serial == 0 {
                 d.serial = 0x7000_0000 + u64::from(self.tick) + 1;
             }
-            let cost = i64::from(self.bomb_cost);
-            if cost > 0 && self.score.score >= cost {
-                self.score.score -= cost;
-            }
+            self.score.score -= cost;
+            d.veh.damage = 0;
             rigged = Some((bs.bx, bs.by, d.serial, cost));
             break;
+        }
+        if let Some(key) = refused {
+            self.say(format!("shop: {key}"));
         }
         if let Some((bx, by, ser, cost)) = rigged {
             let mut slot = 0;
@@ -3217,6 +3359,8 @@ impl World {
         h.i32(self.armour);
         h.i32(self.burning);
         self.arms.sim_hash(&mut h);
+        self.cannon.sim_hash(&mut h);
+        h.bool(self.frenzy);
         h.u32(self.weapons_clock.phase());
         self.weapons.sim_hash(&mut h);
         self.pickups.sim_hash(&mut h);
@@ -3230,9 +3374,7 @@ impl World {
         h.u8(self.card as u8);
         h.i32(self.foot_arrest);
         h.bool(self.game_over);
-        h.bytes(&self.camera.lead.0.to_le_bytes());
-        h.bytes(&self.camera.lead.1.to_le_bytes());
-        h.i32(self.camera.zoom);
+        self.camera.sim_hash(&mut h);
         h.finish()
     }
 

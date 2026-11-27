@@ -5,9 +5,9 @@
 //! width and camera zoom, so a wider window or a zoomed-out camera changes
 //! what spawns where, and replays stop matching. Here the simulation keeps
 //! its own view (Principle 4): a rectangle of blocks round a centre, which
-//! leads a moving player and widens as he speeds up ([`SimCamera`]), from
-//! his position and speed only. Gameplay never reads the window, the zoom
-//! or the HD setting.
+//! leads and widens with the driven car's heading and speed
+//! ([`SimCamera`]). Gameplay never reads the window, the player's manual
+//! zoom or the HD setting.
 //!
 //! It works the other way round too: in normal play the renderer never
 //! shows ground outside this view (it caps its zoom-out and pillarboxes
@@ -15,7 +15,9 @@
 //! The spawn rings sit outside the view: peds a block out, the fleet two to
 //! six blocks out, and both are kept until well past it.
 
+use crate::hash::{SimHash, StateHasher};
 use gfa_fixed::fx::{BLOCK_SHIFT, FP};
+use gfa_fixed::trig::{ONE_Q14, cos16, sin16};
 
 /// Half-extents of the view, in blocks, around its centre.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -72,31 +74,61 @@ impl SimView {
 
 /// 1.0 in 16.16: the zoom at rest.
 pub const ZOOM_ONE: i32 = 1 << FP;
-/// The zoom at full speed: half as much again of the city each way.
-pub const ZOOM_MAX: i32 = ZOOM_ONE * 3 / 2;
-/// The speed at which the zoom is all the way out (16.16 px a tick): a
-/// fast car's top speed (the sports cars make about 10).
-const ZOOM_FULL_SPEED: i64 = 10 << FP;
-/// Ticks of travel the view leads by: Carnage3D's 0.35 seconds.
-const LEAD_TICKS: i64 = 17;
-/// The lead is at most this fraction of the view's half-extent, so a fast
-/// car still has two thirds of the screen ahead of it and a third behind.
-const LEAD_SHARE: i64 = 3;
-/// Each tick the lead closes an eighth of the way to what it wants, and the
-/// zoom a thirty-second: about a sixth and two thirds of a second.
-const LEAD_EASE: i64 = 8;
-const ZOOM_EASE: i64 = 32;
+/// The ground footprint multiplier at the DOS camera's maximum zoom-out.
+pub const ZOOM_MAX: i32 = ground_zoom(240, 204);
+const LENS_REST: i32 = 80;
+const PLANE_REST: i32 = 284;
+const HALF_PX: i64 = 1 << (FP - 1);
+const LEAD_MAX: i64 = 257 * HALF_PX;
 
-/// Where the simulation's view is: ahead of a moving player, and wider the
-/// faster he goes. Ours (decision log, 2026-11-21): AmiGTA1 centres on the
-/// player at a fixed size; the lead is Carnage3D's, and the zoom-out with
-/// speed the original's, with a curve still to measure against it.
+/// Convert the two DOS zoom settings to relative ground coverage. The
+/// renderer uses one height multiplier at a fixed field of view.
+const fn ground_zoom(lens: i32, plane: i32) -> i32 {
+    ((256 + lens) as i64 * PLANE_REST as i64 * ZOOM_ONE as i64 / ((256 + LENS_REST) * plane) as i64)
+        as i32
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct ZoomSetting {
+    value: i32,
+    speed: i32,
+}
+
+impl ZoomSetting {
+    const fn rest(value: i32) -> Self {
+        Self { value, speed: 0 }
+    }
+
+    /// Use the prior frame's speed, then accelerate toward the setting.
+    /// Both DOS settings move faster when decreasing than increasing.
+    fn step(&mut self, target: i32) {
+        let delta = target - self.value;
+        let direction = delta.signum();
+        if self.speed.signum() != direction {
+            self.speed = 0;
+        }
+        let speed = self.speed.abs();
+        let distance = if delta < 0 { speed } else { (speed + 1) / 2 };
+        self.value += direction * distance.min(8).min(delta.abs());
+        if self.value == target {
+            *self = Self::rest(target);
+        } else {
+            self.speed = (self.speed + direction).clamp(-16, 16);
+        }
+    }
+}
+
+/// The view widens with the car's speed and leads toward its bonnet.
+/// AmiGTA1's oracle view stays centred at a fixed scale.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SimCamera {
     /// Offset of the view's centre from the player, 16.16 px.
     pub lead: (i64, i64),
     /// Size against the view at rest, 16.16: [`ZOOM_ONE`] to [`ZOOM_MAX`].
     pub zoom: i32,
+    lens: ZoomSetting,
+    plane: ZoomSetting,
+    lead_rate: (i64, i64),
 }
 
 impl Default for SimCamera {
@@ -109,33 +141,74 @@ impl SimCamera {
     pub const REST: SimCamera = SimCamera {
         lead: (0, 0),
         zoom: ZOOM_ONE,
+        lens: ZoomSetting::rest(LENS_REST),
+        plane: ZoomSetting::rest(PLANE_REST),
+        lead_rate: (0, 0),
     };
 
-    /// One tick, the player moving at `(vx, vy)` (16.16 px a tick). A view
-    /// that does not follow stays at rest.
-    pub fn follow(&mut self, view: SimView, vx: i64, vy: i64) {
+    /// One DOS frame (7/15 of the 50 Hz ticks). The car supplies its speed
+    /// in 16.16 px per physics step and heading in 16.16 of 256 steps.
+    pub fn follow(&mut self, view: SimView, car: Option<(i64, i32)>) {
         if !view.follows {
             *self = SimCamera::REST;
             return;
         }
-        let speed = vx.abs().max(vy.abs()).min(ZOOM_FULL_SPEED);
-        let want = i64::from(ZOOM_ONE) + i64::from(ZOOM_MAX - ZOOM_ONE) * speed / ZOOM_FULL_SPEED;
-        self.zoom += ((want - i64::from(self.zoom)) / ZOOM_EASE) as i32;
-        let now = view.at(self.zoom);
-        let cap = |half: i32| (i64::from(half) << (FP + BLOCK_SHIFT)) / LEAD_SHARE;
-        let ease = |lead: i64, v: i64, half: i32| {
-            let want = (v * LEAD_TICKS).clamp(-cap(half), cap(half));
-            lead + (want - lead) / LEAD_EASE
-        };
-        self.lead = (
-            ease(self.lead.0, vx, now.half_w),
-            ease(self.lead.1, vy, now.half_h),
+        let (speed, heading) = car.unwrap_or_default();
+        let speed_half_px = (speed / HALF_PX).min(16) as i32;
+        let lens = (48 + 12 * speed_half_px).max(LENS_REST);
+        self.lens.step(lens);
+        self.plane.step(324 - lens / 2);
+        self.zoom = ground_zoom(self.lens.value, self.plane.value);
+
+        // Fit the horizontal lead to the DOS straight-run samples. Its
+        // direction comes from the hull, so it still points forward in reverse.
+        let ahead = speed * 16;
+        let project =
+            |axis: i32| (ahead * i64::from(axis) / i64::from(ONE_Q14)).clamp(-LEAD_MAX, LEAD_MAX);
+        step_lead(
+            &mut self.lead.0,
+            &mut self.lead_rate.0,
+            project(sin16(heading)),
+        );
+        step_lead(
+            &mut self.lead.1,
+            &mut self.lead_rate.1,
+            project(-cos16(heading)),
         );
     }
 
     /// The view's centre for a player at `(x, y)` (16.16).
     pub fn centre(&self, x: i64, y: i64) -> (i64, i64) {
         (x + self.lead.0, y + self.lead.1)
+    }
+}
+
+fn step_lead(lead: &mut i64, rate: &mut i64, target: i64) {
+    let delta = target - *lead;
+    let step = if delta.signum() == rate.signum() {
+        rate.abs().min(delta.abs()) * delta.signum()
+    } else {
+        0
+    };
+    *lead += step;
+    *rate = if *lead == target {
+        0
+    } else {
+        (*rate + delta.signum() * 2 * HALF_PX).clamp(-8 * HALF_PX, 8 * HALF_PX)
+    };
+}
+
+impl SimHash for SimCamera {
+    fn sim_hash(&self, h: &mut StateHasher) {
+        h.bytes(&self.lead.0.to_le_bytes());
+        h.bytes(&self.lead.1.to_le_bytes());
+        h.i32(self.zoom);
+        h.i32(self.lens.value);
+        h.i32(self.lens.speed);
+        h.i32(self.plane.value);
+        h.i32(self.plane.speed);
+        h.bytes(&self.lead_rate.0.to_le_bytes());
+        h.bytes(&self.lead_rate.1.to_le_bytes());
     }
 }
 
@@ -157,7 +230,7 @@ mod tests {
     fn zoom_scales_and_rounds_up() {
         assert_eq!(SimView::GAME.at(ZOOM_ONE), SimView::GAME);
         let wide = SimView::GAME.at(ZOOM_MAX);
-        assert_eq!((wide.half_w, wide.half_h), (18, 11));
+        assert_eq!((wide.half_w, wide.half_h), (25, 15));
         assert_eq!(SimView::GAME.at(ZOOM_ONE + 1).half_w, 13);
     }
 
@@ -165,34 +238,53 @@ mod tests {
     fn amigta1s_view_stays_on_him() {
         let mut c = SimCamera::REST;
         for _ in 0..100 {
-            c.follow(SimView::AMIGTA1, 10 << FP, 0);
+            c.follow(SimView::AMIGTA1, Some((10 << FP, 0)));
         }
         assert_eq!(c, SimCamera::REST);
     }
 
     #[test]
-    fn the_view_leads_and_widens_at_speed_then_settles() {
+    fn the_zoom_matches_the_dos_runway_frames() {
         let mut c = SimCamera::REST;
         let v = SimView::GAME;
-        // Flat out south for five seconds.
-        for _ in 0..250 {
-            c.follow(v, 0, 10 << FP);
+        // Whole half-pixels per DOS frame, truncated from the measured
+        // police car's positions. The first sample is the first moving frame.
+        let acceleration = [
+            1, 2, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 21, 22, 23, 23,
+            24, 25, 25, 26, 27, 27, 28,
+        ];
+        for (frame, speed) in acceleration.into_iter().enumerate() {
+            c.follow(v, Some((speed * HALF_PX, 64 << FP)));
+            match frame {
+                3 => assert_eq!((c.lens.value, c.plane.value), (81, 283)),
+                13 => assert_eq!((c.lens.value, c.plane.value), (116, 224)),
+                16 => assert_eq!((c.lens.value, c.plane.value), (136, 204)),
+                29 => assert_eq!(c.zoom, ZOOM_MAX),
+                _ => {}
+            }
         }
-        assert!(c.zoom > ZOOM_MAX - ZOOM_ONE / 64, "zoom {}", c.zoom);
-        let half_h = i64::from(v.at(c.zoom).half_h) << (FP + BLOCK_SHIFT);
-        assert_eq!(c.lead.0, 0);
-        // Capped at a third of the half-height: the car stays on screen.
-        assert!(
-            c.lead.1 > 0 && c.lead.1 <= half_h / 3,
-            "lead {}",
-            c.lead.1 >> FP
-        );
-        assert!(c.lead.1 > half_h / 3 - (4 << FP));
-        // Stopped: back to rest, the lead to within a pixel.
-        for _ in 0..500 {
-            c.follow(v, 0, 0);
+        // During the coast the lens closes faster and the plane returns
+        // more slowly. The first step below the top band begins the ease.
+        for _ in 0..10 {
+            c.follow(v, Some((15 * HALF_PX, 64 << FP)));
         }
-        assert!(c.zoom - ZOOM_ONE < 64, "zoom {}", c.zoom);
-        assert!(c.lead.1.abs() < 1 << FP, "lead {}", c.lead.1);
+        assert_eq!((c.lens.value, c.plane.value), (228, 210));
+    }
+
+    #[test]
+    fn the_view_leads_the_bonnet_and_returns_to_rest() {
+        let mut c = SimCamera::REST;
+        let v = SimView::GAME;
+        // Flat out with the bonnet south. The caller supplies speed even
+        // when the velocity points the other way.
+        for _ in 0..36 {
+            c.follow(v, Some((10 << FP, 128 << FP)));
+        }
+        assert_eq!(c.zoom, ZOOM_MAX);
+        assert_eq!(c.lead, (0, LEAD_MAX));
+        for _ in 0..36 {
+            c.follow(v, None);
+        }
+        assert_eq!(c, SimCamera::REST);
     }
 }

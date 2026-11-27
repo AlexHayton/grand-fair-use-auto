@@ -1,0 +1,14 @@
+# Board the east-facing car, cross the shop at (130,128), and let the HUD settle.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+17000 shot start
++50 tap enter 70
++4500 shot boarded
++100 down up
++0 burst approach 24 150
++3500 up up
++500 shot end
++5500 shot settled
++100 quit

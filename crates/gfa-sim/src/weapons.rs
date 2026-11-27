@@ -19,14 +19,18 @@
 //!   stops it.
 //! - **The rocket** starts ahead of him, speeds up from 10 units to 15, has
 //!   no range limit and bursts on the first thing it meets. Against a wall
-//!   it leaves three fires.
+//!   it leaves one fire, burning about 22 s.
+//! - **The tank's shell** is a rocket from the muzzle of its turret, a little
+//!   slower to start (7 units, up to 17). The cannon fires only during a kill
+//!   frenzy, about once a second, 99 shells to a frenzy ([`Cannon`]).
 //! - **The flame** is a puff a step that lives ten frames. It sets alight
 //!   everybody it passes through and stops only at a car or a wall.
 //! - **An explosion** kills people inside 17 px, sets them alight out to
 //!   30, and writes off any car within 32, whose own fuse then runs: that
-//!   is the chain reaction.
+//!   is the chain reaction, a car every ten game frames.
 //! - **A car blowing up** is one blast, three for anything heavier than a
-//!   car, five for the tanker.
+//!   car, five for the tanker. One the player wrecked pays 100, doubling
+//!   along a chain, but nothing if it is 8 blocks or more from him.
 //!
 //! The player is neither a ped nor a fleet car, so he is a [`Target`] the
 //! world sets once a tick; what reached him is counted in [`Hurt`] until
@@ -293,6 +297,63 @@ impl Arms {
     }
 }
 
+/// Shells a kill frenzy gives the tank's cannon.
+pub const SHELLS: i32 = 99;
+/// Game frames (23.333 Hz) between shells while fire is held: about one a
+/// second (`GTA8.EXE`'s counter went 97, 96, 95 … at 1.03 to 1.2 s).
+pub const SHELL_COOL: i32 = 24;
+
+/// The tank's cannon. It fires only in a tank during a kill frenzy (in
+/// `GTA8.EXE` no key fires it otherwise); the frenzy loads it with
+/// [`SHELLS`], and each shell leaves along the turret.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Cannon {
+    pub shells: i32,
+    /// Game frames until it fires again.
+    cool: i32,
+    /// Fire pressed between game frames, for the next.
+    queued: bool,
+}
+
+impl Cannon {
+    /// A frenzy started: a full load.
+    pub fn load(&mut self) {
+        self.shells = SHELLS;
+    }
+
+    /// One tick of the fire key (`held`, from a press as [`Arms`] reads
+    /// it), with the cannon able to fire (`can`: in a tank, in a frenzy).
+    /// True when a shell leaves now, on a game frame (`gun_step`).
+    pub fn tick(&mut self, can: bool, held: bool, gun_step: bool) -> bool {
+        if gun_step && self.cool > 0 {
+            self.cool -= 1;
+        }
+        if !can {
+            self.queued = false;
+            return false;
+        }
+        if held {
+            self.queued = true;
+        }
+        if !gun_step {
+            return false;
+        }
+        let fire = (held || self.queued) && self.cool == 0 && self.shells > 0;
+        self.queued = false;
+        if fire {
+            self.shells -= 1;
+            self.cool = SHELL_COOL;
+        }
+        fire
+    }
+
+    pub fn sim_hash(&self, h: &mut StateHasher) {
+        h.i32(self.shells);
+        h.i32(self.cool);
+        h.bool(self.queued);
+    }
+}
+
 /// The original's single pool, for every kind of projectile.
 pub const MAX_SHOTS: usize = 40;
 pub const MAX_BLASTS: usize = 4;
@@ -303,6 +364,24 @@ const BULLET_SPEED: i32 = 15;
 const BULLET_LIFE: i32 = 20;
 const ROCKET_SPEED: i32 = 10;
 const ROCKET_SPEED_MAX: i32 = 15;
+/// The tank's shell: 7 units on its first step, 3 more each step after, up
+/// to 17. Measured in M6b under DOSBox-X, the same on two shells: 3.3, 5.0,
+/// 6.5, 8.0, 8.4 world px a game frame (`vc_tank_shell.probe`).
+const SHELL_SPEED: i32 = 7;
+const SHELL_SPEED_MAX: i32 = 17;
+/// The shell leaves the turret's muzzle, this many px from its centre: the
+/// barrel's tip on screen (`tank_turret_rate`, the barrel pointing east:
+/// 92 screen px at 110 a block, 54 of the style's pixels). Screen distances
+/// up and down read 1.2 times short: `GTA8.EXE` draws a block about 110
+/// screen px wide but 91 high.
+pub const MUZZLE_PX: i64 = 26;
+/// The turret as the style draws it: a dome (object `0x21`) over a barrel
+/// (object `0x22`), whose centre sits this many px ahead of the dome's. The
+/// barrel's art is 26 px long and points north, the dome's south; with its
+/// base on the pivot, the barrel's tip is at [`MUZZLE_PX`].
+pub const OBJ_TURRET: usize = 0x21;
+pub const OBJ_BARREL: usize = 0x22;
+pub const BARREL_PX: i64 = 13;
 const FLAME_SPEED_MAX: i32 = 7;
 /// A puff lives this many frames.
 pub const FLAME_FRAMES: i32 = 10;
@@ -323,10 +402,21 @@ const BLAST_CAR_PX: i64 = 32;
 /// (~214 ms).
 const SPLAT_TICKS: i32 = 5;
 
-/// A fire left on the ground burns this long.
+/// A fire left on the ground by the script's explosion burns this long
+/// (AmiGTA1's; not yet measured in `GTA8.EXE`).
 const FIRE_TICKS: i32 = 250;
+/// The one fire a rocket (or a tank shell) leaves when it bursts on a wall
+/// burns about 22 s: measured by hand in M6b under DOSBox-X, the same for
+/// both (`docs/M6B_TANK_TEST_PLAN.md`, B3 and B5). AmiGTA1 lights three
+/// for 250 ticks.
+const WALL_FIRE_TICKS: i32 = 1100;
 /// It sets alight anybody within this many px.
 const FIRE_REACH_PX: i64 = 8;
+/// A car the player wrecked pays only when it blows up nearer him than this
+/// along both axes: 8 blocks. Measured in M6b under DOSBox-X straight up a
+/// road from a standing tank (`tank_range`, `tank_chain`): a wreck 7 blocks
+/// off paid, one 8 off did not. The shape across the screen is not known.
+const PAY_REACH_PX: i64 = 8 * 32;
 /// A car standing in it takes 5 points every this many ticks.
 const FIRE_CAR_EVERY: i32 = 4;
 /// Its sprite's frames, and our ticks to a frame.
@@ -340,6 +430,24 @@ pub enum Kind {
     Bullet,
     Rocket,
     Flame,
+    /// The tank's: a rocket in all it does, but for its speed.
+    Shell,
+}
+
+impl Kind {
+    /// The rocket and the shell burst on whatever they meet.
+    pub fn bursts(self) -> bool {
+        matches!(self, Kind::Rocket | Kind::Shell)
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Kind::Bullet => "bullet",
+            Kind::Rocket => "rocket",
+            Kind::Flame => "flame",
+            Kind::Shell => "shell",
+        }
+    }
 }
 
 /// A projectile in flight.
@@ -564,9 +672,9 @@ impl Weapons {
         self.splat_next = (self.splat_next + 1) % MAX_SPLATS;
     }
 
-    /// A fire on the ground: the first slot out, or else the one with the
-    /// least left to burn.
-    fn light(&mut self, x: i64, y: i64, layer: i32) {
+    /// A fire on the ground, burning `ticks`: the first slot out, or else
+    /// the one with the least left to burn.
+    fn light(&mut self, x: i64, y: i64, layer: i32, ticks: i32) {
         let mut pick = 0;
         for (i, f) in self.fires.iter().enumerate() {
             if f.ticks == 0 {
@@ -581,7 +689,7 @@ impl Weapons {
             x,
             y,
             layer,
-            ticks: FIRE_TICKS,
+            ticks,
             frame: 0,
             frame_tick: 0,
         };
@@ -641,9 +749,35 @@ impl Weapons {
         true
     }
 
+    /// A shell from the player's tank: from the muzzle of a turret centred
+    /// on `(x, y)` and pointing `angle`. False when the pool is full.
+    pub fn fire_shell(&mut self, x: i64, y: i64, layer: i32, angle: i32) -> bool {
+        let Some(slot) = self.shots.iter().position(|s| !s.alive) else {
+            return false;
+        };
+        let (fx, fy, _, _) = axes(angle);
+        // A Q14 unit times 4 is a pixel.
+        self.shots[slot] = Shot {
+            x: x + fx * MUZZLE_PX * 4,
+            y: y + fy * MUZZLE_PX * 4,
+            layer,
+            heading: angle & 255,
+            kind: Kind::Shell,
+            speed: SHELL_SPEED,
+            frame: 1,
+            life: 0,
+            owner: None,
+            grace: 0,
+            alive: true,
+        };
+        self.stats.fired += 1;
+        true
+    }
+
     /// A blast at `(x, y)`: a rocket's, a car's or the script's. People
     /// close in die, further out they burn; the player likewise; cars in
-    /// reach are written off and their own fuses run. `by_player` scores it.
+    /// reach are written off and blow up [`cars::BLAST_FUSE`] game frames
+    /// later. `by_player` scores it.
     pub fn explode(&mut self, st: &mut Street, x: i64, y: i64, layer: i32, by_player: bool) {
         if let Some(b) = self.blasts.iter_mut().find(|b| b.frame == 0) {
             *b = Blast {
@@ -681,7 +815,7 @@ impl Weapons {
         } else if self.target_within(x, y, layer, BLAST_BURN_PX) {
             self.hurt.burn += 20;
         }
-        for c in &mut st.traffic.cars[..st.traffic.n] {
+        for (i, c) in st.traffic.cars[..st.traffic.n].iter_mut().enumerate() {
             if c.done || c.layer != layer || c.damage >= cars::WRECKED {
                 continue;
             }
@@ -689,6 +823,11 @@ impl Weapons {
                 c.damage = cars::WRECKED;
                 c.dmg_bits |= cars::DAMAGE_MASK;
                 c.player_kill |= by_player;
+                c.fuse = cars::BLAST_FUSE;
+                (st.say)(format!(
+                    "traffic: car {i} (model {}) is a write-off - burning",
+                    c.model
+                ));
             }
         }
     }
@@ -717,8 +856,8 @@ impl Weapons {
         };
         let (x, y) = (cx + ox, cy + oy);
         self.explode(st, x, y, layer, by_player);
-        self.light(x + sx, y + sy, layer);
-        self.light(x - sx, y - sy, layer);
+        self.light(x + sx, y + sy, layer, FIRE_TICKS);
+        self.light(x - sx, y - sy, layer, FIRE_TICKS);
         (x, y)
     }
 
@@ -808,7 +947,7 @@ impl Weapons {
                 }
             }
         }
-        self.wreck_sweep(st);
+        self.wreck_sweep(st, gun_step);
         if gun_step {
             for i in 0..MAX_SHOTS {
                 if self.shots[i].alive {
@@ -856,28 +995,40 @@ impl Weapons {
         }
     }
 
-    /// Write-offs in the fleet burn their fuse and blow up, each blast
-    /// inline so a neighbour it writes off joins the sweep.
-    fn wreck_sweep(&mut self, st: &mut Street) {
-        let mut i = 0;
-        while i < st.traffic.n {
-            if let Some(w) = st.traffic.wreck_step(i, &mut *st.say) {
-                let cars = st.cars;
-                // The blasts inherit the car's owner (`car+0x132`), so a
-                // chain the player started stays his.
-                if w.bombed {
-                    self.bomb_blasts(st, &cars[w.model], w.x, w.y, w.face, w.layer, w.player);
-                } else {
-                    self.wreck_car(st, &cars[w.model], w.x, w.y, w.face, w.layer, w.player);
-                }
-                // `GTA8.EXE` pays 100 for a car blowing up only when the
-                // player caused it (the attacker test at `0x547cf`).
-                if w.player {
-                    st.score.add(100);
-                }
+    /// Write-offs in the fleet burn their fuse and blow up. First every
+    /// fuse counts down, then the cars whose fuse ran out blow up, so the
+    /// cars their blasts write off start counting on the next frame,
+    /// whatever their place in the fleet: ten frames a step along a chain.
+    fn wreck_sweep(&mut self, st: &mut Street, frame: bool) {
+        let mut due = Vec::new();
+        for i in 0..st.traffic.n {
+            if let Some(w) = st.traffic.wreck_step(i, frame, &mut *st.say) {
+                due.push(w);
             }
-            i += 1;
         }
+        for w in due {
+            let cars = st.cars;
+            // The blasts inherit the car's owner (`car+0x132`), so a chain
+            // the player started stays his.
+            if w.bombed {
+                self.bomb_blasts(st, &cars[w.model], w.x, w.y, w.face, w.layer, w.player);
+            } else {
+                self.wreck_car(st, &cars[w.model], w.x, w.y, w.face, w.layer, w.player);
+            }
+            // `GTA8.EXE` pays for a car blowing up only when the player
+            // caused it (the attacker test at `0x547cf`), and only near him.
+            if w.player && self.near_player(w.x, w.y) {
+                let paid = st.score.wreck();
+                (st.say)(format!("score: wreck +{paid}"));
+            }
+        }
+    }
+
+    /// Is `(x, y)` close enough to the player for a wreck there to pay?
+    fn near_player(&self, x: i64, y: i64) -> bool {
+        self.target.is_none_or(|t| {
+            ((t.x - x) >> FP).abs() < PAY_REACH_PX && ((t.y - y) >> FP).abs() < PAY_REACH_PX
+        })
     }
 
     /// Projectile `i`'s tick.
@@ -890,6 +1041,7 @@ impl Weapons {
         // The original speeds it up after the step.
         match s.kind {
             Kind::Rocket if s.speed < ROCKET_SPEED_MAX => s.speed += 3,
+            Kind::Shell => s.speed = (s.speed + 3).min(SHELL_SPEED_MAX),
             Kind::Flame if s.speed < FLAME_SPEED_MAX => s.speed += 2,
             _ => {}
         }
@@ -908,7 +1060,7 @@ impl Weapons {
             .shot_cross(s.layer, ox as i32, oy as i32, s.x as i32, s.y as i32)
         {
             match s.kind {
-                Kind::Rocket => self.explode(st, ox, oy, s.layer, by_player),
+                Kind::Rocket | Kind::Shell => self.explode(st, ox, oy, s.layer, by_player),
                 Kind::Bullet => self.splat(ox, oy, s.layer),
                 Kind::Flame => {}
             }
@@ -941,7 +1093,7 @@ impl Weapons {
             } else {
                 self.hurt.bullets += 1;
             }
-            if s.kind == Kind::Rocket {
+            if s.kind.bursts() {
                 self.explode(st, s.x, s.y, s.layer, false);
             } else {
                 self.splat(s.x, s.y, s.layer);
@@ -949,7 +1101,7 @@ impl Weapons {
             self.shots[i].alive = false;
             return;
         } else if st.pickups.open_at(s.x, s.y, s.layer, 12, &mut *st.say) > 0 {
-            if s.kind == Kind::Rocket {
+            if s.kind.bursts() {
                 self.explode(st, s.x, s.y, s.layer, by_player);
             } else if s.kind == Kind::Bullet {
                 self.splat(s.x, s.y, s.layer);
@@ -968,10 +1120,11 @@ impl Weapons {
         let g = st.map.nav_ground(bx, by, s.layer);
         if g == ground::BUILDING || g == ground::WATER {
             match s.kind {
-                Kind::Rocket => {
+                Kind::Rocket | Kind::Shell => {
                     self.explode(st, s.x, s.y, s.layer, by_player);
                     (st.say)(format!(
-                        "weapons: rocket burst on {} at block ({bx},{by},{})",
+                        "weapons: {} burst on {} at block ({bx},{by},{})",
+                        s.kind.name(),
                         if g == ground::WATER {
                             "water"
                         } else {
@@ -979,14 +1132,11 @@ impl Weapons {
                         },
                         s.layer
                     ));
-                    // Three fires this side of the wall: a step back along
-                    // its line, and a step either way across it.
+                    // One fire this side of the wall, a step back along its
+                    // line (GTA8.EXE; AmiGTA1 adds one either side).
                     if g == ground::BUILDING {
-                        let (fx, fy, rx, ry) = axes(s.heading);
-                        let (bx, by) = (ox - fx * 40, oy - fy * 40);
-                        self.light(bx, by, s.layer);
-                        self.light(bx + rx * 40, by + ry * 40, s.layer);
-                        self.light(bx - rx * 40, by - ry * 40, s.layer);
+                        let (fx, fy, _, _) = axes(s.heading);
+                        self.light(ox - fx * 40, oy - fy * 40, s.layer, WALL_FIRE_TICKS);
                     }
                 }
                 Kind::Bullet => {
@@ -1010,8 +1160,8 @@ impl Weapons {
             return;
         }
 
-        // Ageing: a flame counts frames, a bullet ticks, a rocket only
-        // turns its sprite over.
+        // Ageing: a flame counts frames, a bullet ticks, a rocket or a
+        // shell only turns its sprite over.
         let s = &mut self.shots[i];
         match s.kind {
             Kind::Flame => {
@@ -1021,7 +1171,7 @@ impl Weapons {
                     self.stats.expired += 1;
                 }
             }
-            Kind::Rocket => {
+            Kind::Rocket | Kind::Shell => {
                 s.frame += 1;
                 if s.frame > ROCKET_FRAMES {
                     s.frame = 1;
@@ -1109,10 +1259,11 @@ impl Weapons {
             .peds
             .hit_segment(ox, oy, s.heading, len, 1, s.layer, s.owner)
         {
-            if s.kind == Kind::Rocket {
+            if s.kind.bursts() {
                 self.explode(st, s.x, s.y, s.layer, by_player);
                 (st.say)(format!(
-                    "weapons: rocket burst on ped {pi} at ({},{})",
+                    "weapons: {} burst on ped {pi} at ({},{})",
+                    s.kind.name(),
                     s.x >> FP,
                     s.y >> FP
                 ));
@@ -1149,21 +1300,25 @@ impl Weapons {
         let cars = st.cars;
         let info = &cars[model];
         let cop = info.model == traffic::COP_MODEL;
-        if s.kind == Kind::Rocket {
+        if s.kind.bursts() {
+            // Written off where it was hit: it blows up on the next game
+            // frame (its fuse unset, [`cars::HIT_FUSE`]), and pays then. A
+            // hit pays nothing of its own in `GTA8.EXE` (a lone car the
+            // rocket or the shell wrecks pays 100); AmiGTA1 adds 100 here.
             let c = &mut st.traffic.cars[ci];
             c.damage = cars::WRECKED;
             c.dmg_bits |= cars::DAMAGE_MASK;
             c.player_kill |= by_player;
             self.explode(st, s.x, s.y, s.layer, by_player);
             if by_player {
-                st.score.add(100);
                 st.crime(crime::FIREARM);
                 if cop {
                     st.force_level(1);
                 }
             }
             (st.say)(format!(
-                "weapons: rocket burst on car {ci} (model {})",
+                "weapons: {} burst on car {ci} (model {})",
+                s.kind.name(),
                 model
             ));
         } else if !invuln {

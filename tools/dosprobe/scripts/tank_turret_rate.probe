@@ -1,0 +1,21 @@
+# Time the turret's turn: get into the frenzy tank in tank_range, then hold
+# Tab+Right for 9 s while capturing the screen every 86 ms (two 42.86 ms game
+# frames), then Tab+Left for 3 s. The turret's angle is read off the frames.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+17000 shot start
++50 tap enter 70
++4000 shot frenzy
++3000 shot ready
++100 down tab
++60 down right
++0 burst turret 140 86
++9000 up right
++40 down left
++3000 up left
++40 up tab
++600 shot after
++100 quit

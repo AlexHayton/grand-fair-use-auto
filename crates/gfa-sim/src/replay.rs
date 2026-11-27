@@ -164,6 +164,7 @@ impl Runner {
                     },
                     ("ped", &[dx, dy, angle]) => world.drop_ped(dx, dy, angle),
                     ("tab", &[down]) => self.tab = down != 0,
+                    ("frenzy", &[]) => world.start_frenzy(),
                     ("weapon", &[w, rounds]) => world.give_weapon(w, rounds),
                     ("hurt", &[points]) => world.hurt(points),
                     ("shootped", &[range]) => world.shoot_ped(range),

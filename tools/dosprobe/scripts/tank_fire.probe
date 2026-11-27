@@ -1,0 +1,46 @@
+# tank_drive: which key fires the cannon? Board, then try each candidate
+# (tap, then a shot 250 ms and 1 s later), holding Tab for the turret where
+# noted.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+17000 shot start
++50 tap enter 70
++4500 shot boarded
++100 tap lctrl 150
++250 shot lctrl_a
++750 shot lctrl_b
++100 down lctrl
++0 burst lctrl_hold 24 86
++2000 up lctrl
++300 tap rctrl 150
++250 shot rctrl_a
++750 shot rctrl_b
++100 tap space 150
++250 shot space_a
++750 shot space_b
++100 tap lalt 150
++250 shot lalt_a
++750 shot lalt_b
++100 tap lshift 150
++250 shot lshift_a
++750 shot lshift_b
++100 down tab
++100 tap lctrl 150
++250 shot tab_lctrl_a
++750 shot tab_lctrl_b
++100 up tab
++100 tap x 120
++300 tap lctrl 150
++250 shot x_lctrl_a
++750 shot x_lctrl_b
++100 tap z 120
++300 tap lctrl 150
++250 shot z_lctrl_a
++750 shot z_lctrl_b
++100 tap kpenter 150
++250 shot kpenter_a
++750 shot kpenter_b
++100 quit

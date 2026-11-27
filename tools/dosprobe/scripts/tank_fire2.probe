@@ -1,0 +1,33 @@
+# tank_drive: more cannon candidates. Tab alone (tap, hold), Tab+Space,
+# Tab+Up, number keys, and Ctrl while driving forward.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+17000 shot start
++50 tap enter 70
++4500 shot boarded
++100 tap tab 150
++0 burst tab_tap 12 86
++1500 down tab
++0 burst tab_hold 12 86
++1200 up tab
++300 down tab
++100 tap space 150
++0 burst tab_space 12 86
++1200 up tab
++300 tap 1 120
++300 tap lctrl 150
++0 burst one_ctrl 12 86
++1200 down up
++1500 tap lctrl 150
++0 burst moving_ctrl 12 86
++1200 up up
++300 tap rshift 150
++0 burst rshift 12 86
++1200 tap kp0 150
++0 burst kp0 12 86
++1200 tap kpplus 150
++0 burst kpplus 12 86
++1200 quit

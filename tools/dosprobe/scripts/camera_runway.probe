@@ -1,0 +1,24 @@
+# gfa-tool probe-overlay camera_runway. Board from the driver's side,
+# accelerate east, coast, then brake and reverse on the same level road.
+# RAM sample addresses apply to the pinned GTA8.EXE/macOS DOSBox-X run.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+17000 shot start
++50 tap enter 70
++4500 shot boarded
+21560 memdump camera_rest 3bd4a8 40
+21650 down up
++0 burst accel 186 43
+22295 memdump camera_accel 3bd4a8 40
+23200 memdump camera_fast 3bd4a8 40
+29650 up up
++0 burst coast 70 43
+31456 memdump camera_coast 3bd4a8 40
+32650 down down
++0 burst reverse 70 43
+35000 memdump camera_reverse 3bd4a8 40
+35650 up down
+41150 shot settled
++300 quit

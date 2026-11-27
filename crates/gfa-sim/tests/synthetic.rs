@@ -1259,14 +1259,16 @@ fn spray_shop_and_bomb_shop_respray_and_rig_car_bomb() {
     });
     w.score.score = 10_000;
     w.score.force_level(2);
+    w.cars[0].remap8[2] = 1;
     w.put_in_car(0, 15, 15, 128);
+    w.driven.as_mut().unwrap().mission = true;
     w.damage_car(45);
 
     run(&mut w, Buttons::NONE, 4);
     assert_eq!(w.driven.as_ref().unwrap().veh.damage, 0);
     assert_eq!(w.driven.as_ref().unwrap().veh.remap, Some(3));
     assert_eq!(w.score.level, 0);
-    assert_eq!(w.score.score, 5_000);
+    assert_eq!(w.score.score, 2_980);
     assert_eq!(w.bombs[0].kind, 1);
 
     // Arm the bomb with FIRE while driving, get out, and let the 250-tick fuse blow it up.
@@ -1276,6 +1278,97 @@ fn spray_shop_and_bomb_shop_respray_and_rig_car_bomb() {
     run(&mut w, Buttons::NONE, 260);
     assert_eq!(w.bombs[0].kind, 0);
     assert!(log_has(&mut w, "car: bomb detonated"));
+}
+
+#[test]
+fn spray_shop_charges_for_plates_and_preserves_state_on_refusal() {
+    use gfa_sim::world::SprayShop;
+    let mut b = CmpBuilder::new(1);
+    street(&mut b, 5..25, 5..25);
+    let mut w = world(&b, south(15, 15));
+    w.sprays.push(SprayShop {
+        bx: 15,
+        by: 15,
+        color: 3,
+        ..SprayShop::default()
+    });
+    w.cars[0].value[0] = 4;
+    w.cars[0].remap8[2] = 1;
+    w.score.score = 8_159;
+    w.score.force_level(4);
+    w.put_in_car(0, 14, 15, 128);
+
+    run(&mut w, Buttons::NONE, 4);
+    assert!(!log_has(&mut w, "no_respray"));
+    w.put_in_car(0, 15, 15, 128);
+    w.damage_car(2);
+    run(&mut w, Buttons::NONE, 4);
+    assert!(log_has(&mut w, "no_respray"));
+    assert_eq!(w.score.score, 8_159);
+    assert_eq!(w.score.level, 4);
+    assert_eq!(w.driven.as_ref().unwrap().veh.damage, 2);
+    run(&mut w, Buttons::NONE, 4);
+    assert!(!log_has(&mut w, "no_respray"));
+
+    w.put_in_car(0, 14, 15, 128);
+    run(&mut w, Buttons::NONE, 4);
+    w.score.score += 1;
+    w.put_in_car(0, 15, 15, 128);
+    w.damage_car(2);
+    run(&mut w, Buttons::NONE, 4);
+    assert!(log_has(&mut w, "clean_done"));
+    assert_eq!(w.score.score, 0);
+    assert_eq!(w.score.level, 0);
+    assert_eq!(w.driven.as_ref().unwrap().veh.damage, 0);
+    assert_eq!(w.driven.as_ref().unwrap().veh.remap, None);
+}
+
+#[test]
+fn bomb_shop_refuses_special_vehicles_and_insufficient_score() {
+    use gfa_sim::world::BombShop;
+    let mut b = CmpBuilder::new(1);
+    street(&mut b, 5..25, 5..25);
+    let mut w = world(&b, south(15, 15));
+    for bx in [15, 19] {
+        w.bombshops.push(BombShop {
+            bx,
+            by: 15,
+            ..BombShop::default()
+        });
+    }
+    w.bomb_cost = 1_000;
+
+    for (model, score, key) in [
+        (5, 2_000, "no_emerg_respray"),
+        (37, 0, "no_tank_respray"),
+        (47, 2_000, "no_modelcar_respray"),
+        (0, 999, "no_respray"),
+    ] {
+        w.cars[0].model = model;
+        w.score.score = score;
+        w.put_in_car(0, 15, 15, 128);
+        w.damage_car(5);
+        run(&mut w, Buttons::NONE, 4);
+        assert!(log_has(&mut w, key));
+        assert_eq!(w.score.score, score);
+        assert_eq!(w.driven.as_ref().unwrap().veh.damage, 5);
+        assert!(w.bombs.iter().all(|bomb| bomb.kind == 0));
+        w.put_in_car(0, 14, 15, 128);
+        run(&mut w, Buttons::NONE, 4);
+    }
+
+    w.cars[0].model = 4;
+    w.score.score = 1_000;
+    w.put_in_car(0, 15, 15, 128);
+    run(&mut w, Buttons::NONE, 4);
+    assert_eq!(w.score.score, 0);
+    assert_eq!(w.bombs[0].kind, 1);
+
+    w.score.score = 1_000;
+    w.driven.as_mut().unwrap().veh.ox += 4 << 21;
+    run(&mut w, Buttons::NONE, 4);
+    assert_eq!(w.score.score, 1_000);
+    assert_eq!(w.bombs.iter().filter(|bomb| bomb.kind != 0).count(), 1);
 }
 
 #[test]
@@ -1330,6 +1423,140 @@ fn a_car_blowing_up_pays_only_when_the_player_caused_it() {
     run(&mut w, Buttons::NONE, 5);
     // One wreck was his, the other somebody else's: 100 points, not 200.
     assert_eq!(w.score.score - before, 100);
+}
+
+#[test]
+fn a_wreck_pays_only_within_seven_blocks_of_the_player() {
+    let mut b = CmpBuilder::new(1);
+    street(&mut b, 5..35, 5..35);
+    let mut w = world(&b, south(20, 20));
+    w.traffic.clear();
+    w.peds.clear();
+    // His own wrecks, 7 blocks off and 8 (`tank_chain`: the chain paid up
+    // to the car at 7 blocks, not the one at 8), far apart in time.
+    for (blocks, pays) in [(7, 100), (8, 0)] {
+        w.park(0, 0, -32 * blocks, 0);
+        let c = &mut w.traffic.cars[w.traffic.n - 1];
+        c.damage = gfa_sim::cars::WRECKED;
+        c.player_kill = true;
+        let before = w.score.score;
+        run(&mut w, Buttons::NONE, 60);
+        assert!(w.traffic.cars[w.traffic.n - 1].wrecked, "{blocks} blocks");
+        assert_eq!(w.score.score - before, pays, "{blocks} blocks");
+    }
+}
+
+/// A street with car 0 made the tank, and him in it at (15,30) facing
+/// north, nobody else about.
+fn in_tank() -> World {
+    let mut b = CmpBuilder::new(1);
+    street(&mut b, 5..35, 5..45);
+    let mut w = world(&b, south(15, 30));
+    w.peds.clear();
+    w.traffic.clear();
+    w.cars[0].model = gfa_sim::vehicle::TANK_MODEL;
+    w.put_in_car(0, 15, 30, 0);
+    w.drain_log();
+    w
+}
+
+#[test]
+fn the_tank_fires_only_in_a_frenzy_a_shell_every_24_frames() {
+    let mut w = in_tank();
+    run(&mut w, Buttons::FIRE, 100);
+    assert_eq!(w.weapons.stats.fired, 0, "no frenzy, no cannon");
+    w.start_frenzy();
+    assert_eq!(w.cannon.shells, gfa_sim::weapons::SHELLS);
+    run(&mut w, Buttons::NONE, 2);
+    // Held for 150 ticks, 70 game frames: shells on frames 0, 24 and 48.
+    run(&mut w, Buttons::FIRE, 150);
+    assert_eq!(w.weapons.stats.fired, 3);
+    assert_eq!(w.cannon.shells, gfa_sim::weapons::SHELLS - 3);
+    // The last shell, then nothing.
+    w.cannon.shells = 1;
+    run(&mut w, Buttons::FIRE, 150);
+    assert_eq!(w.weapons.stats.fired, 4);
+    assert_eq!(w.cannon.shells, 0);
+}
+
+#[test]
+fn a_shell_leaves_the_muzzle_and_speeds_up_by_three_to_seventeen() {
+    use gfa_sim::weapons::{Kind, MUZZLE_PX};
+    let mut w = in_tank();
+    w.start_frenzy();
+    let y0 = w.driven.as_ref().unwrap().veh.oy;
+    let mut ys = Vec::new();
+    for _ in 0..30 {
+        w.step(press(Buttons::FIRE));
+        if let Some(s) = w
+            .weapons
+            .shots
+            .iter()
+            .find(|s| s.alive && s.kind == Kind::Shell)
+            && ys.last() != Some(&s.y)
+        {
+            ys.push(s.y);
+        }
+    }
+    // Spawned at the muzzle and flown its first step, 7 half-px, at once.
+    assert_eq!(ys[0], y0 - (MUZZLE_PX << 16) - (7 << 15));
+    let moves: Vec<i64> = ys.windows(2).map(|p| (p[0] - p[1]) >> 15).collect();
+    assert_eq!(moves[..6], [10, 13, 16, 17, 17, 17], "{moves:?}");
+}
+
+#[test]
+fn tab_with_left_or_right_turns_the_turret_eight_a_frame_and_not_the_hull() {
+    let mut w = in_tank();
+    let hull = w.driven.as_ref().unwrap().veh.angle();
+    // 15 ticks are 7 game frames: 56 clockwise, and the hull stays put.
+    run(&mut w, Buttons::SPECIAL.with(Buttons::RIGHT, true), 15);
+    let d = w.driven.as_ref().unwrap();
+    assert_eq!(d.turret, 56);
+    assert_eq!(d.veh.angle(), hull);
+    // Back the other way, past ahead.
+    run(&mut w, Buttons::SPECIAL.with(Buttons::LEFT, true), 30);
+    let d = w.driven.as_ref().unwrap();
+    assert_eq!(d.turret, (56 - 14 * 8) & 255);
+    assert_eq!(d.veh.angle(), hull);
+    // A shell goes where the turret points, not the hull.
+    w.start_frenzy();
+    run(&mut w, Buttons::FIRE, 3);
+    assert!(log_has(
+        &mut w,
+        &format!("shell fired at angle {}", (56 - 14 * 8) & 255)
+    ));
+}
+
+#[test]
+fn a_shot_car_blows_up_a_frame_later_and_one_in_its_blast_ten_frames_after() {
+    let mut w = in_tank();
+    // The target 3 blocks ahead; a second car beside and beyond it, inside
+    // the target's blast but not the shell's own burst on its tail.
+    w.park(0, 0, -96, 0);
+    w.park(0, 32, -124, 0);
+    let (a, b) = (w.traffic.n - 2, w.traffic.n - 1);
+    w.start_frenzy();
+    w.drain_log();
+    let before = w.score.score;
+    let (mut burst, mut up_a, mut up_b) = (None, None, None);
+    for t in 0..120 {
+        w.step(press(if t < 3 { Buttons::FIRE } else { Buttons::NONE }));
+        if burst.is_none() && log_has(&mut w, "shell burst on car") {
+            burst = Some(t);
+        }
+        if up_a.is_none() && w.traffic.cars[a].wrecked {
+            up_a = Some(t);
+        }
+        if up_b.is_none() && w.traffic.cars[b].wrecked {
+            up_b = Some(t);
+        }
+    }
+    let (burst, up_a, up_b) = (burst.unwrap(), up_a.unwrap(), up_b.unwrap());
+    // One game frame is 2 or 3 ticks; ten are 21 or 22.
+    assert!((1..=3).contains(&(up_a - burst)), "{burst} -> {up_a}");
+    assert!((21..=22).contains(&(up_b - up_a)), "{up_a} -> {up_b}");
+    // The hit pays nothing of its own; the two wrecks 100, then 200.
+    assert_eq!(w.score.score - before, 300);
 }
 
 #[test]

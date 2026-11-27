@@ -1,0 +1,21 @@
+# tank_drive: turning. Board, hold Left 8 s from rest (spin on the spot?),
+# then hold Up+Left 8 s (turning circle while moving). Bursts every 86 ms.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+17000 shot start
++50 tap enter 70
++4500 shot boarded
++100 down left
++0 burst spin 94 86
++8000 up left
++500 shot after_spin
++100 down up
++0 down left
++0 burst arc 94 86
++8000 up left
++0 up up
++300 shot end
++100 quit

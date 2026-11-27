@@ -1,0 +1,15 @@
+# combat_tank: check the player (north flank of the tank) can board with one Enter, then drive east.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+17000 shot start
++50 tap enter 70
++4000 shot after_enter
++100 down up
++6000 shot mid_drive
++6000 shot mid_drive2
++100 up up
++300 shot driving
++100 quit

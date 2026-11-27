@@ -5,7 +5,8 @@
  * them, which is the order of AmiGTA1's main loop: after the player has
  * moved, the crowd and the fleet are told where he is, the people standing
  * on their feet go to the fleet as walkers, the fleet ticks with the view
- * on him, then the trains, then the score's streak clock, then the crowd,
+ * on him, then the trains, then the score's streak clock (on the game
+ * frame only), then the crowd,
  * then the weapons (gta_weapon.c: fires, explosions, write-offs in the
  * fleet burning and blowing up, and every shot in flight). The glue
  * AmiGTA1 keeps in gta_main.c (a walker held off a car, the lights as the
@@ -199,7 +200,9 @@ static int fleet_tick(long x, long y, long speed, int face, int layer,
     gta_trains_tick(&fleet_trains, &fleet, &crowd, x, y, layer, on_foot, NULL, 0);
     hit = fleet_trains.pl_hit;
     fleet_trains.pl_hit = 0;
-    gta_score_tick(&score);
+    /* The streak window counts game frames (score_streak.pl). */
+    if (gun_step)
+        gta_score_tick(&score);
     gta_peds_set_view(&crowd, FLEET_VIEW, CROWD_VIEW_H, face, moving);
     gta_peds_tick(&crowd, fleet_map, x, y);
     gfa_weapons_set_step(gun_step);

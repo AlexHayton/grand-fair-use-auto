@@ -6,8 +6,12 @@
 //! - **An award is a type and a reason.** The type is what was hit (a
 //!   person, a car), the reason how (run over, shot, burnt, blown up); the
 //!   reason picks a base. The same type again inside the streak window
-//!   (13 of the original's frames) raises the streak, and the whole is
+//!   (13 of the original's game frames) raises the streak, and the whole is
 //!   multiplied by the player's multiplier.
+//! - **A car he wrecked pays 100 when it blows up**, doubling for each more
+//!   inside the window, as a chain of them goes up: 100, 200, 400 …
+//!   (measured in `GTA8.EXE`, M6b). The far-off ones pay nothing; that is
+//!   the weapons' to judge ([`crate::weapons`]).
 //! - **Heat never cools.** A crime adds heat; only a respray, a bribe, a
 //!   bust, a death or the script clear it. The wanted level is not kept:
 //!   it is read off the heat against the city's thresholds each time the
@@ -28,6 +32,10 @@ pub mod kind {
     pub const RAM: u8 = 0x18;
     /// A car taken off its driver.
     pub const CAR: u8 = 0x1c;
+    /// A car he wrecked, blowing up. Ours: the original's number for it is
+    /// not known, only that a different award between two breaks the
+    /// streak.
+    pub const WRECK: u8 = 0x80;
 }
 
 /// How: the reason picks the base an award is multiplied from.
@@ -61,8 +69,13 @@ pub mod crime {
 pub const HEAT_CAP: i32 = 2000;
 /// The score stops here, as the original's does.
 pub const SCORE_CAP: i64 = 999_999_999;
-/// The streak window: the original's 13 frames, in our 50 Hz ticks.
-pub const STREAK_TICKS: i32 = 20;
+/// The streak window: the original's 13 game frames, counted on the
+/// 23.333 Hz clock (557 ms). AmiGTA1 took them for 20 of our ticks (400 ms),
+/// shorter than the 10 frames (429 ms) between the cars of a chain, whose
+/// streak runs its whole length in `GTA8.EXE` (`tank_chain_view`, M6b).
+pub const STREAK_FRAMES: i32 = 13;
+/// What a wrecked car pays at the start of a streak.
+pub const WRECK_VALUE: i64 = 100;
 /// The highest wanted level.
 pub const WANTED_MAX: i32 = 4;
 
@@ -163,9 +176,10 @@ impl Score {
             .unwrap_or(0)
     }
 
-    /// One tick: the streak window closes on its own.
-    pub fn tick(&mut self) {
-        if self.streak_timer > 0 {
+    /// One tick: on a game frame (`frame`, 23.333 Hz) the streak window
+    /// closes a frame further.
+    pub fn tick(&mut self, frame: bool) {
+        if frame && self.streak_timer > 0 {
             self.streak_timer -= 1;
             if self.streak_timer == 0 {
                 self.streak_kind = None;
@@ -188,13 +202,7 @@ impl Score {
         if (1..=9).contains(&kind) {
             self.kills += 1;
         }
-        if self.streak_kind == Some(kind) && self.streak_timer > 0 {
-            self.streak_count = (self.streak_count + 1).min(30);
-        } else {
-            self.streak_kind = Some(kind);
-            self.streak_count = 1;
-        }
-        self.streak_timer = STREAK_TICKS;
+        self.streak(kind);
         // A person: the streak times the base. Anything else with a base
         // above 1 doubles for each repeat (at most 19 times); with base 1
         // it is the streak.
@@ -206,6 +214,25 @@ impl Score {
             i64::from(self.streak_count)
         };
         self.add(factor * kind_value(kind))
+    }
+
+    /// A car he wrecked blowing up: 100, doubling with each more inside the
+    /// streak window (at most 19 times). Returns what it was worth.
+    pub fn wreck(&mut self) -> i64 {
+        self.streak(kind::WRECK);
+        self.add(WRECK_VALUE << (self.streak_count - 1).clamp(0, 19))
+    }
+
+    /// The same type again inside the window counts up; anything else
+    /// starts a new streak. The window opens again either way.
+    fn streak(&mut self, kind: u8) {
+        if self.streak_kind == Some(kind) && self.streak_timer > 0 {
+            self.streak_count = (self.streak_count + 1).min(30);
+        } else {
+            self.streak_kind = Some(kind);
+            self.streak_count = 1;
+        }
+        self.streak_timer = STREAK_FRAMES;
     }
 
     /// Report crime `c`: its heat, its counters, and the level read again.
@@ -297,12 +324,43 @@ mod tests {
         let mut s = Score::new(1);
         assert_eq!(s.event(kind::CIVILIAN, reason::RUNOVER), 100);
         assert_eq!(s.event(kind::CIVILIAN, reason::RUNOVER), 200);
-        for _ in 0..STREAK_TICKS {
-            s.tick();
+        // Ticks between game frames leave the window open.
+        for _ in 0..100 {
+            s.tick(false);
+        }
+        assert_eq!(s.event(kind::CIVILIAN, reason::RUNOVER), 300);
+        for _ in 0..STREAK_FRAMES {
+            s.tick(true);
         }
         assert_eq!(s.event(kind::CIVILIAN, reason::SHOT), 200);
-        assert_eq!(s.score, 500);
-        assert_eq!(s.kills, 3);
+        assert_eq!(s.score, 800);
+        assert_eq!(s.kills, 4);
+    }
+
+    #[test]
+    fn wrecks_double_along_a_chain_and_anything_else_breaks_the_streak() {
+        let mut s = Score::new(3);
+        // A chain ten frames apart: inside the 13-frame window each time.
+        let mut paid = Vec::new();
+        for _ in 0..6 {
+            paid.push(s.wreck());
+            for _ in 0..10 {
+                s.tick(true);
+            }
+        }
+        assert_eq!(paid, [100, 200, 400, 800, 1600, 3200]);
+        assert_eq!(s.score, 6300);
+        assert_eq!(s.kills, 0);
+        // A person in between starts again.
+        s.wreck();
+        s.event(kind::CIVILIAN, reason::BLOWN);
+        assert_eq!(s.wreck(), 100);
+        // So does the window running out.
+        for _ in 0..STREAK_FRAMES {
+            s.tick(true);
+        }
+        s.multiplier = 2;
+        assert_eq!(s.wreck(), 200);
     }
 
     #[test]

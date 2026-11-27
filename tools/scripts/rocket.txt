@@ -4,8 +4,9 @@
 # the road 48 px ahead, 24 px apart. The rocket starts 6 px ahead of him,
 # speeds up from 5 px a tick to 7.5, and bursts on the first car: that car
 # is written off on the spot, and the blast writes off the other, which is
-# within 32 px. Both burn for 120 ticks and blow up, the chain the original
-# shows, and the wrecks stay.
+# within 32 px. The first blows up on the next game frame, the second 10
+# frames after the burst (the chain GTA8.EXE shows, tank_chain_view), and
+# the wrecks stay. They pay 100 and then 200, one streak.
 #
 # oracle: walk
 # section: 1

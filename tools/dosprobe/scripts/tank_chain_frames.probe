@@ -1,0 +1,16 @@
+# Time the chain in tank_chain_view frame by frame: get in, one shell at the
+# middle of the row of cars, then capture the screen every 21 ms (about two
+# per 42.86 ms game frame) for 3 s.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+17000 shot start
++50 tap enter 70
++4000 shot frenzy
++4000 shot ready
++100 tap lctrl 120
++0 burst chain 150 21
++3500 shot after
++100 quit

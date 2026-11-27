@@ -1,0 +1,15 @@
+# Check a tank_scenarios.sh overlay: the start, boarding (the frenzy starts),
+# one shell straight ahead, and the scene after.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+17000 shot start
++50 tap enter 70
++4000 shot frenzy
++4000 shot ready
++100 tap lctrl 120
++0 burst fire 24 86
++2500 shot after
++100 quit

@@ -153,6 +153,7 @@ const FIXTURES: &[(&str, &[usize])] = &[
     ("levelend", &[1]),
     ("gunman", &[3]),
     ("tab", &[1]),
+    ("frenzy", &[0]),
     ("lives", &[1]),
     ("endkey", &[1]),
     ("pause", &[0]),

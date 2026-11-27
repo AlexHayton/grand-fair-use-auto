@@ -638,23 +638,33 @@ impl Traffic {
         out
     }
 
-    /// One car's turn in the wreck sweep: a write-off catches fire and,
-    /// [`cars::FUSE`] ticks later, blows up and stays where it stood as a
-    /// wreck nobody drives (AmiGTA1's `wreck_sweep`). Returns the car's
-    /// model, centre, heading and layer on the tick it blows up, for the
-    /// blast.
-    pub fn wreck_step(&mut self, i: usize, say: &mut dyn FnMut(String)) -> Option<WreckStep> {
+    /// One car's turn in the wreck sweep, every tick: a write-off catches
+    /// fire, its fuse counts down on the game frames (`frame`, 23.333 Hz),
+    /// and when it runs out the car blows up and stays where it stood as a
+    /// wreck nobody drives (AmiGTA1's `wreck_sweep`). A blast sets the fuse
+    /// of the cars it writes off ([`cars::BLAST_FUSE`]); any other write-off
+    /// finds it unset and takes [`cars::HIT_FUSE`], to go up on the next
+    /// frame. Returns the car's model, centre, heading and layer on the tick
+    /// it blows up, for the blast.
+    pub fn wreck_step(
+        &mut self,
+        i: usize,
+        frame: bool,
+        say: &mut dyn FnMut(String),
+    ) -> Option<WreckStep> {
         let c = &mut self.cars[i];
         if c.done || c.wrecked || c.damage < cars::WRECKED {
             return None;
         }
         if c.fuse == 0 {
-            c.fuse = cars::FUSE;
+            c.fuse = cars::HIT_FUSE;
             c.dmg_bits |= cars::DAMAGE_MASK;
             say(format!(
                 "traffic: car {i} (model {}) is a write-off - burning",
                 c.model
             ));
+        }
+        if !frame {
             return None;
         }
         c.fuse -= 1;

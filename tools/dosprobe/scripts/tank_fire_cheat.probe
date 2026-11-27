@@ -1,0 +1,55 @@
+# tank_drive with the suckmyrocket cheat name: does the tank fire with weapons/ammo loaded?
+3500 tap esc 80
++2000 tap enter 80
++3000 tap delete 60
++300 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap backspace 50
++120 tap s 50
++120 tap u 50
++120 tap c 50
++120 tap k 50
++120 tap m 50
++120 tap y 50
++120 tap r 50
++120 tap o 50
++120 tap c 50
++120 tap k 50
++120 tap e 50
++120 tap t 50
++150 tap enter 80
++500 tap enter 80
++1200 tap enter 80
+
+# Board the tank (north flank) and fire with every weapon selected in turn.
+20000 shot start
++50 tap enter 70
++4500 shot boarded
++100 tap lctrl 150
++250 shot fire0_a
++600 shot fire0_b
++100 tap x 120
++300 tap lctrl 150
++250 shot fire1_a
++600 shot fire1_b
++100 tap x 120
++300 tap lctrl 150
++250 shot fire2_a
++600 shot fire2_b
++100 tap x 120
++300 tap lctrl 150
++250 shot fire3_a
++600 shot fire3_b
++100 tap x 120
++300 tap lctrl 150
++250 shot fire4_a
++600 shot fire4_b
++100 down lctrl
++0 burst held 24 86
++2000 up lctrl
++100 quit

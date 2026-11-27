@@ -1,0 +1,16 @@
+# vc_tank_calm: one cannon shell, filmed every 43 ms once the KILL FRENZY
+# banner has gone, then a second shell 3 s later.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+17000 shot start
++50 tap enter 70
++8000 shot ready
++100 tap lctrl 120
++0 burst shell1 50 43
++3000 tap lctrl 120
++0 burst shell2 50 43
++2500 shot end
++100 quit

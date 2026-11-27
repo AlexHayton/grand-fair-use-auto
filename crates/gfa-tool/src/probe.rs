@@ -25,6 +25,10 @@ struct GeneratedOverlay {
 }
 
 fn fill_arena(cell: impl Fn(u8, u8) -> Cell) -> CmpBuilder {
+    fill_arena_width(104, 151, cell)
+}
+
+fn fill_arena_width(west: u8, east: u8, cell: impl Fn(u8, u8) -> Cell) -> CmpBuilder {
     let mut b = CmpBuilder::new(1);
     b.sample_number(0);
 
@@ -59,9 +63,9 @@ fn fill_arena(cell: impl Fn(u8, u8) -> Cell) -> CmpBuilder {
         ..Block::default()
     };
 
-    for x in 104u8..152 {
+    for x in west..=east {
         for y in 104u8..152 {
-            let perimeter = x == 104 || x == 151 || y == 104 || y == 151;
+            let perimeter = x == west || x == east || y == 104 || y == 151;
             let kind = if perimeter {
                 Cell::Building
             } else {
@@ -900,6 +904,141 @@ fn build_combat_tanker_bomb() -> Result<GeneratedOverlay> {
     })
 }
 
+/// An arena for the tank (model 37, placed from the map's object list, door
+/// at its driver's north flank), for
+/// the owner to eyeball: handling, the turret, the cannon, armour and what
+/// it does to cars and people.
+///
+/// The player starts on foot beside the tank at (123,128), facing east down
+/// a 20-block road to a wall at x=146. Along its path (y=128): two Bulldogs
+/// (one lengthways, one broadside), then a Bus. Cannon targets off the line
+/// of travel: Bulldogs at (132,122) and (132,134), for aiming the turret
+/// away from the hull. A second, unmanned tank at (123,133) is the armour
+/// target (shoot it with the cheat's rockets and machine gun). Three
+/// motionless peds stand in the tank's way.
+fn build_combat_tank() -> Result<GeneratedOverlay> {
+    let mut b = fill_arena(|x, y| {
+        if x == 146 && (116..=140).contains(&y) {
+            Cell::Building
+        } else if (118..=145).contains(&x) && (116..=140).contains(&y) {
+            Cell::Road
+        } else {
+            Cell::Pavement
+        }
+    });
+    // Both tanks come from the map's object list, as the original places them.
+    for (x, y) in [(123, 128), (123, 133)] {
+        b.object(StartupObject {
+            x: x * 64 + 32,
+            y: y * 64 + 32,
+            z: 255,
+            kind: 37,
+            remap: 129,
+            rotation: 256,
+            pitch: 0,
+            roll: 0,
+        });
+    }
+    let (cmp_bytes, cmp) = finish_cmp(&mut b, "Probe Combat Tank")?;
+    let ini_bytes = build_mission_ini_with_cmds(
+        "Probe Combat Tank",
+        &[
+            "5 1 (128,128,4) PARKED 31 256",
+            "6 1 (131,128,4) PARKED 31 0",
+            "7 1 (136,128,4) PARKED 9 256",
+            "8 1 (132,122,4) PARKED 31 256",
+            "14 1 (132,134,4) PARKED 31 256",
+            // After the cars: `PLAYER 1` names a start car that does not
+            // exist here, and declared before the cars the one he gets
+            // into will not drive (GTA8.EXE, M6b).
+            "2 1 (123,127,4) PLAYER 1 512",
+            "9 (123,127,4) TRIGGER 100 0",
+            "20 1 (8032,8224,256) FUTUREPED 0 768",
+            "21 1 (8288,8480,256) FUTUREPED 0 768",
+            "22 1 (8416,8224,256) FUTUREPED 0 768",
+        ],
+        &[
+            "0 DONOWT 0 0 0 0 0",
+            "100 DISABLE 9 0 0 0 0",
+            "101 PED_ON 20 0 -1 136 0",
+            "102 CHANGE_PED_TYPE 20 0 -1 4 0",
+            "103 SET_PED_SPEED 20 0 0 0 0",
+            "104 PED_ON 21 0 -1 136 0",
+            "105 CHANGE_PED_TYPE 21 0 -1 4 0",
+            "106 SET_PED_SPEED 21 0 0 0 0",
+            "107 PED_ON 22 0 -1 136 0",
+            "108 CHANGE_PED_TYPE 22 0 -1 4 0",
+            "109 SET_PED_SPEED 22 0 0 0 0",
+            "110 DONOWT 0 0 0 0 0",
+        ],
+    )?;
+    Ok(GeneratedOverlay {
+        cmp_bytes,
+        ini_bytes,
+        cmp,
+    })
+}
+
+/// An empty arena for measuring the tank's handling from captures: one
+/// object-list tank at `(bx, 128)` facing EAST on open road filling the
+/// whole arena (inside its perimeter wall, x and y 105..150), nothing else
+/// on it. The player starts on foot at its driver's (north) flank.
+fn build_tank_handling(name: &str, bx: u8) -> Result<GeneratedOverlay> {
+    let mut b = fill_arena(|_, _| Cell::Road);
+    b.object(StartupObject {
+        x: i16::from(bx) * 64 + 32,
+        y: 128 * 64 + 32,
+        z: 255,
+        kind: 37,
+        remap: 129,
+        rotation: 256,
+        pitch: 0,
+        roll: 0,
+    });
+    let (cmp_bytes, cmp) = finish_cmp(&mut b, name)?;
+    let player = format!("2 1 ({bx},127,4) PLAYER 1 512");
+    let trigger = format!("9 ({bx},127,4) TRIGGER 100 0");
+    let ini_bytes = build_mission_ini_with_cmds(
+        name,
+        &[&player, &trigger],
+        &[
+            "0 DONOWT 0 0 0 0 0",
+            "100 DISABLE 9 0 0 0 0",
+            "101 DONOWT 0 0 0 0 0",
+        ],
+    )?;
+    Ok(GeneratedOverlay {
+        cmp_bytes,
+        ini_bytes,
+        cmp,
+    })
+}
+
+/// The straight-line runway: the tank at the west end, 43 blocks to the wall.
+fn build_tank_drive() -> Result<GeneratedOverlay> {
+    build_tank_handling("Probe Tank Drive", 107)
+}
+
+/// The turning pad: the tank in the middle, 20 blocks clear all round.
+fn build_tank_turn() -> Result<GeneratedOverlay> {
+    build_tank_handling("Probe Tank Turn", 128)
+}
+
+fn build_camera_runway() -> Result<GeneratedOverlay> {
+    let name = "Probe Camera Runway";
+    let mut b = fill_arena_width(20, 235, |_, _| Cell::Road);
+    let (cmp_bytes, cmp) = finish_cmp(&mut b, name)?;
+    let ini_bytes = build_mission_ini(
+        name,
+        &["1 1 (34,128,4) PARKED 4 256", "2 1 (34,127,4) PLAYER 1 512"],
+    )?;
+    Ok(GeneratedOverlay {
+        cmp_bytes,
+        ini_bytes,
+        cmp,
+    })
+}
+
 pub fn probe_overlay(preset: &str, out: &Path) -> Result<()> {
     let generated = match preset {
         "arena" => build_arena()?,
@@ -918,8 +1057,12 @@ pub fn probe_overlay(preset: &str, out: &Path) -> Result<()> {
         "combat_tanker_drive" => build_combat_tanker_drive()?,
         "combat_tanker_npc" => build_combat_tanker_npc()?,
         "combat_tanker_bomb" => build_combat_tanker_bomb()?,
+        "combat_tank" => build_combat_tank()?,
+        "tank_drive" => build_tank_drive()?,
+        "tank_turn" => build_tank_turn()?,
+        "camera_runway" => build_camera_runway()?,
         _ => bail!(
-            "unknown probe overlay preset {preset:?} (available: arena, shooting, getin, vault, blocked_exit, combat_water, combat_score, combat_score_nonplayer, combat_score_script, combat_score_npc, combat_score_npc_parked, combat_punch, combat_tanker, combat_tanker_drive, combat_tanker_npc, combat_tanker_bomb)"
+            "unknown probe overlay preset {preset:?} (available: arena, shooting, getin, vault, blocked_exit, combat_water, combat_score, combat_score_nonplayer, combat_score_script, combat_score_npc, combat_score_npc_parked, combat_punch, combat_tanker, combat_tanker_drive, combat_tanker_npc, combat_tanker_bomb, combat_tank, tank_drive, tank_turn, camera_runway)"
         ),
     };
 
@@ -1156,5 +1299,35 @@ mod tests {
         );
         let start = Start::from_section(&sections[0]).unwrap();
         assert_eq!((start.bx, start.by, start.angle), (125, 127, Some(128)));
+    }
+    #[test]
+    fn combat_tank_preset_is_valid_and_compact() {
+        let g = build_combat_tank().unwrap();
+        let sections = mission::parse(&g.ini_bytes).unwrap();
+        assert!(g.cmp.blocks.len() < 20, "blocks: {}", g.cmp.blocks.len());
+        assert_eq!(g.cmp.objects.len(), 2);
+        assert_eq!(
+            sections[0]
+                .decls
+                .iter()
+                .filter(|d| d.kind == "PARKED")
+                .count(),
+            5
+        );
+        let start = Start::from_section(&sections[0]).unwrap();
+        assert_eq!((start.bx, start.by, start.angle), (123, 127, Some(128)));
+    }
+    #[test]
+    fn tank_drive_preset_is_valid_and_compact() {
+        let g = build_tank_drive().unwrap();
+        let sections = mission::parse(&g.ini_bytes).unwrap();
+        assert!(g.cmp.blocks.len() < 20, "blocks: {}", g.cmp.blocks.len());
+        assert_eq!(g.cmp.objects.len(), 1);
+        let start = Start::from_section(&sections[0]).unwrap();
+        assert_eq!((start.bx, start.by, start.angle), (107, 127, Some(128)));
+        let g = build_tank_turn().unwrap();
+        let sections = mission::parse(&g.ini_bytes).unwrap();
+        let start = Start::from_section(&sections[0]).unwrap();
+        assert_eq!((start.bx, start.by), (128, 127));
     }
 }

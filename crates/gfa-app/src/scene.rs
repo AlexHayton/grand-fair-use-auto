@@ -194,6 +194,10 @@ impl Scene {
                     t.pose.draw_angle,
                     t.deltas,
                 );
+                if world.is_tank(t.model) {
+                    let heading = t.pose.draw_angle - std::f32::consts::PI;
+                    out.extend(turret(style, &self.atlas, t.pose.pos.to_array(), heading));
+                }
             }
             if t.cop == 4 {
                 use gfa_sim::gfa_fixed::trig::{cos, sin};
@@ -232,6 +236,12 @@ impl Scene {
                 pose.draw_angle,
                 deltas,
             );
+            if world.is_tank(model)
+                && let Some(d) = &world.driven
+            {
+                let heading = pose.draw_angle - std::f32::consts::PI + sim_angle(d.turret);
+                out.extend(turret(style, &self.atlas, pos, heading));
+            }
             if fuse > 0 {
                 out.extend(fire_sprite(style, &self.atlas, fuse, pos));
             }
@@ -267,7 +277,8 @@ impl Scene {
             let pos = ground(sh.x, sh.y, sh.layer, 4);
             let (object, frame, angle) = match sh.kind {
                 Kind::Bullet => (OBJ_BULLET, 0, sh.heading + 128),
-                Kind::Rocket => (OBJ_ROCKET, sh.frame - 1, sh.heading),
+                // The tank's shell is drawn as the rocket (owner, DOSBox-X).
+                Kind::Rocket | Kind::Shell => (OBJ_ROCKET, sh.frame - 1, sh.heading),
                 Kind::Flame => (OBJ_FLAME, sh.frame - 1, sh.heading),
             };
             let frame = usize::try_from(frame).unwrap_or(0);
@@ -426,6 +437,37 @@ pub fn fire_sprite(
     pos: [f32; 3],
 ) -> Option<SpriteInstance> {
     flames(style, atlas, ((fuse / 3) % 7) as usize, pos)
+}
+
+/// A tank's turret on the hull centred at `pos`, its barrel pointing
+/// `heading` radians clockwise from north (the barrel's art points north,
+/// the dome's south):
+/// the barrel, its centre [`gfa_sim::weapons::BARREL_PX`] ahead, then the dome over
+/// its base, both a little above the hull so they win against its top.
+fn turret(
+    style: &gfa_formats::style::Style,
+    atlas: &SpriteAtlas,
+    pos: [f32; 3],
+    heading: f32,
+) -> impl Iterator<Item = SpriteInstance> {
+    use gfa_render::sprites::SIM_SCALE;
+    use gfa_sim::weapons;
+    let ahead = weapons::BARREL_PX as f32 * SIM_SCALE;
+    let barrel = [
+        pos[0] + heading.sin() * ahead,
+        pos[1] - heading.cos() * ahead,
+        pos[2] + 1.0,
+    ];
+    let dome = [pos[0], pos[1], pos[2] + 2.0];
+    let sprite =
+        |object, at, angle| gfa_render::sprites::object_sprite(style, atlas, object, 0, at, angle);
+    sprite(weapons::OBJ_BARREL, barrel, heading)
+        .into_iter()
+        .chain(sprite(
+            weapons::OBJ_TURRET,
+            dome,
+            heading + std::f32::consts::PI,
+        ))
 }
 
 /// Frame `frame` of the fire object at `pos`.

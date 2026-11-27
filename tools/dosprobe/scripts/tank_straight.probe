@@ -1,0 +1,21 @@
+# tank_drive: straight-line handling. Board, then from rest hold Up 12 s
+# (accel), release 4 s (coast), hold Down 6 s (brake / reverse). Bursts every
+# 86 ms (2 game frames) for the analyzer: background shift = speed, lane-line
+# spacing = screen scale (speed zoom).
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+17000 shot start
++50 tap enter 70
++4500 shot boarded
++100 down up
++0 burst accel 140 86
++12000 up up
++0 burst coast 47 86
++4000 down down
++0 burst reverse 70 86
++6000 up down
++300 shot end
++100 quit

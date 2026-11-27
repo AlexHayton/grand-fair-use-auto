@@ -1,0 +1,30 @@
+# vc_tank_calm: Vice City [202] in slot [1], the player beside the frenzy
+# tank, the frenzy's soldiers left as ordinary peds. Board (the frenzy
+# starts), then fire: tap, hold, and with the turret turned.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+17000 shot start
++50 tap enter 70
++2600 shot frenzy
++200 tap lctrl 120
++0 burst tap1 30 43
++1500 down lctrl
++0 burst held 60 86
++5000 up lctrl
++200 down tab
++0 down right
++800 up right
++0 up tab
++200 shot turret_right
++100 tap lctrl 120
++0 burst tap2 30 43
++1500 down up
++0 down lctrl
++0 burst drive_fire 40 86
++3500 up lctrl
++0 up up
++300 shot end
++100 quit
