@@ -730,12 +730,7 @@ impl World {
                 continue;
             }
             if !was_burning && p.burn > 0 {
-                new_sfx.push((
-                    crate::audio::snd::IGNITE,
-                    p.x as i32,
-                    p.y as i32,
-                    p.layer,
-                ));
+                new_sfx.push((crate::audio::snd::IGNITE, p.x as i32, p.y as i32, p.layer));
             }
             if !was_corpse && p.corpse {
                 let id = if was_burning && p.burn == 0 {
@@ -2520,12 +2515,7 @@ impl World {
                     lines.push(l);
                 }
                 if n > 0 {
-                    sfx.push((
-                        crate::audio::snd::CRASH,
-                        v.ox as i32,
-                        v.oy as i32,
-                        d.layer,
-                    ));
+                    sfx.push((crate::audio::snd::CRASH, v.ox as i32, v.oy as i32, d.layer));
                     lines.push(format!("car: the tank crushed {n}"));
                 }
             } else {
@@ -2643,7 +2633,12 @@ impl World {
             return;
         };
         self.marks.splash(d.veh.ox, d.veh.oy, z);
-        self.emit_sfx(crate::audio::snd::SPLASH, d.veh.ox as i32, d.veh.oy as i32, z);
+        self.emit_sfx(
+            crate::audio::snd::SPLASH,
+            d.veh.ox as i32,
+            d.veh.oy as i32,
+            z,
+        );
         self.player.x = d.veh.ox as i32;
         self.player.y = d.veh.oy as i32;
         self.player.layer = z;

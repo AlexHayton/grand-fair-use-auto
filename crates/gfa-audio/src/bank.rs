@@ -146,12 +146,7 @@ mod tests {
         raw.extend_from_slice(&16384i16.to_le_bytes());
         raw.extend_from_slice(&(-16384i16).to_le_bytes());
 
-        let sdt = sdt_bytes(&[
-            (0, 4, 32000),
-            (4, 4, 32000),
-            (8, 4, 24000),
-            (12, 4, 44100),
-        ]);
+        let sdt = sdt_bytes(&[(0, 4, 32000), (4, 4, 32000), (8, 4, 24000), (12, 4, 44100)]);
         let bank = SfxBank::decode(&sdt, &raw, "LEVEL000").unwrap();
         let s0 = bank.get(0).unwrap();
         assert_eq!(s0.frames.len(), 1);

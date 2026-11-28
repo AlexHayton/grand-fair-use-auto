@@ -85,17 +85,14 @@ impl Backend {
                 return None;
             }
         };
-        let sfx = match manager
-            .add_sub_track(TrackBuilder::new().volume(volume_db(sound_volume)))
-        {
+        let sfx = match manager.add_sub_track(TrackBuilder::new().volume(volume_db(sound_volume))) {
             Ok(t) => t,
             Err(e) => {
                 log::warn!("could not create SFX track: {e}");
                 return None;
             }
         };
-        let music = match manager
-            .add_sub_track(TrackBuilder::new().volume(volume_db(music_volume)))
+        let music = match manager.add_sub_track(TrackBuilder::new().volume(volume_db(music_volume)))
         {
             Ok(t) => t,
             Err(e) => {
@@ -362,11 +359,7 @@ impl Audio {
         let Some(backend) = self.backend.as_mut() else {
             return;
         };
-        let Some(data) = self
-            .frontend_bank
-            .as_ref()
-            .and_then(|b| b.get(sfx.index()))
-        else {
+        let Some(data) = self.frontend_bank.as_ref().and_then(|b| b.get(sfx.index())) else {
             return;
         };
         if let Err(e) = backend.sfx.play(data.clone()) {
@@ -382,12 +375,14 @@ impl Audio {
         let Some(backend) = self.backend.as_mut() else {
             return;
         };
-        let Some(base) = self.level_bank.as_ref().and_then(|b| b.get(usize::from(id))) else {
+        let Some(base) = self
+            .level_bank
+            .as_ref()
+            .and_then(|b| b.get(usize::from(id)))
+        else {
             return;
         };
-        let mut data = base
-            .volume(gain_db(gain))
-            .panning(pan.clamp(-1.0, 1.0));
+        let mut data = base.volume(gain_db(gain)).panning(pan.clamp(-1.0, 1.0));
         if let Some(hz) = rate_hz
             && base.sample_rate > 0
         {
@@ -507,7 +502,11 @@ impl Audio {
         if let Some(mut old) = slot.take() {
             old.handle.stop(LOOP_STOP_TWEEN);
         }
-        let Some(base) = self.level_bank.as_ref().and_then(|b| b.get(usize::from(id))) else {
+        let Some(base) = self
+            .level_bank
+            .as_ref()
+            .and_then(|b| b.get(usize::from(id)))
+        else {
             return;
         };
         let base_rate = f64::from(base.sample_rate.max(1));

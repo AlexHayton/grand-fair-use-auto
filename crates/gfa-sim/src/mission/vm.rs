@@ -1160,14 +1160,19 @@ mod tests {
     #[test]
     fn the_players_slot_runs_from_command_zero() {
         // As in the probe arena (`weapons_ammo`): nothing triggers these.
-        let mut v = vm("3 (126,128,4) POWERUP 2 20\n4 (125,128,4) POWERUP 4 10\n-1\n\
-            0 POWERUP_ON 3 0 0 0 0\n1 POWERUP_ON 4 0 0 0 0\n2 DONOWT 0 0 0 0 0\n-1\n");
+        let mut v = vm(
+            "3 (126,128,4) POWERUP 2 20\n4 (125,128,4) POWERUP 4 10\n-1\n\
+            0 POWERUP_ON 3 0 0 0 0\n1 POWERUP_ON 4 0 0 0 0\n2 DONOWT 0 0 0 0 0\n-1\n",
+        );
         let mut w = Fake::default();
         assert_eq!(v.running(), vec![(0, 0, "POWERUP_ON")]);
         assert_eq!((v.procs[0].trigger, v.procs[0].parent), (0, -1));
         frames(&mut v, &mut w, 2);
         assert_eq!(v.running(), vec![(0, 2, "DONOWT")]);
-        assert_eq!(w.crates, vec![([126, 128, 4], 2, 20), ([125, 128, 4], 4, 10)]);
+        assert_eq!(
+            w.crates,
+            vec![([126, 128, 4], 2, 20), ([125, 128, 4], 4, 10)]
+        );
         assert!(w.paid.is_empty(), "POWERUP_ON does not pay");
     }
 
@@ -1179,7 +1184,11 @@ mod tests {
         frames(&mut v, &mut w, 2);
         assert!(w.crates.is_empty());
         frames(&mut v, &mut w, 1);
-        assert_eq!(w.paid, vec![500, 500], "it pays whether or not one was there");
+        assert_eq!(
+            w.paid,
+            vec![500, 500],
+            "it pays whether or not one was there"
+        );
         assert_eq!(v.running(), vec![(0, 3, "DONOWT")]);
     }
 

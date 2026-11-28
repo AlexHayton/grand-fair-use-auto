@@ -337,10 +337,7 @@ fn sprite_to_rgba(style: &Style, sprite_idx: usize) -> Option<(Vec<u8>, usize, u
     let mut rgba = vec![0u8; w * h * 4];
     let pal: [[u8; 3]; 256] = match &style.colour {
         Colour::G24(c) => {
-            let pid = sp
-                .clut
-                .and_then(|k| c.sprite_palette(k))
-                .unwrap_or(0) as usize;
+            let pid = sp.clut.and_then(|k| c.sprite_palette(k)).unwrap_or(0) as usize;
             let clut = c.cluts.get(pid)?;
             std::array::from_fn(|i| [clut[i][0], clut[i][1], clut[i][2]])
         }
@@ -402,8 +399,7 @@ impl ShelfPacker {
         for row in 0..h {
             let dst_off = ((py + row) * self.width + px) * 4;
             let src_off = row * w * 4;
-            self.pixels[dst_off..dst_off + w * 4]
-                .copy_from_slice(&rgba[src_off..src_off + w * 4]);
+            self.pixels[dst_off..dst_off + w * 4].copy_from_slice(&rgba[src_off..src_off + w * 4]);
         }
         self.x += w + Self::PAD;
         self.shelf = self.shelf.max(h);
@@ -474,11 +470,22 @@ fn build_atlas(style: &Style, fonts: &HudFonts, epx: bool) -> BuiltAtlas {
                     rgba[i * 4..i * 4 + 4].copy_from_slice(&[r, gr, b, 255]);
                 }
             }
-            // Apply EPX 2× when requested; if the atlas is running low on space
-            // (e.g. very tall font), fall back cleanly to 1× for that glyph.
+            // Apply EPX 4× to the car-name font (SUB2/CARNAME2) for crisp HD
+            // curves and outlines, and EPX 2× to the remaining fonts; fall back
+            // gracefully if atlas space is tight.
             let rect = if epx {
-                let (up, uw, uh) = epx2_rgba(&rgba, w, h);
-                packer.push(&up, uw, uh).or_else(|| packer.push(&rgba, w, h))
+                let (up2, u2w, u2h) = epx2_rgba(&rgba, w, h);
+                if fi == HudFontKind::CarName as usize {
+                    let (up4, u4w, u4h) = epx2_rgba(&up2, u2w, u2h);
+                    packer
+                        .push(&up4, u4w, u4h)
+                        .or_else(|| packer.push(&up2, u2w, u2h))
+                        .or_else(|| packer.push(&rgba, w, h))
+                } else {
+                    packer
+                        .push(&up2, u2w, u2h)
+                        .or_else(|| packer.push(&rgba, w, h))
+                }
             } else {
                 packer.push(&rgba, w, h)
             };
@@ -603,38 +610,37 @@ impl HudRenderer {
         fonts: &HudFonts,
         filter: HudFilter,
     ) -> Self {
-        let bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("hud_bgl"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::VERTEX,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("hud_bgl"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                ],
-            });
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("hud_shader"),
@@ -695,8 +701,15 @@ impl HudRenderer {
             mapped_at_creation: false,
         });
 
-        let (bind_group, sprites, packed_fonts) =
-            upload_atlas(device, queue, &bind_group_layout, &globals, style, fonts, filter);
+        let (bind_group, sprites, packed_fonts) = upload_atlas(
+            device,
+            queue,
+            &bind_group_layout,
+            &globals,
+            style,
+            fonts,
+            filter,
+        );
 
         Self {
             pipeline,
@@ -799,7 +812,9 @@ impl HudRenderer {
         let clip_rect = clip.unwrap_or(NO_CLIP);
         if shadow {
             let off = 2.0f32;
-            let sclip = clip.map_or(NO_CLIP, |c| [c[0] + off, c[1] + off, c[2] + off, c[3] + off]);
+            let sclip = clip.map_or(NO_CLIP, |c| {
+                [c[0] + off, c[1] + off, c[2] + off, c[3] + off]
+            });
             self.push_text_pass(batch, font, x + off, y + off, text, SHADOW, sclip);
         }
         self.push_text_pass(batch, font, x, y, text, WHITE, clip_rect);

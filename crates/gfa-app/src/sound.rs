@@ -167,7 +167,9 @@ pub fn tick(
                 if !audio.is_speaking() {
                     let c = state.scream_cool;
                     state.scream_cool = c - 1;
-                    if c < 0 && let Some((gain, pan)) = pos {
+                    if c < 0
+                        && let Some((gain, pan)) = pos
+                    {
                         audio.speak(62 + (r % 8) as u8, gain, pan, false);
                         state.scream_cool = 3;
                     }
@@ -327,11 +329,10 @@ pub fn tick(
             audio.play_radio_file(src, &path, start);
         }
 
-        if radio_next && (driving || audio.radio.music_mode == 1)
-            && let Some((path, start)) = audio
-                .radio
-                .next_station()
-                .map(|(s, t)| (s.path.clone(), t))
+        if radio_next
+            && (driving || audio.radio.music_mode == 1)
+            && let Some((path, start)) =
+                audio.radio.next_station().map(|(s, t)| (s.path.clone(), t))
         {
             audio.play_radio_file(src, &path, start);
         }

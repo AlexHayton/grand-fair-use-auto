@@ -67,12 +67,7 @@ pub fn load_menu_music(src: &dyn AssetSource, dataset: Dataset) -> Option<Vec<u8
         .read(&format!("{dir}/CDAUDIO.DAT"))
         .ok()
         .and_then(|b| cue::parse(&b).ok())
-        .and_then(|tracks| {
-            tracks
-                .into_iter()
-                .find(|t| t.number == 2)
-                .map(|t| t.file)
-        })
+        .and_then(|tracks| tracks.into_iter().find(|t| t.number == 2).map(|t| t.file))
         .unwrap_or_else(|| "Track02.ogg".to_string());
     src.read(&format!("{dir}/{file}")).ok()
 }

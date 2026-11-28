@@ -33,7 +33,12 @@ pub fn engine_rate(sound_function: u8, sample: u8, v: i32, airborne: bool) -> (f
             h
         }
         2 | 3 => {
-            let mut h = 22050.0 + if v < 0 { 400.0 * f64::from(a) } else { 1400.0 * f64::from(v) };
+            let mut h = 22050.0
+                + if v < 0 {
+                    400.0 * f64::from(a)
+                } else {
+                    1400.0 * f64::from(v)
+                };
             if sound_function == 3 {
                 h *= 3.0;
             }
@@ -58,11 +63,7 @@ pub fn engine_rate(sound_function: u8, sample: u8, v: i32, airborne: bool) -> (f
     if airborne {
         hz *= 3.0;
     }
-    let pct = if v < 1 {
-        40
-    } else {
-        (40 + v * 3 / 2).min(100)
-    };
+    let pct = if v < 1 { 40 } else { (40 + v * 3 / 2).min(100) };
     // The engine is the floor of the mix (~75% max relative to one-shots).
     (hz.max(1000.0), (pct as f32 / 100.0) * 0.65)
 }

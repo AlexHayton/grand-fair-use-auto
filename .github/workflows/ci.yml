@@ -1,5 +1,5 @@
-# Continuous integration: run the unit/simulation tests, Clippy on native and
-# wasm32 targets, and the wasm32 build check on pushes to main and PRs.
+# Continuous integration: run formatting, unit/simulation tests, and Clippy
+# on native and wasm32 targets on pushes to main and PRs.
 #
 # Tests that require a copy of the original game data (`cargo data-test`,
 # `cargo oracle-test`) are #[ignore]d by default and are not run in CI.
@@ -20,49 +20,56 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  # Keep each job to only the components/targets installed below instead of
+  # downloading everything in rust-toolchain.toml on every runner.
+  RUSTUP_TOOLCHAIN: stable
 
 jobs:
-  test:
-    name: Test
+  fmt:
+    name: Format
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  native:
+    name: Test & Clippy
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: -C link-arg=-fuse-ld=lld
+    steps:
+      - uses: actions/checkout@v4
       - name: Install Linux dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev pkg-config
-      - name: Install Rust toolchain
-        run: rustup show active-toolchain
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev pkg-config lld
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          key: test
+          key: native
+          cache-on-failure: true
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Run tests
         run: cargo test --workspace
 
-  clippy:
-    name: Clippy
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Linux dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev pkg-config
-      - name: Install Rust toolchain
-        run: rustup show active-toolchain
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: clippy
-      - name: Run Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-
   wasm:
-    name: Wasm32 check & Clippy
+    name: Wasm32 Clippy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust toolchain
-        run: rustup show active-toolchain
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
         with:
           key: wasm
-      - name: Check wasm32 crates
-        run: cargo wasm-check
+          cache-on-failure: true
       - name: Run Clippy for wasm32
         run: cargo clippy --target wasm32-unknown-unknown --workspace --exclude gfa-native --exclude gfa-tool -- -D warnings

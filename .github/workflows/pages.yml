@@ -19,14 +19,21 @@ concurrency:
   group: pages
   cancel-in-progress: true
 
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        run: rustup show active-toolchain
       - uses: Swatinem/rust-cache@v2
         with:
           key: web
+          cache-on-failure: true
       - name: Build the bundle
         run: sh tools/web/build.sh
         env:

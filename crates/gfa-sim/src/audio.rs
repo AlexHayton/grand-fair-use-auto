@@ -89,12 +89,7 @@ pub mod voice {
 pub enum AudioEvent {
     /// A sample from the level's SFX bank (`LEVEL001`–`003`) at sim position
     /// `(x, y, layer)` (16.16 world pixels at 32 px/block).
-    Sfx {
-        id: u8,
-        x: i32,
-        y: i32,
-        layer: i32,
-    },
+    Sfx { id: u8, x: i32, y: i32, layer: i32 },
     /// A speech line from `VOCALCOM`. When `pos` is `None`, it is an announcer
     /// line at full volume; when `cut` is true, it interrupts any playing line.
     Voice {

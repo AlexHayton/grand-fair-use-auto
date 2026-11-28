@@ -68,6 +68,8 @@ pub fn load_fonts(src: &dyn AssetSource, dataset: Dataset) -> HudFonts {
     if let Some((f, s)) = load(&[
         ("CARNAME2.FON", 1.0),
         ("CARNAME1.FON", 2.0),
+        ("SUB2.FON", 1.0),
+        ("SUB1.FON", 2.0),
         ("PAGER2.FON", 1.0),
         ("PAGER1.FON", 2.0),
     ]) {
@@ -185,10 +187,7 @@ impl HudState {
         if bytes.is_empty() {
             return;
         }
-        if self.brief_ticks > 0
-            && self.brief_kind.is_high_priority()
-            && !kind.is_high_priority()
-        {
+        if self.brief_ticks > 0 && self.brief_kind.is_high_priority() && !kind.is_high_priority() {
             return;
         }
         let mult = match self.text_speed {
@@ -234,18 +233,11 @@ impl HudState {
         let [px, py, _] = world.player_pos();
         let bx = (px >> 21) as usize;
         let by = (py >> 21) as usize;
-        if let Some(d) = world
-            .map
-            .cmp()
-            .districts
-            .iter()
-            .rev()
-            .find(|d| {
-                !d.is_empty()
-                    && (d.x as usize..d.x as usize + d.w as usize).contains(&bx)
-                    && (d.y as usize..d.y as usize + d.h as usize).contains(&by)
-            })
-        {
+        if let Some(d) = world.map.cmp().districts.iter().rev().find(|d| {
+            !d.is_empty()
+                && (d.x as usize..d.x as usize + d.w as usize).contains(&bx)
+                && (d.y as usize..d.y as usize + d.h as usize).contains(&by)
+        }) {
             self.show_pager(d.name.as_bytes().to_vec(), None);
         }
     }
@@ -428,7 +420,14 @@ impl HudState {
             let secs = (world.arms.inf_ticks / 50).max(0) as u64;
             let digits = digits_of(secs);
             let dw = renderer.measure_indices(HudFontKind::Score, &digits);
-            renderer.push_indices(batch, HudFontKind::Score, right - dw, right_y, &digits, true);
+            renderer.push_indices(
+                batch,
+                HudFontKind::Score,
+                right - dw,
+                right_y,
+                &digits,
+                true,
+            );
         }
 
         // 2. Cop heads (top-centre, 1..=4 shimmering icons).
@@ -465,9 +464,9 @@ impl HudState {
                 batch,
                 HudFontKind::CarName,
                 (vw - tw) * 0.5,
-                top_centre_y + (ph - th) * 0.5,
+                top_centre_y + (ph - th) * 0.5 + 1.0,
                 &self.carname_text,
-                true,
+                false,
                 None,
             );
         }
@@ -506,7 +505,9 @@ impl HudState {
                 && secs >= 0
             {
                 let digits = digits_of(secs as u64);
-                let pager_w = renderer.sprite_size(HudSprite::Pager).map_or(160.0, |s| s[0]);
+                let pager_w = renderer
+                    .sprite_size(HudSprite::Pager)
+                    .map_or(160.0, |s| s[0]);
                 renderer.push_indices(
                     batch,
                     HudFontKind::Score,
@@ -521,7 +522,9 @@ impl HudState {
         // 5. Left column: weapon + ammo, armour, jail-free card, speed/frenzy.
         let left_x = 6.0f32;
         let mut left_y = if pager_active {
-            let pager_h = renderer.sprite_size(HudSprite::Pager).map_or(60.0, |s| s[1]);
+            let pager_h = renderer
+                .sprite_size(HudSprite::Pager)
+                .map_or(60.0, |s| s[1]);
             PAGER_Y + pager_h + 6.0
         } else {
             6.0
@@ -608,13 +611,7 @@ impl HudState {
 
 /// Draw a centred big card split into up to 3 words (one word per line,
 /// matching the original's 2-line `MISSION COMPLETE!` / `GAME OVER` cards).
-fn draw_big_card(
-    renderer: &HudRenderer,
-    batch: &mut HudBatch,
-    vw: f32,
-    vh: f32,
-    text: &[u8],
-) {
+fn draw_big_card(renderer: &HudRenderer, batch: &mut HudBatch, vw: f32, vh: f32, text: &[u8]) {
     let words: Vec<&[u8]> = text
         .split(|&b| b == b' ')
         .filter(|w| !w.is_empty())
@@ -655,11 +652,7 @@ fn digits_of(mut n: u64) -> Vec<usize> {
 }
 
 /// Greedily wrap `text` on ASCII spaces to fit `max_w` (at most 8 lines).
-fn wrap_bytes(
-    text: &[u8],
-    max_w: f32,
-    mut measure: impl FnMut(&[u8]) -> f32,
-) -> Vec<&[u8]> {
+fn wrap_bytes(text: &[u8], max_w: f32, mut measure: impl FnMut(&[u8]) -> f32) -> Vec<&[u8]> {
     let mut lines = Vec::new();
     let mut start = 0;
     while start < text.len() && lines.len() < 8 {
