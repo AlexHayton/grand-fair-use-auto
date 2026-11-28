@@ -20,6 +20,7 @@ pub mod camera;
 pub mod city;
 pub mod city_mesh;
 mod gpu;
+pub mod hud;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod offscreen;
 pub mod sprites;

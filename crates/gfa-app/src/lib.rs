@@ -7,6 +7,7 @@
 
 mod controls;
 mod game;
+mod hud;
 mod menu;
 mod overlay;
 #[cfg(test)]
@@ -106,14 +107,17 @@ struct App {
     overlay: Option<Overlay>,
     /// Loaded before the GPU was ready; becomes a [`Scene`] when it is.
     pending: Option<Level>,
+    pending_hud: Option<(gfa_render::hud::HudFonts, Option<gfa_formats::fxt::Fxt>)>,
     menu: Option<menu::Menu>,
     /// Retained while in-game so radio tracks can be read on demand.
     source: Option<Box<dyn AssetSource>>,
     audio: gfa_audio::Audio,
     sound_state: sound::SoundState,
     music_mode: u8,
+    text_speed: u8,
     scene: Option<Scene>,
     game: Option<Game>,
+    hud: Option<hud::HudState>,
     controls: Controls,
     /// Shown in the overlay: why there is no city, for instance.
     status: String,
@@ -140,13 +144,16 @@ impl App {
             gfx: None,
             overlay: None,
             pending: None,
+            pending_hud: None,
             menu: None,
             source: None,
             audio,
             sound_state: sound::SoundState::default(),
             music_mode: 0,
+            text_speed: 2,
             scene: None,
             game: None,
+            hud: None,
             controls: Controls::new(Vec3::new(centre, centre, 128.0)),
             status: String::new(),
             started: Instant::now(),
@@ -229,12 +236,14 @@ impl App {
         if self.config.show_menu {
             self.game = None;
             self.scene = None;
+            self.hud = None;
             self.source = None;
             self.status.clear();
             #[cfg(target_arch = "wasm32")]
             web::set_playing(false);
             let menu = menu::Menu::new(src);
             self.music_mode = menu.music_mode();
+            self.text_speed = menu.text_speed();
             self.audio.start_menu(
                 menu.source.as_ref(),
                 self.config.game,
@@ -275,6 +284,10 @@ impl App {
                     self.music_mode,
                 );
                 self.sound_state.reset();
+                self.pending_hud = Some((
+                    hud::load_fonts(src, self.config.game),
+                    hud::load_fxt(src, self.config.game),
+                ));
                 self.pending = Some(level);
                 self.build_scene();
             }
@@ -301,7 +314,20 @@ impl App {
         self.game = Some(game);
         #[cfg(target_arch = "wasm32")]
         web::set_playing(true);
-        self.scene = Some(Scene::new(gpu, surface.format(), surface.size(), level));
+        let (hud_fonts, fxt) = self.pending_hud.take().unwrap_or_default();
+        let hud_filter = self
+            .overlay
+            .as_ref()
+            .map_or(gfa_render::hud::HudFilter::SmoothHd, |o| o.hud_filter);
+        self.hud = Some(hud::HudState::new(fxt, self.text_speed));
+        self.scene = Some(Scene::new(
+            gpu,
+            surface.format(),
+            surface.size(),
+            level,
+            hud_fonts,
+            hud_filter,
+        ));
         log::info!("city uploaded in {} ms", started.elapsed().as_millis());
         if let Some(w) = &self.window {
             w.request_redraw();
@@ -323,6 +349,7 @@ impl App {
         };
         let input = self.controls.input();
         let radio_next = self.controls.take_radio_next();
+        let (rep_pager, show_area, rep_brief) = self.controls.take_hud_keys();
         let frame = self.game.as_mut().map(|g| {
             let ticks = g.advance(sim_us, input);
             sound::tick(
@@ -334,6 +361,18 @@ impl App {
                 self.controls.paused,
                 radio_next,
             );
+            if let (Some(hud), Some(scene)) = (self.hud.as_mut(), self.scene.as_ref()) {
+                if rep_pager {
+                    hud.repeat_pager();
+                }
+                if show_area {
+                    hud.show_area(&g.world);
+                }
+                if rep_brief {
+                    hud.repeat_brief();
+                }
+                hud.tick(&mut g.world, &scene.hud_renderer, ticks);
+            }
             (g.frame(), g.floor_z(), ticks)
         });
         // A debug menu press is let go once a tick has run with it.
@@ -370,6 +409,7 @@ impl App {
         let overlay = &mut self.overlay;
         if let (Some(scene), Some(o)) = (scene.as_mut(), overlay.as_ref()) {
             scene.city.debug_view = o.debug_view;
+            scene.set_hud_filter(gpu, o.hud_filter);
         }
         let inspect = match (scene.as_ref(), self.controls.cursor) {
             (Some(s), Some(c)) if overlay.as_ref().is_some_and(|o| o.visible) => {
@@ -404,9 +444,16 @@ impl App {
         let target = self.controls.target;
         let free_look = self.controls.free_look;
         let flying = self.controls.flying;
+        let hud = self.hud.as_ref();
+        let game = self.game.as_ref();
         let outcome = surface.frame(gpu, |encoder, view| {
             match scene.as_mut() {
-                Some(s) => s.draw(gpu, encoder, view, size, &camera, seconds, &extra),
+                Some(s) => {
+                    s.draw(gpu, encoder, view, size, &camera, seconds, &extra);
+                    if let (Some(h), Some(g)) = (hud, game) {
+                        s.draw_hud(gpu, encoder, view, size, h, &g.world, paused);
+                    }
+                }
                 None => gfa_render::clear(encoder, view, scene::SKY),
             }
             if let Some(o) = overlay.as_mut() {
@@ -458,6 +505,7 @@ impl App {
         {
             self.config.level = section;
             self.music_mode = menu.music_mode();
+            self.text_speed = menu.text_speed();
             self.load_level(menu.source.as_ref());
             self.last_frame = Instant::now();
             if let (Some(scene), Some(w)) = (&self.scene, &self.window) {
@@ -530,6 +578,17 @@ impl App {
             seconds,
             &extra,
         );
+        if let (Some(hud), Some(game)) = (self.hud.as_ref(), self.game.as_ref()) {
+            scene.draw_hud(
+                gpu,
+                &mut encoder,
+                target.view(),
+                (w, h),
+                hud,
+                &game.world,
+                self.controls.paused,
+            );
+        }
         gpu.queue.submit([encoder.finish()]);
         let rgba = target.read(gpu);
         if let Some(dir) = path.parent() {

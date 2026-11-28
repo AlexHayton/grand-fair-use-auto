@@ -7,6 +7,7 @@ use gfa_formats::style::SpriteCategory;
 use gfa_render::camera::Camera;
 use gfa_render::city::{CityRenderer, DepthTarget};
 use gfa_render::city_mesh::{BLOCK_PX, CityMesh, TileBanks};
+use gfa_render::hud::{HUD_VIRTUAL_H, HudBatch, HudFilter, HudFonts, HudRenderer};
 use gfa_render::sprites::{
     SpriteAtlas, SpriteBatch, SpriteInstance, SpriteRenderer, own_sprite, push_startup_objects,
 };
@@ -24,10 +25,20 @@ pub struct Scene {
     /// This frame's sprites: the statics plus what moves.
     batch: SpriteBatch,
     depth: DepthTarget,
+    hud_fonts: HudFonts,
+    pub hud_renderer: HudRenderer,
+    hud_batch: HudBatch,
 }
 
 impl Scene {
-    pub fn new(gpu: &Gpu, format: wgpu::TextureFormat, size: (u32, u32), level: Level) -> Self {
+    pub fn new(
+        gpu: &Gpu,
+        format: wgpu::TextureFormat,
+        size: (u32, u32),
+        level: Level,
+        hud_fonts: HudFonts,
+        hud_filter: HudFilter,
+    ) -> Self {
         let tables = StyleTables::new(&level.style);
         let mesh = CityMesh::build(
             &level.map,
@@ -62,6 +73,14 @@ impl Scene {
         if skipped > 0 {
             log::warn!("{skipped} startup objects have no sprite");
         }
+        let hud_renderer = HudRenderer::new(
+            &gpu.device,
+            &gpu.queue,
+            format,
+            &level.style,
+            &hud_fonts,
+            hud_filter,
+        );
         Scene {
             level,
             city,
@@ -70,7 +89,20 @@ impl Scene {
             statics,
             batch: SpriteBatch::default(),
             depth: DepthTarget::new(&gpu.device, size),
+            hud_fonts,
+            hud_renderer,
+            hud_batch: HudBatch::default(),
         }
+    }
+
+    pub fn set_hud_filter(&mut self, gpu: &Gpu, filter: HudFilter) {
+        self.hud_renderer.set_filter(
+            &gpu.device,
+            &gpu.queue,
+            &self.level.style,
+            &self.hud_fonts,
+            filter,
+        );
     }
 
     /// A ped sprite: `frame` within the style's ped category, at `pos` (map
@@ -376,6 +408,33 @@ impl Scene {
         pass.set_scissor_rect(x, y, w, h);
         self.city.draw(&mut pass);
         self.sprites.draw(&mut pass);
+    }
+
+    /// Draw the 2D original HUD inside the pillarboxed game viewport.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_hud(
+        &mut self,
+        gpu: &Gpu,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        size: (u32, u32),
+        hud: &crate::hud::HudState,
+        world: &gfa_sim::world::World,
+        paused: bool,
+    ) {
+        let viewport = gfa_render::camera::pillarbox(size.0, size.1);
+        let aspect = viewport[2] as f32 / viewport[3].max(1) as f32;
+        let vw = HUD_VIRTUAL_H * aspect;
+        hud.build(world, &self.hud_renderer, &mut self.hud_batch, vw, paused);
+        self.hud_renderer.draw(
+            &gpu.device,
+            &gpu.queue,
+            encoder,
+            view,
+            viewport,
+            (vw, HUD_VIRTUAL_H),
+            &self.hud_batch,
+        );
     }
 
     /// The top block under a window pixel, described for the overlay.

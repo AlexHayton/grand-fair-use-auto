@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use gfa_render::city::DebugView;
+use gfa_render::hud::HudFilter;
 use winit::window::Window;
 
 /// The simulation's counts for the menu.
@@ -60,6 +61,7 @@ pub struct Overlay {
     renderer: egui_wgpu::Renderer,
     pub visible: bool,
     pub debug_view: DebugView,
+    pub hud_filter: HudFilter,
 }
 
 impl Overlay {
@@ -93,6 +95,7 @@ impl Overlay {
             renderer,
             visible: false,
             debug_view: DebugView::Normal,
+            hud_filter: HudFilter::SmoothHd,
         }
     }
 
@@ -120,6 +123,7 @@ impl Overlay {
         let (device, queue) = (&gpu.device, &gpu.queue);
         let input = self.state.take_egui_input(window);
         let mut debug_view = self.debug_view;
+        let mut hud_filter = self.hud_filter;
         let output = self.ctx.run_ui(input, |ui| {
             if info.needs_setup {
                 egui::Window::new("Choose your game data")
@@ -157,9 +161,12 @@ impl Overlay {
             egui::Window::new("debug")
                 .default_pos([12.0, 12.0])
                 .resizable(false)
-                .show(&ctx, |ui| panel(ui, info, &mut debug_view, &mut actions));
+                .show(&ctx, |ui| {
+                    panel(ui, info, &mut debug_view, &mut hud_filter, &mut actions)
+                });
         });
         self.debug_view = debug_view;
+        self.hud_filter = hud_filter;
         self.state
             .handle_platform_output(window, output.platform_output);
 
@@ -209,6 +216,7 @@ fn panel(
     ui: &mut egui::Ui,
     info: &OverlayInfo<'_>,
     debug_view: &mut DebugView,
+    hud_filter: &mut HudFilter,
     actions: &mut OverlayActions,
 ) {
     // The counter line: frames drawn, the simulation's tick, the rate.
@@ -285,6 +293,12 @@ fn panel(
                 ui.selectable_value(debug_view, DebugView::Normal, "normal");
                 ui.selectable_value(debug_view, DebugView::Faces, "faces");
                 ui.selectable_value(debug_view, DebugView::Flat, "flat");
+            });
+            ui.horizontal(|ui| {
+                ui.label("HUD fonts");
+                for mode in [HudFilter::Original, HudFilter::Epx, HudFilter::SmoothHd] {
+                    ui.selectable_value(hud_filter, mode, mode.name());
+                }
             });
         });
 

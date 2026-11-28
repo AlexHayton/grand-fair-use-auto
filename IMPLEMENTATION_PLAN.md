@@ -420,7 +420,7 @@ Ref, for the HUD and text: `gta_hud.c`, `gta_font.c`, `gta_text.c`, `gta_main.c:
   - Done 2026-11-27 (decision log). The tables are generated, and `cargo data-test` fails when they are stale. The doc also records how GTA8.EXE reads a script and what it does with a name it lacks.
 - [x] `gfa-tool mission coverage` produces the coverage report.
   - Done 2026-11-27. Single-player GTA uses 129 of the original's 150 commands on 20,130 lines, and 50 of its 72 declaration kinds on 4,568 lines. Every name is in GTA8.EXE's tables and AmiGTA1 has a case for each. gfa-sim runs no command yet and reads 5 declaration kinds (23.9% of the declaration lines).
-- [ ] Original HUD: cop heads, weapon and ammo, armour, jail-free card, the pager scroll, the brief box, the big two-line card, score and multiplier fonts.
+- [x] Original HUD: cop heads, weapon and ammo, armour, jail-free card, the pager scroll, the brief box, the big two-line card, score and multiplier fonts. (`gfa_sim::hud`, `gfa_render::hud`, `gfa_app::hud`; uses the original `*2.FON` hi-res fonts and G24 hi-res `Arrow` sprites `25..49` with `*1.FON`/GRY fallback, plus runtime-toggleable Original / EPX 2x / Smooth HD upscaling.)
 - [ ] Close the M7 items in _Gaps beyond AmiGTA1_: every job, a playthrough script per job, mission-only vehicles, gang roles.
 - Exit, in order:
   1. LC jobs 1–2 play through, driven by AmiGTA1's `threejobs`/`phonering`/`lc2_job1` scripts. Their expectations (pay, timing) come from GTA8.EXE, not from AmiGTA1's runs.

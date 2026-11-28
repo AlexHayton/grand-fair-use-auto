@@ -61,6 +61,10 @@ pub struct Controls {
     pub paused: bool,
     /// F5: cycle radio station (consumed once per press).
     radio_next: bool,
+    /// F7 / F9 / F10: repeat last pager, show area name, repeat last brief.
+    hud_repeat_pager: bool,
+    hud_show_area: bool,
+    hud_repeat_brief: bool,
     pub pitch: f32,
     pub yaw: f32,
     dragging: bool,
@@ -105,6 +109,9 @@ impl Controls {
             flying: false,
             paused: false,
             radio_next: false,
+            hud_repeat_pager: false,
+            hud_show_area: false,
+            hud_repeat_brief: false,
             pitch: 0.0,
             yaw: 0.0,
             dragging: false,
@@ -138,6 +145,15 @@ impl Controls {
     /// Consume a pending F5 radio-station press.
     pub fn take_radio_next(&mut self) -> bool {
         std::mem::take(&mut self.radio_next)
+    }
+
+    /// Consume pending HUD hotkeys: `(F7 repeat_pager, F9 show_area, F10 repeat_brief)`.
+    pub fn take_hud_keys(&mut self) -> (bool, bool, bool) {
+        (
+            std::mem::take(&mut self.hud_repeat_pager),
+            std::mem::take(&mut self.hud_show_area),
+            std::mem::take(&mut self.hud_repeat_brief),
+        )
     }
 
     pub fn jump_to(&mut self, target: Vec3) {
@@ -225,6 +241,9 @@ impl Controls {
             KeyCode::KeyC => self.flying = !self.flying,
             KeyCode::F5 => self.radio_next = true,
             KeyCode::F6 => self.paused = !self.paused,
+            KeyCode::F7 => self.hud_repeat_pager = true,
+            KeyCode::F9 => self.hud_show_area = true,
+            KeyCode::F10 => self.hud_repeat_brief = true,
             KeyCode::Equal | KeyCode::NumpadAdd | KeyCode::PageUp => self.follow.zoom(0.8),
             KeyCode::Minus | KeyCode::NumpadSubtract | KeyCode::PageDown => self.follow.zoom(1.25),
             _ => {}

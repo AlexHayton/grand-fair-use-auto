@@ -139,6 +139,10 @@ impl Menu {
         self.settings[3]
     }
 
+    pub fn text_speed(&self) -> u8 {
+        self.settings[2]
+    }
+
     pub fn drain_sounds(&mut self) -> Vec<MenuSfx> {
         std::mem::take(&mut self.sounds)
     }

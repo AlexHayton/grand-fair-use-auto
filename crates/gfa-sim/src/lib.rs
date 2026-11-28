@@ -27,6 +27,7 @@ pub mod audio;
 pub mod cars;
 pub mod clock;
 pub mod hash;
+pub mod hud;
 pub mod input;
 pub mod map;
 pub mod marks;

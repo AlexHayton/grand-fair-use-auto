@@ -335,6 +335,8 @@ pub struct World {
     log: Vec<LogLine>,
     /// Transient one-shot audio events for the audio layer (not in `World::hash`).
     audio: Vec<crate::audio::AudioEvent>,
+    /// Transient one-shot HUD events for the HUD layer (not in `World::hash`).
+    hud: Vec<crate::hud::HudEvent>,
 }
 
 impl World {
@@ -419,6 +421,7 @@ impl World {
             prev_fire: false,
             log: Vec::new(),
             audio: Vec::new(),
+            hud: Vec::new(),
         };
         let p = &world.player;
         let text = format!(
@@ -487,6 +490,30 @@ impl World {
     /// Drain one-shot audio events emitted since the last call.
     pub fn drain_audio(&mut self) -> Vec<crate::audio::AudioEvent> {
         std::mem::take(&mut self.audio)
+    }
+
+    /// Drain one-shot HUD events emitted since the last call.
+    pub fn drain_hud(&mut self) -> Vec<crate::hud::HudEvent> {
+        std::mem::take(&mut self.hud)
+    }
+
+    pub fn emit_hud(&mut self, event: crate::hud::HudEvent) {
+        self.hud.push(event);
+    }
+
+    /// Queue a pager message (FXT key or literal text).
+    pub fn hud_pager(&mut self, text: crate::hud::HudText, secs: Option<i32>) {
+        self.emit_hud(crate::hud::HudEvent::Pager { text, secs });
+    }
+
+    /// Queue a bottom-left brief box message.
+    pub fn hud_brief(&mut self, kind: crate::hud::BriefKind, text: crate::hud::HudText) {
+        self.emit_hud(crate::hud::HudEvent::Brief { kind, text });
+    }
+
+    /// Queue a centred big card message.
+    pub fn hud_big(&mut self, text: crate::hud::HudText) {
+        self.emit_hud(crate::hud::HudEvent::Big { text });
     }
 
     fn emit_sfx(&mut self, id: u8, x: i32, y: i32, layer: i32) {
@@ -561,6 +588,7 @@ impl World {
             }
             if armed {
                 self.say("car: bomb armed - five seconds".into());
+                self.hud_pager(crate::hud::HudText::literal("BOMB ARMED!"), Some(5));
             }
         }
         if pressed.contains(Buttons::ALL_WEAPONS) {
@@ -1271,6 +1299,7 @@ impl World {
                 "score: GOURANGA! +{bonus} points (score {})",
                 self.score.score
             ));
+            self.hud_big(crate::hud::HudText::key("8787"));
         }
     }
 
@@ -1596,6 +1625,9 @@ impl World {
             "police: BUSTED (multiplier {}, jail_free {})",
             self.score.multiplier, self.jail_free
         ));
+        self.emit_hud(crate::hud::HudEvent::BustCrimes {
+            crimes: self.score.crimes,
+        });
         self.emit_voice(crate::audio::voice::BUSTED_WASTED, None, true);
     }
 
@@ -2258,6 +2290,9 @@ impl World {
             self.emit_sfx(crate::audio::snd::DOOR, car.x, car.y, car.layer);
         }
         self.emit_sfx(crate::audio::snd::CAR_START, car.x, car.y, car.layer);
+        self.emit_hud(crate::hud::HudEvent::CarName {
+            model: self.cars[car.model].model,
+        });
         self.say(format!(
             "car: in - model {} at ({},{})",
             self.cars[car.model].model,
@@ -3182,6 +3217,7 @@ impl World {
         }
         if let Some(key) = spray_refusal {
             self.say(format!("shop: {key}"));
+            self.hud_pager(crate::hud::HudText::key(key), None);
         }
         if let Some((bx, by, remap, key, cost)) = sprayed {
             self.emit_sfx(
@@ -3198,6 +3234,7 @@ impl World {
             self.say(format!(
                 "shop: {key} at ({bx},{by}) remap {remap:?} for {cost} points"
             ));
+            self.hud_pager(crate::hud::HudText::key(key), None);
         }
 
         let Some(d) = self.driven.as_mut() else {
@@ -3249,6 +3286,7 @@ impl World {
         }
         if let Some(key) = refused {
             self.say(format!("shop: {key}"));
+            self.hud_pager(crate::hud::HudText::key(key), None);
         }
         if let Some((bx, by, ser, cost)) = rigged {
             let mut slot = 0;
@@ -3266,6 +3304,7 @@ impl World {
             self.say(format!(
                 "shop: bomb fitted to car #{ser} at ({bx},{by}) for {cost} points"
             ));
+            self.hud_pager(crate::hud::HudText::key("bomb_on"), None);
         }
     }
 
