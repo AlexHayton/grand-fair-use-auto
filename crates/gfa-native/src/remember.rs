@@ -12,29 +12,12 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-const APP: &str = "GrandFairUseAuto";
+use gfa_assets::datapath::settings_dir;
 const FILE: &str = "game.toml";
 
 #[derive(Serialize, Deserialize)]
 struct Remembered {
     archive: PathBuf,
-}
-
-/// The settings folder, if the platform has one.
-fn settings_dir() -> Option<PathBuf> {
-    let env = |k: &str| {
-        std::env::var_os(k)
-            .filter(|v| !v.is_empty())
-            .map(PathBuf::from)
-    };
-    let base = if cfg!(target_os = "macos") {
-        env("HOME")?.join("Library/Application Support")
-    } else if cfg!(windows) {
-        env("APPDATA")?
-    } else {
-        env("XDG_CONFIG_HOME").or_else(|| env("HOME").map(|h| h.join(".config")))?
-    };
-    Some(base.join(APP))
 }
 
 /// The remembered archive, and the file it was remembered in.

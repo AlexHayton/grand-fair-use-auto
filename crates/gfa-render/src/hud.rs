@@ -23,7 +23,8 @@ use crate::ASSET_TEXTURE_MAX;
 pub const HUD_VIRTUAL_H: f32 = 480.0;
 
 /// How HUD fonts and icons are upscaled for HD/Retina displays.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum HudFilter {
     /// Original bitmap pixels, nearest-neighbour.
     Original,

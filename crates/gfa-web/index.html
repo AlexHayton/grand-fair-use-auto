@@ -54,6 +54,7 @@
       button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
       .link { background: none; border: none; padding: 0; color: var(--muted); text-decoration: underline; cursor: pointer; }
       .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+      #career-error { position: fixed; bottom: 1em; left: 1em; padding: .5em; background: var(--panel); z-index: 2; }
       #status { min-height: 1.4em; margin-top: 12px; color: var(--text); overflow-wrap: anywhere; }
       progress { width: 100%; height: 6px; margin-top: 10px; accent-color: var(--accent); }
       progress[hidden] { display: none; }
@@ -135,6 +136,7 @@
       </div>
     </div>
 
+    <div id="career-error" role="alert" hidden><span></span> <button type="button">Retry save</button></div>
     <script>
       "use strict";
       // The page's half of starting the game (Rust's is crates/gfa-app/src/web.rs):
@@ -155,10 +157,10 @@
         addEventListener("TrunkApplicationStarted", () => resolve(window.wasmBindings), { once: true });
       }).then((w) => (wasm = w));
 
-      function openDb() {
+      function openDb(name = DB, store = STORE) {
         return new Promise((resolve, reject) => {
-          const req = indexedDB.open(DB, 1);
-          req.onupgradeneeded = () => req.result.createObjectStore(STORE, { keyPath: "path" });
+          const req = indexedDB.open(name, 1);
+          req.onupgradeneeded = () => req.result.createObjectStore(store, { keyPath: "path" });
           req.onsuccess = () => resolve(req.result);
           req.onerror = () => reject(req.error);
         });
@@ -191,6 +193,65 @@
         },
       };
 
+      // A separate database keeps career saves through cache replacement and "Forget saved files".
+      const careers = () => openDb("gfa-careers", "saves");
+      const careerError = $("career-error");
+      let diskCareer, desiredCareer, careerReadError;
+      let writes = Promise.resolve();
+
+      async function readCareer() {
+        await writes;
+        const db = await careers();
+        try {
+          const result = await new Promise((resolve, reject) => {
+            const request = db.transaction("saves").objectStore("saves").get("career.sqlite3");
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+          });
+          diskCareer = desiredCareer = result?.bytes;
+          careerReadError = undefined;
+          careerError.hidden = true;
+        } finally { db.close(); }
+      }
+      window.gfaReadCareer = () => {
+        if (careerReadError) throw careerReadError;
+        return desiredCareer;
+      };
+      async function replaceCareer(bytes) {
+        const db = await careers();
+        try {
+          await new Promise((resolve, reject) => {
+            const t = db.transaction("saves", "readwrite"), store = t.objectStore("saves");
+            const read = store.get("career.sqlite3");
+            let conflict;
+            read.onsuccess = () => {
+              const current = read.result?.bytes;
+              if (current?.length !== diskCareer?.length ||
+                  current?.some((value, i) => value !== diskCareer[i])) {
+                conflict = new Error("Career changed in another tab. Reload to use it.");
+                t.abort();
+              } else {
+                store.put({path: "career.sqlite3", bytes});
+              }
+            };
+            t.oncomplete = resolve;
+            t.onabort = () => reject(conflict || t.error || new Error("Save aborted"));
+          });
+          diskCareer = bytes;
+          careerError.hidden = true;
+        } finally { db.close(); }
+      }
+      window.gfaWriteCareer = (view) => {
+        if (careerReadError) throw careerReadError;
+        // Copy before returning to Rust, which owns the incoming memory.
+        const bytes = desiredCareer = view.slice();
+        writes = writes.then(() => replaceCareer(bytes)).catch(error => {
+          careerError.querySelector("span").textContent = "Career save failed. " + error.message;
+          careerError.hidden = false;
+        });
+      };
+      careerError.querySelector("button").onclick = () => window.gfaWriteCareer(desiredCareer);
+
       function busy(on) {
         for (const b of panel.querySelectorAll("button")) b.disabled = on;
         bar.hidden = !on;
@@ -206,6 +267,7 @@
       // Hand files to the engine: [{path, bytes: ArrayBuffer}].
       async function loadEntries(entries) {
         const w = await wasmReady;
+        try { await readCareer(); } catch (error) { careerReadError = error; }
         for (const e of entries) w.gfa_add_file(e.path, new Uint8Array(e.bytes));
         w.gfa_files_done();
         panel.hidden = true;

@@ -320,6 +320,7 @@ pub const IMPLEMENTED_OPS: &[Op] = &[
     Op::Unused122,
     Op::Unused123,
     Op::Survive,
+    Op::Startup,
     Op::Kickstart,
     Op::KeepThisProc,
     Op::KillSideProc,
@@ -333,18 +334,38 @@ pub const IMPLEMENTED_OPS: &[Op] = &[
     Op::IsPowerupDone,
 ];
 
-/// The commands the VM carries out for some of their uses. `STARTUP` skips
-/// a call not read yet (0x10b50); `ENABLE` waits on the doors and the
-/// watch triggers, whose own routine is not ported; `ARROW` waits on
-/// anything that moves (a car, a person); `POWERUP_ON` waits on the 56
-/// uses whose label names no `POWERUP` (sections 102 and 103).
-pub const PARTIAL_OPS: &[Op] = &[Op::Startup, Op::Enable, Op::Arrow, Op::PowerupOn];
+/// The commands the VM carries out for some of their uses:
+/// - `ENABLE` waits on the doors and the watch triggers, whose own routine
+///   is not ported.
+/// - `ARROW` and `GENERAL_ONSCREEN` wait on anything that moves (a car, a
+///   person). `GENERAL_ONSCREEN` tests gfa-sim's view, not yet the
+///   original's rectangle.
+/// - `POWERUP_ON` waits on the 56 uses whose label names no `POWERUP`
+///   (sections 102 and 103), and `MPHONE` on its one whose labels name no
+///   `TELEPHONE`.
+/// - `DOOR_ON` and `DOOR_OFF` wait on the gates and specific doors, whose
+///   loaders are not read.
+/// - `RESET` and `MPHONE` skip the clean-ups for the mission's own cars,
+///   peds and objects, which no ported command makes yet.
+pub const PARTIAL_OPS: &[Op] = &[
+    Op::Enable,
+    Op::Arrow,
+    Op::GeneralOnscreen,
+    Op::PowerupOn,
+    Op::Mphone,
+    Op::DoorOn,
+    Op::DoorOff,
+    Op::Reset,
+];
 
 /// The declarations gfa-sim reads. The world loads the start, crates and
 /// shops with the level (`World::load_section`, `Pickups::from_section`);
 /// when the mission runs, the crates are the script's `POWERUP_ON`s'. The
-/// VM fires `TRIGGER`s, counts with the counters and points at `TARGET`s. Every other trigger-making kind gets its trigger record, in
-/// the original's order, but none of them fires yet.
+/// VM fires `TRIGGER`s, `MPHONES` and `PHONE_TOGG`s, counts with the
+/// counters, points at `TARGET`s and rings the `TELEPHONE`s (which are not
+/// drawn yet). Every other trigger-making kind gets its trigger record, in
+/// the original's order, but none of them fires yet. `DOOR`s get their door
+/// records for `DOOR_ON`, but the doors themselves are not made.
 pub const READ_DECLS: &[DeclKind] = &[
     DeclKind::Player,
     DeclKind::Powerup,
@@ -352,6 +373,9 @@ pub const READ_DECLS: &[DeclKind] = &[
     DeclKind::Bombshop,
     DeclKind::BombshopCost,
     DeclKind::Trigger,
+    DeclKind::Mphones,
+    DeclKind::PhoneTogg,
+    DeclKind::Telephone,
     DeclKind::Counter,
     DeclKind::Target,
     DeclKind::MissionCounter,

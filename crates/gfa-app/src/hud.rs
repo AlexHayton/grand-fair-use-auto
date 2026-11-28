@@ -369,14 +369,7 @@ impl HudState {
         let score_w = renderer.measure_indices(HudFontKind::Score, &score_digits);
         let score_h = renderer.font_height(HudFontKind::Score).unwrap_or(20.0);
         let score_x = right - score_w;
-        renderer.push_indices(
-            batch,
-            HudFontKind::Score,
-            score_x,
-            top,
-            &score_digits,
-            true,
-        );
+        renderer.push_indices(batch, HudFontKind::Score, score_x, top, &score_digits, true);
 
         let mh = renderer.font_height(HudFontKind::Mult).unwrap_or(13.0);
         let col_right = score_x - 6.0;

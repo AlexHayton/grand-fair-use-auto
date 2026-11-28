@@ -48,8 +48,68 @@ const ROOF_Z: f32 = 6.0 * PX;
 /// The lowest the eye goes: a block above the rooftops.
 pub(crate) const MIN_EYE_Z: f32 = ROOF_Z + PX;
 
+/// Physical keys for simulation actions. Missing overrides use the original layout.
+pub type Bindings = std::collections::BTreeMap<Action, KeyCode>;
+
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum Action {
+    Forward,
+    Back,
+    Left,
+    Right,
+    Walk,
+    EnterCar,
+    Handbrake,
+    Fire,
+    Special,
+    PreviousWeapon,
+    NextWeapon,
+}
+
+impl Action {
+    pub const ALL: [Self; 11] = [
+        Self::Forward,
+        Self::Back,
+        Self::Left,
+        Self::Right,
+        Self::Walk,
+        Self::EnterCar,
+        Self::Handbrake,
+        Self::Fire,
+        Self::Special,
+        Self::PreviousWeapon,
+        Self::NextWeapon,
+    ];
+
+    pub fn layout(self) -> (&'static str, Buttons, &'static [KeyCode]) {
+        use KeyCode::*;
+        match self {
+            Self::Forward => ("Forward", Buttons::UP, &Controls::UP),
+            Self::Back => ("Back", Buttons::DOWN, &Controls::DOWN),
+            Self::Left => ("Left", Buttons::LEFT, &Controls::LEFT),
+            Self::Right => ("Right", Buttons::RIGHT, &Controls::RIGHT),
+            Self::Walk => ("Walk", Buttons::WALK, &Controls::SHIFT),
+            Self::EnterCar => ("Enter / exit car", Buttons::ENTER, &[Enter, NumpadEnter]),
+            Self::Handbrake => ("Jump / handbrake", Buttons::HANDBRAKE, &[Space]),
+            Self::Fire => ("Fire", Buttons::FIRE, &[ControlLeft, ControlRight]),
+            Self::Special => ("Special / horn", Buttons::SPECIAL, &[Tab]),
+            Self::PreviousWeapon => ("Previous weapon", Buttons::WEAPON_PREV, &[KeyZ]),
+            Self::NextWeapon => ("Next weapon", Buttons::WEAPON_NEXT, &[KeyX]),
+        }
+    }
+    pub fn keys(self, bindings: &Bindings) -> &[KeyCode] {
+        bindings
+            .get(&self)
+            .map_or(self.layout().2, std::slice::from_ref)
+    }
+}
+
 pub struct Controls {
     held: HashSet<KeyCode>,
+    pub bindings: Bindings,
     pub follow: FollowCamera,
     /// What the camera looks at, map pixels: the player, or in fly mode a
     /// point moved with the keys.
@@ -97,12 +157,37 @@ pub fn touch_button(name: &str) -> Option<Buttons> {
     })
 }
 
+pub fn reserved_key(key: KeyCode) -> bool {
+    use KeyCode::*;
+    matches!(
+        key,
+        Escape
+            | Backquote
+            | KeyC
+            | KeyF
+            | KeyR
+            | F5
+            | F6
+            | F7
+            | F9
+            | F10
+            | Equal
+            | NumpadAdd
+            | PageUp
+            | Minus
+            | NumpadSubtract
+            | PageDown
+            | NumpadMultiply
+    )
+}
+
 impl Controls {
     pub fn new(target: Vec3) -> Self {
         let mut follow = FollowCamera::new(target);
         follow.snap(MIN_EYE_Z);
         Controls {
             held: HashSet::new(),
+            bindings: Bindings::new(),
             follow,
             target,
             free_look: false,
@@ -266,25 +351,10 @@ impl Controls {
         if self.flying {
             return TickInput::new(self.queued);
         }
-        let b = Buttons::NONE
-            .with(Buttons::UP, self.any(&Self::UP))
-            .with(Buttons::DOWN, self.any(&Self::DOWN))
-            .with(Buttons::LEFT, self.any(&Self::LEFT))
-            .with(Buttons::RIGHT, self.any(&Self::RIGHT))
-            .with(Buttons::WALK, self.any(&Self::SHIFT))
-            .with(
-                Buttons::ENTER,
-                self.any(&[KeyCode::Enter, KeyCode::NumpadEnter]),
-            )
-            .with(Buttons::HANDBRAKE, self.any(&[KeyCode::Space]))
-            .with(
-                Buttons::FIRE,
-                self.any(&[KeyCode::ControlLeft, KeyCode::ControlRight]),
-            )
-            .with(Buttons::SPECIAL, self.any(&[KeyCode::Tab]))
-            .with(Buttons::WEAPON_PREV, self.any(&[KeyCode::KeyZ]))
-            .with(Buttons::WEAPON_NEXT, self.any(&[KeyCode::KeyX]))
-            .with(Buttons::ALL_WEAPONS, self.any(&[KeyCode::NumpadMultiply]));
+        let mut b = Buttons::NONE.with(Buttons::ALL_WEAPONS, self.any(&[KeyCode::NumpadMultiply]));
+        for action in Action::ALL {
+            b.set(action.layout().1, self.any(action.keys(&self.bindings)));
+        }
         let b = Buttons(b.0 | self.queued.0 | self.touched.0);
         TickInput::new(b)
     }
@@ -348,6 +418,19 @@ impl Controls {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remapped_fire_replaces_the_default_and_preserves_touch_input() {
+        let mut controls = Controls::new(Vec3::ZERO);
+        controls.bindings.insert(Action::Fire, KeyCode::KeyG);
+        controls.held.insert(KeyCode::ControlLeft);
+        assert!(!controls.input().held(Buttons::FIRE));
+        controls.held.insert(KeyCode::KeyG);
+        assert!(controls.input().held(Buttons::FIRE));
+        controls.held.clear();
+        controls.touch(Buttons::FIRE, true);
+        assert!(controls.input().held(Buttons::FIRE));
+    }
 
     #[test]
     fn a_menu_press_is_held_until_a_tick_has_run() {

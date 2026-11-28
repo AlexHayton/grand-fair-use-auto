@@ -398,3 +398,20 @@ mod tests {
         assert!(matches!(err, DataPathError::NoGtaData { .. }));
     }
 }
+
+/// The settings folder, if the platform has one.
+pub fn settings_dir() -> Option<PathBuf> {
+    let env = |k: &str| {
+        std::env::var_os(k)
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+    };
+    let base = if cfg!(target_os = "macos") {
+        env("HOME")?.join("Library/Application Support")
+    } else if cfg!(windows) {
+        env("APPDATA")?
+    } else {
+        env("XDG_CONFIG_HOME").or_else(|| env("HOME").map(|h| h.join(".config")))?
+    };
+    Some(base.join("GrandFairUseAuto"))
+}

@@ -301,7 +301,7 @@ impl Audio {
     }
 
     /// Load the front-end sound bank (`LEVEL000`) and start the looping title
-    /// theme (`Track02.ogg`).
+    /// theme (`Track03.ogg`).
     pub fn start_menu(&mut self, src: &dyn AssetSource, dataset: Dataset, sound: u8, music: u8) {
         self.stop_loops();
         self.set_sound_volume(sound);

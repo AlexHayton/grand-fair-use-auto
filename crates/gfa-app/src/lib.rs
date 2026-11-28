@@ -5,6 +5,7 @@
 //! city with the player in it, followed by the camera. The backtick key shows the egui
 //! debug overlay. The front end hands a selected chapter to the level loader.
 
+mod career;
 mod controls;
 mod game;
 mod hud;
@@ -12,6 +13,7 @@ mod menu;
 mod overlay;
 #[cfg(test)]
 mod popin;
+mod save;
 mod scene;
 mod sound;
 #[cfg(target_arch = "wasm32")]
@@ -109,6 +111,7 @@ struct App {
     pending: Option<Level>,
     pending_hud: Option<(gfa_render::hud::HudFonts, Option<gfa_formats::fxt::Fxt>)>,
     menu: Option<menu::Menu>,
+    playing_career: Option<save::CareerSave>,
     /// Retained while in-game so radio tracks can be read on demand.
     source: Option<Box<dyn AssetSource>>,
     audio: gfa_audio::Audio,
@@ -146,6 +149,7 @@ impl App {
             pending: None,
             pending_hud: None,
             menu: None,
+            playing_career: None,
             source: None,
             audio,
             sound_state: sound::SoundState::default(),
@@ -232,7 +236,19 @@ impl App {
         }
     }
 
+    fn apply_options(&mut self, options: &career::Options) {
+        self.controls.bindings.clone_from(&options.keybindings);
+        self.music_mode = options.music_mode;
+        self.text_speed = options.text_speed;
+        self.audio.set_sound_volume(options.sound_volume);
+        self.audio.set_music_volume(options.music_volume);
+        if let Some(overlay) = &mut self.overlay {
+            overlay.hud_filter = options.hud_filter;
+        }
+    }
+
     fn accept_data(&mut self, src: Box<dyn AssetSource>) {
+        self.playing_career = None;
         if self.config.show_menu {
             self.game = None;
             self.scene = None;
@@ -242,8 +258,7 @@ impl App {
             #[cfg(target_arch = "wasm32")]
             web::set_playing(false);
             let menu = menu::Menu::new(src);
-            self.music_mode = menu.music_mode();
-            self.text_speed = menu.text_speed();
+            self.apply_options(&menu.save.career.options);
             self.audio.start_menu(
                 menu.source.as_ref(),
                 self.config.game,
@@ -252,6 +267,11 @@ impl App {
             );
             self.menu = Some(menu);
         } else {
+            if self.config.screenshot.is_none() {
+                let save = save::CareerSave::open(src.as_ref(), save::platform_store());
+                self.apply_options(&save.career.options);
+                self.playing_career = Some(save);
+            }
             self.load_level(src.as_ref());
             self.source = Some(src);
         }
@@ -351,7 +371,22 @@ impl App {
         let radio_next = self.controls.take_radio_next();
         let (rep_pager, show_area, rep_brief) = self.controls.take_hud_keys();
         let frame = self.game.as_mut().map(|g| {
+            let was_over = g.world.game_over;
             let ticks = g.advance(sim_us, input);
+            if !was_over
+                && g.world.game_over
+                && self.config.show_menu
+                && let Some(save) = &mut self.playing_career
+                && let Some(level) = menu::SECTIONS
+                    .iter()
+                    .position(|&id| id == self.config.level)
+            {
+                save.career.record_result(level, g.world.score.score, false);
+                save.commit();
+                if !save.error.is_empty() {
+                    self.status.clone_from(&save.error);
+                }
+            }
             sound::tick(
                 &mut self.audio,
                 &mut self.sound_state,
@@ -482,6 +517,15 @@ impl App {
         if let Some(action) = actions.setup {
             self.setup_action(action);
         }
+        if let (Some(overlay), Some(save)) = (&self.overlay, &mut self.playing_career)
+            && overlay.hud_filter != save.career.options.hud_filter
+        {
+            save.career.options.hud_filter = overlay.hud_filter;
+            save.commit();
+            if !save.error.is_empty() {
+                self.status.clone_from(&save.error);
+            }
+        }
         if let Some(menu) = self.menu.as_mut() {
             self.audio.set_sound_volume(menu.sound_volume());
             self.audio.set_music_volume(menu.music_volume());
@@ -504,8 +548,7 @@ impl App {
             && let Some(menu) = self.menu.take()
         {
             self.config.level = section;
-            self.music_mode = menu.music_mode();
-            self.text_speed = menu.text_speed();
+            self.apply_options(&menu.save.career.options);
             self.load_level(menu.source.as_ref());
             self.last_frame = Instant::now();
             if let (Some(scene), Some(w)) = (&self.scene, &self.window) {
@@ -514,6 +557,7 @@ impl App {
                     menu.name(),
                     scene.level.files.name
                 ));
+                self.playing_career = Some(menu.save);
                 self.source = Some(menu.source);
             } else {
                 self.menu = Some(menu);
@@ -657,7 +701,16 @@ impl ApplicationHandler<UserEvent> for App {
                         // Resized delivered) while the GPU was still starting.
                         let size = w.inner_size();
                         surface.resize(&gpu, size.width, size.height);
-                        self.overlay = Some(Overlay::new(w, &gpu.device, surface.format()));
+                        let mut overlay = Overlay::new(w, &gpu.device, surface.format());
+                        if let Some(save) = self
+                            .menu
+                            .as_ref()
+                            .map(|m| &m.save)
+                            .or(self.playing_career.as_ref())
+                        {
+                            overlay.hud_filter = save.career.options.hud_filter;
+                        }
+                        self.overlay = Some(overlay);
                         w.request_redraw();
                     }
                     self.gfx = Some((gpu, surface));
@@ -697,6 +750,14 @@ impl ApplicationHandler<UserEvent> for App {
         #[cfg(not(target_arch = "wasm32"))]
         if setup && let WindowEvent::DroppedFile(path) = &event {
             self.setup_action(SetupAction::Dropped(path.clone()));
+            return;
+        }
+        if let WindowEvent::KeyboardInput { event, .. } = &event
+            && event.state == ElementState::Pressed
+            && !event.repeat
+            && let PhysicalKey::Code(key) = event.physical_key
+            && self.menu.as_mut().is_some_and(|menu| menu.capture_key(key))
+        {
             return;
         }
         if let (Some(o), Some(w)) = (self.overlay.as_mut(), self.window.as_ref())

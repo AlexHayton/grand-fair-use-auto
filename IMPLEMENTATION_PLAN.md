@@ -414,7 +414,9 @@ Ref, for the HUD and text: `gta_hud.c`, `gta_font.c`, `gta_text.c`, `gta_main.c:
   - `RESET`'s eight clean-ups;
   - 0x10b50;
   - the score routine's multiplier (0xca190);
-  - what slots 0 to 3 run in a single-player game.
+  - what taking a kill frenzy does beyond freeing its record.
+
+  Read 2026-11-28: each player's slot (0 to 3) runs from command 0, which is `0 DONOWT` in GTA's sections.
 - [ ] **Unknown commands log section and line and count toward coverage. They do not silently succeed.** In the original an unknown command stops the game (error -182). gfa-sim logs it and never takes its success path.
 - [x] `docs/MISSION_OPCODES.md` lists every command used in GTA's `MISSION.INI` with its status. Sources: AmiGTA1's table, Carnage3D `docs/ped.txt`, community mission docs, and observed behaviour.
   - Done 2026-11-27 (decision log). The tables are generated, and `cargo data-test` fails when they are stale. The doc also records how GTA8.EXE reads a script and what it does with a name it lacks.
@@ -440,10 +442,10 @@ Ref, for the HUD and text: `gta_hud.c`, `gta_font.c`, `gta_text.c`, `gta_main.c:
 - [x] Radio: clock-based stations `(offset+elapsed) mod length` mapped to `Track02-11.ogg` through `CDAUDIO.DAT`; the police band only in police cars; on-foot ambience; a station key (`F5`); Radio vs Constant mode. Native streams via Kira; web streams via browser-native `<audio>` (`Blob` URL + `canPlayType('audio/ogg; codecs="vorbis"')` check with Kira fallback). Done 2026-11-28.
 - [x] Web audio starts on the first gesture (`Audio::unlock` on first key/pointer/touch event, 2026-11-27).
 - [ ] Close the M8 items in _Gaps beyond AmiGTA1_: cheats, language, high scores, pause and options, attract demos, complete speech and SFX.
-- [ ] Saves: read and write the original `PLAYER_A.DAT` format behind a `SaveStore` trait.
-  - Native: `~/Library/Application Support/GrandFairUseAuto`.
-  - Web: IndexedDB.
-  - A versioned sidecar holds settings.
+- [x] Port-owned SQLite careers. Profiles, chapter scores, high scores, key bindings and options share one database. The first run can import the base game's bundled career. Native uses the application settings directory. Web persists the SQLite image in IndexedDB.
+- Number SQL migrations in `gfa-app/src/save/`. Apply all pending steps and the schema version in one transaction and validate the career before commit. Test upgrades from each released schema and refuse writes to newer schemas.
+- [ ] Quicksave and quickload. Each player and dataset gets a manual checkpoint and a separate last-mission autosave. Both use the same independently versioned simulation snapshot. Capture at a completed simulation tick, including section, data identity, RNG, world entities, script state, pending timers and input edge state. Rebuild renderer and audio resources on load. Validate compatibility before replacing the running world. Quickload restores the checkpoint while keeping current key bindings and options.
+- [ ] Mission autosave depends on M7 emitting a successful job outcome. Capture after the reward and script transitions have committed. Save progress and the checkpoint atomically, once per completion, so a reload cannot award the job twice. Verify by restoring each checkpoint and comparing subsequent simulation hashes under identical inputs.
 - Exit: boot, title, chapter, play, complete, save, relaunch, resume.
 
 **M9: FMV**
@@ -924,6 +926,32 @@ Each entry: date, decision, why.
 - **2026-11-20. Rust + wgpu (Metal native, WebGL2 web), one codebase.**
 
 ## Progress log
+
+- **2026-11-28. M7: the crates become the script's, and the game runs the script.**
+  - **Read in GTA8.EXE** (`docs/MISSION_VM.md`):
+    - the loader keeps only a `POWERUP`'s two numbers (0x79db3), so a crate exists only once a `POWERUP_ON` names it;
+    - each player's slot starts in use at command 0;
+    - the crate records (0x3baafc), with a kill frenzy made standing loose and no crate;
+    - what each kind holds when it opens (0xd7ce8);
+    - `POWERUP_ON`, `POWERUP_OFF` and `IS_POWERUP_DONE`.
+
+    `IS_POWERUP_DONE` with p4 ≤ 0 takes p3 at once, where AmiGTA1 waits for ever.
+  - **Ported:**
+    - `POWERUP_OFF` and `IS_POWERUP_DONE` are done;
+    - `POWERUP_ON` is done in part: it waits on the 56 uses in [102] and [103] whose label names no `POWERUP`;
+    - the player's slot is ported;
+    - `Pickups::power_up`, `first_at` and `take_off`, and `PickupState::Loose`;
+    - `ScriptWorld::{powerup_on, powerup_off, powerup_there}`.
+  - **Fix:** the game runs the mission script from the start of every level (`Game::new`).
+    - Before this, the world put a crate on all 151 of Liberty City's `POWERUP`s. That included the 32 kill frenzies, and the crate nearest the start was frenzy 19, which the original never puts out.
+    - Now the opening's `POWERUP_ON`s make the crates: 73 crates, and frenzies 1 to 16 standing loose. It waits at `31500 DOOR_ON`.
+    - Test scripts without `# mission: on` keep the old crates.
+  - **Checks:**
+    - `tools/scripts/mission_opening.txt`;
+    - `tools/scripts/mission_crates.txt` (new);
+    - unit tests in `mission::vm`.
+
+    Commands now cover 40.0% of the command lines, and 4 more commands in part.
 
 - **2026-11-27. M8: in-game SFX, vehicle/siren/wreck loops, `VOCALCOM`, and CD-audio radio.**
   - Added a pure, transient `World::drain_audio()` event queue (`gfa_sim::audio`, excluded from `World::hash` so determinism and replays are unchanged) emitting weapons, tank shell, punch, explosions, bullet wall hits, door shut/car start, car-car impacts, tank crush, wall hit, jump landing, water splash, pickups, respray, and `VOCALCOM` announcer lines (`BUSTED`/`WASTED`, extra life, kill frenzy).

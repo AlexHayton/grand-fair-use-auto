@@ -57,6 +57,33 @@ pub const MAX_TRIGGERS: usize = 210;
 const KICK_SLOTS: usize = 5;
 /// The player whose processes these are. Single player only.
 const PLAYER_SLOT: i32 = 0;
+/// Door records, at most (0xe84a0 walks 64 of them).
+pub const MAX_DOORS: usize = 64;
+
+/// The trigger types the scan fires (GTA8.EXE's record +4).
+const TYPE_TRIGGER: u8 = 4;
+const TYPE_MPHONES: u8 = 12;
+const TYPE_PHONE_TOGG: u8 = 13;
+/// A player driving this model sets off no `MPHONES` (the scan's check, 0xf4075).
+const MPHONES_IGNORES_MODEL: u8 = 47;
+/// A `PHONE_TOGG` re-arms its phone once the player is outside this many
+/// blocks of it, but inside its own radius (0xf5053).
+const PHONE_TOGG_INNER: i32 = 3;
+/// `MPHONE` gives up when the player is more than this many blocks from its
+/// first phone (0xf1900 with 15).
+const MPHONE_REACH: i32 = 15;
+/// He answers a phone within this many of the original's pixels of it, on
+/// either axis, exclusive (0xf17a0).
+const ANSWER_REACH_PX: i32 = 16;
+/// `MPHONE`'s ring count, in its own p4: set at the start, counted down a
+/// frame, a ring at 0 and another at -10, then set again.
+const RING_START: i32 = 25;
+const RING_SECOND: i32 = -10;
+/// After he answers, no phone rings or answers for this many frames (the
+/// event 0x10b50(250, 0, 50 + player)).
+const PHONE_LOCK_FRAMES: u32 = 250;
+/// `STARTUP`'s event: 0x10b50(10, 0, 20).
+const STARTUP_SOUND_FRAMES: u32 = 10;
 
 /// A trigger record's state (record +0).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,6 +120,58 @@ pub struct Trigger {
     pub flag: u8,
     /// The declaration that made it.
     pub decl: usize,
+}
+
+/// A door's state (its record +4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum DoorState {
+    Open = 0,
+    Shut = 1,
+    Opening = 2,
+    Closing = 3,
+}
+
+/// A door record (GTA8.EXE's 36 bytes at 0x3da9e5, made by 0xe7e10 as the
+/// section loads). This is what the script sees. The door itself (its
+/// object, its blocks, and the scan that opens it for the player) is the
+/// world's and is not ported, so no door here ever moves.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Door {
+    pub state: DoorState,
+    /// Turned on by `DOOR_ON`, so it can open (the record's +8, 0 when on).
+    /// Every door loads off.
+    pub on: bool,
+    /// The declaration's flag (+0x26). `RESET` shuts and turns off the doors
+    /// without one.
+    pub flag: u8,
+    /// The declaration that made it.
+    pub decl: usize,
+}
+
+/// A phone (GTA8.EXE's object 0x28, made by 0x76da0 for each `TELEPHONE`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Phone {
+    /// The declaration's block: the phone stands at its centre.
+    pub block: [i32; 3],
+    /// Its facing: the declaration's second number, 1024 steps a turn.
+    pub turn: i32,
+    /// Reads as the object's frame (its +0xc, set by 0xad590): 0 as made,
+    /// 3 when it starts ringing, 2 and 3 in turn at each ring (0xf1dd0),
+    /// and 1 once it stops.
+    pub frame: u8,
+}
+
+/// An event on GTA8.EXE's timed queue (0x10b50 puts one on, 0x10ed0 runs
+/// the ones due once a frame, before the script). Only the two the ported
+/// commands schedule are kept.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Event {
+    /// Kind 0 with 20, from `STARTUP`: sound 0 (0x16870). Sound is M8's.
+    StartupSound,
+    /// Kind 0 with 50 + the player, from answering a phone: his phone lock
+    /// ends (0x2d24f0 cleared, at 0x9f85d).
+    PhoneLockOver,
 }
 
 /// A declaration as the interpreter keeps it.
@@ -174,6 +253,21 @@ pub struct Vm {
     started: bool,
     /// The arrow's target in 16.16 world pixels and the layer, or `None`.
     pub arrow: Option<(i32, i32, i32)>,
+    /// The door records, in load order.
+    pub doors: Vec<Door>,
+    /// An `MPHONE` is ringing (0x3dcbb8): one rings at a time.
+    pub ringing: bool,
+    /// He answered a phone in the last 250 frames (0x2d24f0): no `MPHONES`
+    /// starts and no `MPHONE` rings or answers.
+    pub phone_lock: bool,
+    /// The phones made, in load order. A `TELEPHONE`'s handle is its index
+    /// here (GTA8.EXE's is its object's), -1 when none was made or once it
+    /// is answered; the phone itself stays.
+    pub phones: Vec<Phone>,
+    /// The event clock (0x1427a0): one a game frame.
+    clock: u32,
+    /// Timed events, soonest first: (due, event).
+    events: Vec<(u32, Event)>,
     /// Texts shown since the last [`Vm::drain_briefs`].
     briefs: Vec<Brief>,
     /// The game frame: 7 of every 15 ticks.
@@ -207,6 +301,12 @@ impl Vm {
             kicks: Vec::new(),
             started: false,
             arrow: None,
+            doors: Vec::new(),
+            ringing: false,
+            phone_lock: false,
+            phones: Vec::new(),
+            clock: 0,
+            events: Vec::new(),
             briefs: Vec::new(),
             frame: crate::clock::game_frame(),
             waiting: BTreeSet::new(),
@@ -276,6 +376,20 @@ impl Vm {
                 decl.handle = a;
                 decl.second = a;
             }
+            // 0x79bb9: a door record, shut and off, its index in +4.
+            Some(DeclKind::Door) => decl.handle = self.make_door(index, &decl),
+            // 0x7991f (0x76da0): a phone at the block's centre; +4 holds it,
+            // +8 the first number when above 0 (otherwise -1).
+            Some(DeclKind::Telephone) => {
+                decl.handle = self.make_phone(&decl);
+                decl.second = if a > 0 { a } else { -1 };
+            }
+            // 0x79ffb: the line it would start is the trigger of the
+            // `MPHONES` its first number names; the radius is its second.
+            Some(DeclKind::PhoneTogg) => {
+                let phone = self.decls.get(self.decl_index(a)).map_or(-1, |m| m.handle);
+                decl.handle = self.make_trigger(TYPE_PHONE_TOGG, index, &decl, phone, b);
+            }
             Some(k) => {
                 if let Some(t) = trigger_type(k) {
                     decl.handle = self.make_trigger(t, index, &decl, a, b);
@@ -287,8 +401,61 @@ impl Vm {
         self.decls.push(decl);
     }
 
-    /// 0xe8340: a trigger record, armed. Only `TRIGGER`'s arguments have
-    /// been read (`line` = the first number, `radius` = the second); the
+    /// 0xe7e10 and 0xe8600, as the loader's `DOOR` case calls them: a door
+    /// record, shut and off. Past the last record GTA8.EXE stops (error -1);
+    /// ours: no record, logged.
+    fn make_door(&mut self, decl: usize, d: &Decl) -> i32 {
+        if self.doors.len() >= MAX_DOORS {
+            self.log.push(format!(
+                "mission: door {} has no record free: the original stops here",
+                d.label
+            ));
+            return -1;
+        }
+        self.doors.push(Door {
+            state: DoorState::Shut,
+            on: false,
+            flag: d.flag,
+            decl,
+        });
+        (self.doors.len() - 1) as i32
+    }
+
+    /// 0x76da0: a phone (object 0x28) at the block's centre, turned by the
+    /// second number. The object routine makes nothing off the map's blocks
+    /// or heights, as for a crate.
+    fn make_phone(&mut self, d: &Decl) -> i32 {
+        let [x, y, z] = d.pos;
+        if !(1..=255).contains(&x) || !(1..=255).contains(&y) || !(1..=5).contains(&z) {
+            return -1;
+        }
+        self.phones.push(Phone {
+            block: d.pos,
+            turn: d.nums.get(1).copied().unwrap_or(0),
+            frame: 0,
+        });
+        (self.phones.len() - 1) as i32
+    }
+
+    /// The phone a `TELEPHONE`'s handle names, while it has one.
+    fn phone_mut(&mut self, d: usize) -> Option<&mut Phone> {
+        let h = usize::try_from(self.decls[d].handle).ok()?;
+        self.phones.get_mut(h)
+    }
+
+    /// Set the frame of each of these phones that still has its handle
+    /// (0xf1b10).
+    fn phones_frame(&mut self, phones: &[usize], frame: u8) {
+        for &d in phones {
+            if let Some(p) = self.phone_mut(d) {
+                p.frame = frame;
+            }
+        }
+    }
+
+    /// 0xe8340: a trigger record, armed. `TRIGGER` and `MPHONES` give it
+    /// the line to start (their first number) and the radius (their second);
+    /// `PHONE_TOGG` gives the trigger it re-arms in place of the line. The
     /// other kinds' records are made in the same order so the numbering
     /// matches, but none of them fires yet.
     fn make_trigger(&mut self, kind: u8, decl: usize, d: &Decl, a: i32, b: i32) -> i32 {
@@ -362,8 +529,10 @@ impl Vm {
         }
     }
 
-    /// One game frame: the trigger scan, then every process once.
+    /// One game frame: the events due, the trigger scan, then every process
+    /// once.
     pub fn run_frame(&mut self, w: &mut dyn ScriptWorld) {
+        self.run_events();
         self.scan_triggers(w);
         for slot in 0..SLOTS {
             if !self.procs[slot].in_use {
@@ -382,57 +551,139 @@ impl Vm {
         }
     }
 
+    /// GTA8.EXE's 0x10b50: an event `frames` from now. It goes before the
+    /// first one due at the same time or later.
+    fn schedule(&mut self, frames: u32, e: Event) {
+        let due = self.clock.wrapping_add(frames);
+        let at = self.events.partition_point(|&(d, _)| d < due);
+        self.events.insert(at, (due, e));
+    }
+
+    /// 0x10ed0: the events due now, then the clock moves on.
+    fn run_events(&mut self) {
+        while self.events.first().is_some_and(|&(d, _)| d == self.clock) {
+            let (_, e) = self.events.remove(0);
+            match e {
+                Event::StartupSound => self
+                    .log
+                    .push("mission: STARTUP's sound 0 is due (sound waits for M8)".into()),
+                Event::PhoneLockOver => {
+                    self.phone_lock = false;
+                    self.log.push("mission: the phones can ring again".into());
+                }
+            }
+        }
+        self.clock = self.clock.wrapping_add(1);
+    }
+
     /// The script triggers of GTA8.EXE's scan (0xf3800), in record order,
-    /// for the one player. Only type 4 (`TRIGGER`) is ported.
+    /// for the one player. Types 4 (`TRIGGER`), 12 (`MPHONES`) and 13
+    /// (`PHONE_TOGG`) are ported; the others' records stay as they are.
     fn scan_triggers(&mut self, w: &mut dyn ScriptWorld) {
+        // A player getting in or out of a car (his state 1) is skipped for
+        // every trigger.
+        let Some((bx, by)) = w.trigger_block() else {
+            return;
+        };
+        let car = w.trigger_car_model();
         for t in 0..self.triggers.len() {
-            if self.triggers[t].state == TriggerState::Disabled {
+            let (state, kind) = (self.triggers[t].state, self.triggers[t].kind);
+            if state == TriggerState::Disabled
+                || !matches!(kind, TYPE_TRIGGER | TYPE_MPHONES | TYPE_PHONE_TOGG)
+            {
                 continue;
             }
-            let Some((bx, by)) = w.trigger_block() else {
-                continue;
-            };
+            // The type's own check (the switch at 0xf41cc). `MPHONES` skips
+            // a driver of model 47, and puts back a trigger still firing from
+            // the frame before (its start waited), skipping it this frame.
+            if kind == TYPE_MPHONES {
+                let mut skip = car == Some(MPHONES_IGNORES_MODEL);
+                if state == TriggerState::Firing {
+                    self.triggers[t].state = TriggerState::Armed;
+                    skip = true;
+                }
+                if skip {
+                    continue;
+                }
+            }
             let trig = &self.triggers[t];
-            if trig.kind != 4 {
-                continue;
-            }
-            let r = trig.radius;
-            let [tx, ty, _] = trig.block;
-            let inside = (tx - r..=tx + r).contains(&bx) && (ty - r..=ty + r).contains(&by);
-            if !inside {
-                continue;
-            }
-            if trig.state == TriggerState::Armed {
+            if trig.state == TriggerState::Armed && near(trig.block, trig.radius, bx, by) {
                 if trig.delay > 0 {
-                    // 0x10b50 counts the delay down; not read yet, and no
-                    // TRIGGER has one.
+                    // 0x10b50 counts the delay down; not read yet, and none
+                    // of these types has one.
                     self.triggers[t].state = TriggerState::Waiting;
                     continue;
                 }
                 self.triggers[t].state = TriggerState::Firing;
             }
+            // A trigger left firing runs its case every frame, in range or
+            // not (0xf45b0).
             if self.triggers[t].state != TriggerState::Firing {
                 continue;
             }
-            let (line, decl, kill) = (
-                self.triggers[t].line,
-                self.triggers[t].decl,
-                self.triggers[t].kill,
-            );
-            match self.start(PLAYER_SLOT, t as i32, line) {
-                Some(slot) => self.log.push(format!(
-                    "mission: trigger {} starts line {line} in slot {slot}",
-                    self.decls[decl].label
-                )),
-                None => self.log.push(format!(
-                    "mission: trigger {} has no free slot for line {line}",
-                    self.decls[decl].label
-                )),
-            }
-            // The kill link (`SET_KILLTRIG`): type 4 ends that process too.
+            self.fire(t, bx, by);
+            // The kill link (`SET_KILLTRIG`): that process ends too.
+            let kill = self.triggers[t].kill;
             if kill > -1 {
                 self.kill(kill as usize);
             }
+        }
+    }
+
+    /// A firing trigger's case (the switch at 0xf594a).
+    fn fire(&mut self, t: usize, bx: i32, by: i32) {
+        let trig = self.triggers[t].clone();
+        match trig.kind {
+            // 0xf4b63: its line starts, which marks it started.
+            TYPE_TRIGGER => self.fire_start(t),
+            // 0xf4fec: not while a phone rings or the phone lock is on; it
+            // stays firing, and the check puts it back next frame.
+            TYPE_MPHONES => {
+                if self.ringing || self.phone_lock {
+                    return;
+                }
+                self.fire_start(t);
+                self.triggers[t].state = TriggerState::Started;
+            }
+            // 0xf5053: inside its radius but outside 3 blocks, it re-arms
+            // the phone trigger it names if that has started. It never stops
+            // firing, so this runs every frame from the first time he comes
+            // near until a `DISABLE`.
+            TYPE_PHONE_TOGG => {
+                if !near(trig.block, trig.radius, bx, by)
+                    || near(trig.block, PHONE_TOGG_INNER, bx, by)
+                {
+                    return;
+                }
+                let Some(phone) = usize::try_from(trig.line).ok().filter(|&p| p < self.triggers.len())
+                else {
+                    return;
+                };
+                if self.triggers[phone].state == TriggerState::Started {
+                    self.triggers[phone].state = TriggerState::Armed;
+                    self.log.push(format!(
+                        "mission: trigger {} re-arms trigger {}",
+                        self.decls[trig.decl].label,
+                        self.decls[self.triggers[phone].decl].label
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Start a trigger's line with the player as parent (0x75e90).
+    fn fire_start(&mut self, t: usize) {
+        let (line, decl) = (self.triggers[t].line, self.triggers[t].decl);
+        match self.start(PLAYER_SLOT, t as i32, line) {
+            Some(slot) => self.log.push(format!(
+                "mission: trigger {} starts line {line} in slot {slot}",
+                self.decls[decl].label
+            )),
+            None => self.log.push(format!(
+                "mission: trigger {} has no free slot for line {line}",
+                self.decls[decl].label
+            )),
         }
     }
 
@@ -485,6 +736,46 @@ impl Vm {
             trigger: 0,
             ..Proc::FREE
         };
+    }
+
+    /// The loop `RESET` and an answered `MPHONE` share: every process in
+    /// slots 3 to 31 ends, re-arming its trigger, except this one, those
+    /// waiting on `MPHONE`, and keep classes 1 and 2.
+    fn end_others(&mut self, slot: usize) {
+        for s in 3..SLOTS {
+            let p = self.procs[s];
+            if s == slot || !p.in_use || matches!(p.keep, 1 | 2) {
+                continue;
+            }
+            if self.cmds.get(p.cmd).and_then(|c| c.op) == Some(Op::Mphone) {
+                continue;
+            }
+            self.kill(s);
+        }
+    }
+
+    /// The clean-ups after that loop that gfa-sim has anything for.
+    /// GTA8.EXE's also take away the mission's own peds, cars and objects
+    /// (0x765b0, 0x76490, 0x766e0), which no ported command makes yet, and
+    /// stop its sounds (0xe7670, and for `RESET` 0xf20f0), which are M8's.
+    /// `MPHONE` also clears the briefs (0x102260, 0x1029a0, not read), which
+    /// are not drawn yet.
+    fn clean_up(&mut self) {
+        // 0xe8460: every trigger without its declaration's flag is disabled.
+        for t in &mut self.triggers {
+            if t.flag == 0 {
+                t.state = TriggerState::Disabled;
+            }
+        }
+        // 0xe84a0: every door without one is shut and turned off.
+        for d in &mut self.doors {
+            if d.flag == 0 {
+                d.state = DoorState::Shut;
+                d.on = false;
+            }
+        }
+        // 0xfef50: the arrow goes out.
+        self.arrow = None;
     }
 
     /// The root of a process's chain: the player who is paid.
@@ -598,9 +889,9 @@ impl Vm {
                 }
                 self.paid(slot, w)
             }
-            // 0xa24d4: once a game. It marks p1's trigger started and moves on
-            // by p2 without pay; a later process stays on it for good. Its call
-            // of 0x10b50(10, 0, 20) is not read yet.
+            // 0xa24d4: once a game. It marks p1's trigger started, puts sound
+            // 0 on the timed queue for ten frames on (0x10b50(10, 0, 20)), and
+            // moves on by p2 without pay; a later process stays on it for good.
             Op::Startup => {
                 if self.started {
                     return Step::Stay;
@@ -609,6 +900,7 @@ impl Vm {
                 if !self.trigger_set(t, TriggerState::Started) {
                     return Step::Wait("STARTUP names no trigger: the original stops here");
                 }
+                self.schedule(STARTUP_SOUND_FRAMES, Event::StartupSound);
                 let s = self.success(slot);
                 self.started = true;
                 s
@@ -799,8 +1091,151 @@ impl Vm {
                 }
                 Step::Stay
             }
+            // 0xa293f and 0xa298f: p1's door turned on (0xe8800) or off
+            // (0xe87a0), then pay and move on. While the door is opening or
+            // closing it is refused and the process stays on the command.
+            Op::DoorOn | Op::DoorOff => {
+                let d = &self.decls[self.decl_index(p1)];
+                if d.kind != Some(DeclKind::Door) {
+                    return Step::Wait("a door or gate of a kind whose loader is not read");
+                }
+                let Some(door) = usize::try_from(d.handle)
+                    .ok()
+                    .and_then(|i| self.doors.get_mut(i))
+                else {
+                    return Step::Wait("a DOOR that got no record");
+                };
+                if matches!(door.state, DoorState::Opening | DoorState::Closing) {
+                    return Step::Stay;
+                }
+                door.on = op == Op::DoorOn;
+                self.paid(slot, w)
+            }
+            // 0x7d400.
+            Op::Mphone => self.mphone(p, slot, ci, w),
+            // 0xa7172: the loop and clean-ups above, then pay and move on.
+            Op::Reset => {
+                self.end_others(slot);
+                self.clean_up();
+                self.log.push("mission: RESET".into());
+                self.paid(slot, w)
+            }
+            // 0xa583b: is p1's position inside the player's view? Then pay
+            // and take p2, otherwise p3. GTA8.EXE tests it in pixels against
+            // the rectangle in his player record (0xcd760), whose making is
+            // not read; gfa-sim's view stands in, by blocks.
+            Op::GeneralOnscreen => {
+                let d = &self.decls[self.decl_index(p1)];
+                if d.kind.is_some_and(moves) {
+                    return Step::Wait("GENERAL_ONSCREEN of something that moves: not ported");
+                }
+                let [x, y, _] = original_pixels(d);
+                if w.onscreen(x >> 6, y >> 6) {
+                    self.paid(slot, w)
+                } else {
+                    self.failure(slot)
+                }
+            }
             _ => Step::Wait("not ported yet"),
         }
+    }
+
+    /// `MPHONE` (0x7d400): p3 phones, labelled from p1 on, ring until he
+    /// answers one or goes out of reach. It never pays.
+    fn mphone(&mut self, p: [i32; 5], slot: usize, ci: usize, w: &mut dyn ScriptWorld) -> Step {
+        let [first, _, count, _, _] = p;
+        let phones: Vec<usize> = (0..count.max(0))
+            .map(|i| self.decl_index(first + i))
+            .collect();
+        if phones
+            .iter()
+            .any(|&d| self.decls[d].kind != Some(DeclKind::Telephone))
+        {
+            return Step::Wait(
+                "MPHONE of a declaration that is not a TELEPHONE: the original reads it as one",
+            );
+        }
+        // Nothing at all while the phone lock is on.
+        if self.phone_lock {
+            return Step::Stay;
+        }
+        // Arriving: the phones start ringing, unless another MPHONE's are.
+        if self.procs[slot].state == 1 {
+            self.procs[slot].state = 0;
+            if !self.ringing {
+                self.ringing = true;
+                self.cmds[ci].p[3] = RING_START;
+                self.phones_frame(&phones, 3);
+                self.log.push(format!(
+                    "mission: phones {first} to {} ring",
+                    first + count - 1
+                ));
+            }
+        }
+        self.cmds[ci].p[3] -= 1;
+        // More than 15 blocks from the first phone: they stop, and the
+        // process frees its slot without re-arming its trigger.
+        let [fx, fy, _] = original_pixels(&self.decls[self.decl_index(first)]);
+        let (px, py, _) = w.player_pos();
+        if !near([fx >> 6, fy >> 6, 0], MPHONE_REACH, px >> 21, py >> 21) {
+            self.phones_frame(&phones, 1);
+            self.ringing = false;
+            self.procs[slot].in_use = false;
+            self.log
+                .push("mission: he is out of the phones' reach; they stop ringing".into());
+            return Step::Moved;
+        }
+        // Each phone in turn: a ring at 0 and at -10, which rocks it between
+        // its frames 2 and 3 (0xf1dd0), and the answer: he stands on foot
+        // within 16 of the original's pixels of it.
+        let ring = self.cmds[ci].p[3];
+        let (hx, hy) = (px >> 15, py >> 15);
+        let mut rang = None;
+        for (i, &d) in phones.iter().enumerate() {
+            let handle = self.decls[d].handle;
+            if handle > -1 && (ring == 0 || ring == RING_SECOND) {
+                rang = Some(ring);
+                if let Some(p) = self.phone_mut(d) {
+                    p.frame = match p.frame {
+                        2 => 3,
+                        3 => 2,
+                        f => f,
+                    };
+                }
+            }
+            let [x, y, _] = original_pixels(&self.decls[d]);
+            let at = (x - hx).abs() < ANSWER_REACH_PX && (y - hy).abs() < ANSWER_REACH_PX;
+            if at && handle > -1 && !self.phone_lock && w.player_on_foot() {
+                self.phones_frame(&phones, 1);
+                return self.answer(slot, ci, i, d);
+            }
+        }
+        match rang {
+            Some(0) => self.cmds[ci].p[3] = -1,
+            Some(_) => self.cmds[ci].p[3] = RING_START,
+            None => {}
+        }
+        Step::Stay
+    }
+
+    /// 0x7d700: he answered the `i`th phone, `d`. Every other process ends
+    /// and the clean-ups run, as for `RESET`. The process moves on by p2,
+    /// then `i` commands further, so each phone has its own line. That phone
+    /// rings no more, and the phone lock is on for 250 frames.
+    fn answer(&mut self, slot: usize, ci: usize, i: usize, d: usize) -> Step {
+        self.end_others(slot);
+        self.clean_up();
+        let s = self.advance(slot, self.cmds[ci].p[1]);
+        if self.procs[slot].in_use {
+            self.procs[slot].cmd += i;
+        }
+        self.decls[d].handle = -1;
+        self.ringing = false;
+        self.schedule(PHONE_LOCK_FRAMES, Event::PhoneLockOver);
+        self.phone_lock = true;
+        self.log
+            .push(format!("mission: phone {} answered", self.decls[d].label));
+        s
     }
 
     /// Everything that decides later frames.
@@ -843,7 +1278,28 @@ impl Vm {
             }
             None => h.bool(false),
         }
+        for d in &self.doors {
+            h.u8(d.state as u8);
+            h.bool(d.on);
+        }
+        for p in &self.phones {
+            h.u8(p.frame);
+        }
+        h.bool(self.ringing);
+        h.bool(self.phone_lock);
+        h.u32(self.clock);
+        for &(due, e) in &self.events {
+            h.u32(due);
+            h.u8(e as u8);
+        }
     }
+}
+
+/// Is block `(bx, by)` within `r` blocks of `block` on both axes, edges
+/// included?
+fn near(block: [i32; 3], r: i32, bx: i32, by: i32) -> bool {
+    let [x, y, _] = block;
+    (x - r..=x + r).contains(&bx) && (y - r..=y + r).contains(&by)
 }
 
 /// The trigger type a declaration kind's loader makes (0xe8340's `type`),
@@ -939,9 +1395,14 @@ fn moves(k: DeclKind) -> bool {
 
 /// A declaration's position in the original's pixels (64 to a block):
 /// most kinds are written in blocks; these few in pixels (AmiGTA1's
-/// `gta_script_is_block`).
+/// `gta_script_is_block`). A `TELEPHONE`'s the loader moves to its block's
+/// centre (0x76da0), and the position reader (0x7acf0) returns that.
 fn original_pixels(d: &Decl) -> [i32; 3] {
     use DeclKind as K;
+    if d.kind == Some(K::Telephone) {
+        let [x, y, z] = d.pos;
+        return [x * 64 + 32, y * 64 + 32, z * 64];
+    }
     let pixels = matches!(
         d.kind,
         Some(
@@ -962,29 +1423,42 @@ fn original_pixels(d: &Decl) -> [i32; 3] {
 mod tests {
     use super::*;
 
-    /// A world with nothing in it but the player's block, his score and the
-    /// crates: `(block, kind, amount)`.
+    /// A world with nothing in it but the player's block (he stands at its
+    /// centre, or at `at` in the original's pixels), his car, his score, what
+    /// is on screen and the crates: `(block, kind, amount)`.
     #[derive(Default)]
     struct Fake {
         block: Option<(i32, i32)>,
+        at: Option<(i32, i32)>,
+        car: Option<u8>,
         paid: Vec<i32>,
         target: bool,
+        shown: Vec<(i32, i32)>,
         crates: Vec<([i32; 3], i32, i32)>,
     }
 
     impl ScriptWorld for Fake {
         fn player_pos(&self) -> (i32, i32, i32) {
+            if let Some((x, y)) = self.at {
+                return (x << 15, y << 15, 2);
+            }
             let (x, y) = self.block.unwrap_or_default();
-            (x << 21, y << 21, 2)
+            ((x << 21) + (1 << 20), (y << 21) + (1 << 20), 2)
         }
         fn player_on_foot(&self) -> bool {
-            true
+            self.car.is_none()
         }
-        fn onscreen(&self, _: i32, _: i32) -> bool {
-            false
+        fn onscreen(&self, bx: i32, by: i32) -> bool {
+            self.shown.contains(&(bx, by))
         }
         fn trigger_block(&self) -> Option<(i32, i32)> {
-            self.block
+            match self.at {
+                Some((x, y)) => Some((x >> 6, y >> 6)),
+                None => self.block,
+            }
+        }
+        fn trigger_car_model(&self) -> Option<u8> {
+            self.car
         }
         fn pay(&mut self, points: i32) {
             self.paid.push(points);
@@ -1224,6 +1698,142 @@ mod tests {
         frames(&mut v, &mut w, 1);
         assert_eq!(v.running(), vec![(0, 10, "DONOWT")]);
         assert_eq!(w.paid, vec![90]);
+    }
+
+    #[test]
+    fn door_on_turns_the_door_on_and_reset_puts_out_what_has_no_flag() {
+        let mut v = vm("5 1 (10,10,3) DOOR 0 11 7\n6 (20,20,3) DOOR 0 11 7\n\
+            7 (5,5,4) TRIGGER 100 0\n8 1 (6,6,4) TRIGGER 100 0\n9 (30,30,3) BARRIER 0 0\n-1\n\
+            0 DOOR_ON 5 0 0 0 30\n1 DOOR_ON 6 0 0 0 0\n2 RESET 0 0 0 0 0\n\
+            3 DOOR_ON 9 0 0 0 0\n-1\n");
+        let mut w = Fake::default();
+        assert_eq!(v.doors.len(), 2);
+        assert!(v.doors.iter().all(|d| d.state == DoorState::Shut && !d.on));
+        frames(&mut v, &mut w, 2);
+        assert!(v.doors[0].on && v.doors[1].on);
+        assert_eq!(w.paid, vec![30], "DOOR_ON pays p5");
+        frames(&mut v, &mut w, 1);
+        assert!(v.doors[0].on, "a door with its flag stays on");
+        assert!(!v.doors[1].on, "one without is turned off");
+        assert_eq!(v.triggers[0].state, TriggerState::Disabled);
+        assert_eq!(v.triggers[1].state, TriggerState::Armed);
+        frames(&mut v, &mut w, 2);
+        assert_eq!(v.running(), vec![(0, 3, "DOOR_ON")], "a BARRIER waits");
+    }
+
+    #[test]
+    fn door_on_waits_while_the_door_moves() {
+        let mut v = vm("5 1 (10,10,3) DOOR 0 11 7\n-1\n\
+            0 DOOR_OFF 5 0 0 0 0\n1 DONOWT 0 0 0 0 0\n-1\n");
+        let mut w = Fake::default();
+        v.doors[0].state = DoorState::Closing;
+        v.doors[0].on = true;
+        frames(&mut v, &mut w, 3);
+        assert_eq!(v.running(), vec![(0, 0, "DOOR_OFF")]);
+        v.doors[0].state = DoorState::Open;
+        frames(&mut v, &mut w, 1);
+        assert_eq!(v.running(), vec![(0, 1, "DONOWT")]);
+        assert!(!v.doors[0].on);
+    }
+
+    /// Two phones on (50,50) and (51,50), their MPHONES trigger (radius 3)
+    /// and its PHONE_TOGG (radius 5); a side process from a TRIGGER.
+    const PHONES: &str = "10 1 (50,50,4) TELEPHONE 0 0\n11 1 (51,50,4) TELEPHONE 0 256\n\
+        20 1 (50,50,4) MPHONES 100 3\n21 1 (50,50,4) PHONE_TOGG 20 5\n\
+        22 1 (53,50,4) TRIGGER 200 0\n-1\n\
+        0 DONOWT 0 0 0 0 0\n100 MPHONE 10 0 2 30 100\n101 SURVIVE 0 0 0 1000 0\n\
+        102 SURVIVE 0 0 0 1000 0\n200 DONOWT 0 0 0 0 0\n-1\n";
+
+    #[test]
+    fn the_phone_rings_and_answering_takes_that_phones_line() {
+        let mut v = vm(PHONES);
+        assert_eq!(v.decls[1].second, -1, "a TELEPHONE's first number, if above 0");
+        assert_eq!(v.triggers[1].line, 0, "the PHONE_TOGG names trigger 0");
+        let mut w = Fake {
+            block: Some((53, 50)),
+            ..Fake::default()
+        };
+        frames(&mut v, &mut w, 1);
+        assert_eq!(jobs(&v), vec![(4, 100, "MPHONE"), (5, 200, "DONOWT")]);
+        assert!(v.ringing);
+        assert_eq!(v.triggers[0].state, TriggerState::Started);
+        // He walks onto the second phone, within 16 pixels of its centre.
+        w.at = Some((51 * 64 + 32 + 15, 50 * 64 + 32 - 15));
+        frames(&mut v, &mut w, 1);
+        assert_eq!(jobs(&v), vec![(4, 102, "SURVIVE")], "its line; 200 ended");
+        assert_eq!(v.triggers[2].state, TriggerState::Armed, "re-armed by the end");
+        assert!(!v.ringing && v.phone_lock);
+        assert_eq!(v.decls[1].handle, -1, "that phone rings no more");
+        assert!(w.paid.is_empty(), "MPHONE never pays");
+        // The lock lasts 250 frames.
+        frames(&mut v, &mut w, 250);
+        assert!(v.phone_lock);
+        frames(&mut v, &mut w, 1);
+        assert!(!v.phone_lock);
+    }
+
+    #[test]
+    fn the_phone_rings_twice_every_36_frames_and_stops_out_of_reach() {
+        let mut v = vm(PHONES);
+        let mut w = Fake {
+            block: Some((50, 53)),
+            ..Fake::default()
+        };
+        frames(&mut v, &mut w, 25);
+        assert_eq!(v.cmds[1].p[3], -1, "the first ring, at 0");
+        frames(&mut v, &mut w, 9);
+        assert_eq!(v.cmds[1].p[3], 25, "the second, at -10");
+        w.block = Some((66, 50));
+        frames(&mut v, &mut w, 1);
+        assert!(jobs(&v).iter().all(|j| j.2 != "MPHONE"), "the slot is free");
+        assert!(!v.ringing);
+        assert_eq!(
+            v.triggers[0].state,
+            TriggerState::Started,
+            "and its trigger is not re-armed"
+        );
+        // The PHONE_TOGG re-arms it between 3 and 5 blocks out.
+        w.block = Some((54, 50));
+        frames(&mut v, &mut w, 1);
+        assert_eq!(v.triggers[0].state, TriggerState::Armed);
+    }
+
+    #[test]
+    fn mphones_waits_out_the_lock_and_a_driver_of_model_47() {
+        let mut v = vm(PHONES);
+        // Near the phones, but not on one.
+        let mut w = Fake {
+            block: Some((50, 52)),
+            car: Some(47),
+            ..Fake::default()
+        };
+        frames(&mut v, &mut w, 2);
+        assert!(jobs(&v).iter().all(|j| j.1 != 100));
+        w.car = None;
+        v.phone_lock = true;
+        frames(&mut v, &mut w, 1);
+        assert_eq!(v.triggers[0].state, TriggerState::Firing, "it waits firing");
+        frames(&mut v, &mut w, 1);
+        assert_eq!(v.triggers[0].state, TriggerState::Armed, "put back");
+        v.phone_lock = false;
+        frames(&mut v, &mut w, 1);
+        assert_eq!(v.triggers[0].state, TriggerState::Started);
+        assert!(jobs(&v).iter().any(|j| j.1 == 100));
+    }
+
+    #[test]
+    fn general_onscreen_takes_p2_with_pay_or_p3() {
+        // As Liberty City's opening has it: p3 is its own label.
+        let mut v = vm("3 (100,100,4) TELEPHONE 0 0\n-1\n\
+            5 GENERAL_ONSCREEN 3 0 5 0 40\n6 DONOWT 0 0 0 0 0\n-1\n");
+        let mut w = Fake::default();
+        frames(&mut v, &mut w, 3);
+        assert_eq!(v.running(), vec![(0, 5, "GENERAL_ONSCREEN")]);
+        assert!(w.paid.is_empty());
+        w.shown.push((100, 100));
+        frames(&mut v, &mut w, 1);
+        assert_eq!(v.running(), vec![(0, 6, "DONOWT")]);
+        assert_eq!(w.paid, vec![40]);
     }
 
     #[test]

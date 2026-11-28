@@ -1,0 +1,27 @@
+# The crates near Liberty City's start, as the script puts them out
+# (docs/MISSION_VM.md).
+#
+# The level declares 151 POWERUPs, 32 of them kill frenzies. GTA8.EXE's
+# loader keeps only their numbers. The opening's POWERUP_ONs make 89:
+# 73 crates, and frenzies 1 to 16 standing loose with no crate. The rest
+# wait for the jobs that name them.
+#
+# Frenzy 19, three blocks from the start, is never put out in section 1.
+# Frenzy 18, 14 blocks away, is only put out by a job. Before the game ran
+# the script, both stood there in crates, the first crates a player found.
+#
+# section: 1
+# mission: on
+# expect: pickups: loose 1 at (81,146) - kind 14 (kill frenzy), 16
+# expect: pickups: took kill frenzy
+# reject: opened at (108,120)
+# reject: opened at (118,105)
+# reject: kind 14 (kill frenzy), 19
+# reject: kind 14 (kill frenzy), 18
+wait 300
+drive 0 108 120 0
+wait 10
+drive 0 118 105 0
+wait 10
+drive 0 81 146 0
+wait 10

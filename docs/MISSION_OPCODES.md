@@ -110,27 +110,43 @@ them.
 ## What gfa-sim does
 
 - **The interpreter** (`gfa_sim::mission::Vm`) is ported from GTA8.EXE's
-  live code (`MISSION_VM.md`). Turn it on with `# mission: on` in a test
-  script. The game does not run it yet.
+  live code (`MISSION_VM.md`). The game runs it from the start of every
+  level. A test script turns it on with `# mission: on`.
 - **Commands it carries out:**
-  - flow and processes: `DONOWT`, `SURVIVE`, `KICKSTART`,
+  - flow and processes: `DONOWT`, `SURVIVE`, `STARTUP`, `KICKSTART`,
     `KEEP_THIS_PROC`, `KILL_SIDE_PROC`;
   - triggers and counters: `DISABLE`, `COMPARE`, `INCCOUNT`, `DECCOUNT`;
+  - crates: `POWERUP_OFF`, `IS_POWERUP_DONE`;
   - text and the arrow: `MOBILE_BRIEF`, `ARROW_OFF`.
 - **Commands it carries out in part:**
-  - `STARTUP`: it skips one call that has not been read yet.
   - `ENABLE`: it waits when the declaration is a door or a watch trigger.
   - `ARROW`: it waits when the target is something that moves.
+  - `GENERAL_ONSCREEN`: it waits when the target is something that moves.
+    It tests gfa-sim's view by blocks, where the original tests a
+    rectangle in pixels whose making has not been read.
+  - `POWERUP_ON`: it waits when the label names no `POWERUP`. That is 56
+    uses in sections [102] and [103], which in the original read
+    declaration record 0.
+  - `DOOR_ON` and `DOOR_OFF`: they wait on the gates and specific doors
+    (20 uses), whose loaders have not been read.
+  - `MPHONE`: it waits on its one use whose labels name no `TELEPHONE`.
+  - `RESET` and `MPHONE`: their clean-ups skip the mission's own cars,
+    peds and objects, which no ported command makes yet.
 - **Any other command:** a process that reaches it waits there and logs
   its section and line once. It never takes the command's success path.
   AmiGTA1 takes it for a command it lacks.
 - **Declarations:**
-  - The interpreter fires `TRIGGER`s and counts with the counters. Every
-    other kind that makes a trigger gets its record in the original's
-    order, but none of those fires yet.
+  - The interpreter fires `TRIGGER`s, `MPHONES` and `PHONE_TOGG`s, counts
+    with the counters and rings the `TELEPHONE`s, which are not drawn yet.
+    Every other kind that makes a trigger gets its record in the
+    original's order, but none of those fires yet.
+  - Each `DOOR` gets its door record, which `DOOR_ON`, `DOOR_OFF` and
+    `RESET` use. The door itself is not made yet, so it never moves.
   - The world reads five kinds when it loads a level:
     - `PLAYER` (the start);
-    - `POWERUP` (crates);
+    - `POWERUP`: a crate on every one, which only a test script without
+      the interpreter keeps. With the interpreter on, the crates are the
+      script's `POWERUP_ON`s', as in the original;
     - `SPRAY`, `BOMBSHOP` and `BOMBSHOP_COST` (the shops).
 
 ## The tables
@@ -140,26 +156,25 @@ number. In the gfa-sim column, `yes` marks a command the VM carries out or
 a declaration kind the world reads.
 
 <!-- BEGIN gfa-tool mission coverage --markdown -->
-
 Sections [1] [2] [102] [103] [202] [203].
 
-Commands: 129 of the original's 150 in use, on 20130 lines. gfa-sim runs 11 of them, 7879 of the 20130 lines (39.1%), and 3 more in part (1192 lines).
+Commands: 129 of the original's 150 in use, on 20130 lines. gfa-sim runs 14 of them, 8075 of the 20130 lines (40.1%), and 8 more in part (3189 lines).
 
-Declarations: 50 of the original's 72 kinds in use, on 4568 lines. gfa-sim reads 11 of them, 1851 of the 4568 lines (40.5%).
+Declarations: 50 of the original's 72 kinds in use, on 4568 lines. gfa-sim reads 14 of them, 2566 of the 4568 lines (56.1%).
 
 | No. | Command                    | Lines | [1] | [2] | [102] | [103] | [202] | [203] | gfa-sim |
 | --: | -------------------------- | ----: | --: | --: | ----: | ----: | ----: | ----: | ------- |
 |   4 | `SURVIVE`                  |  1924 | 287 | 410 |   341 |   269 |   257 |   360 | yes     |
 |  18 | `DISABLE`                  |  1425 | 141 | 226 |   214 |   244 |   267 |   333 | yes     |
 |  89 | `KICKSTART`                |  1174 |  78 | 104 |   198 |   153 |   326 |   315 | yes     |
-|  64 | `POWERUP_ON`               |  1092 | 175 | 159 |   215 |   212 |   163 |   168 |         |
+|  64 | `POWERUP_ON`               |  1092 | 175 | 159 |   215 |   212 |   163 |   168 | part    |
 | 111 | `MOBILE_BRIEF`             |  1059 | 125 | 164 |   176 |   145 |   281 |   168 | yes     |
 |  36 | `ARROW_OFF`                |  1041 |  99 | 141 |   213 |   150 |   282 |   156 | yes     |
 |  69 | `CHANGE_PED_TYPE`          |   970 |  33 |  52 |    73 |   115 |   219 |   478 |         |
 | 105 | `IS_GOAL_DEAD`             |   925 |  83 |  84 |    61 |   120 |   163 |   414 |         |
 |  19 | `ENABLE`                   |   793 |  95 | 115 |   121 |   143 |   156 |   163 | part    |
 | 116 | `MESSAGE_BRIEF`            |   669 |  75 |  94 |   138 |   104 |   117 |   141 |         |
-| 129 | `RESET`                    |   497 |  43 |  61 |    85 |    50 |   164 |    94 |         |
+| 129 | `RESET`                    |   497 |  43 |  61 |    85 |    50 |   164 |    94 | part    |
 |   1 | `DESTROY`                  |   452 |   4 |   6 |    67 |    58 |   130 |   187 |         |
 |  20 | `DECCOUNT`                 |   435 |  39 |  35 |    59 |    62 |    87 |   153 | yes     |
 | 101 | `KILL_SPEC_PROC`           |   418 |  16 |  20 |    85 |    47 |   160 |    90 |         |
@@ -169,7 +184,7 @@ Declarations: 50 of the original's 72 kinds in use, on 4568 lines. gfa-sim reads
 | 110 | `SPEECH_BRIEF`             |   313 |  36 |  54 |    49 |    30 |    57 |    87 |         |
 | 142 | `RESET_KF`                 |   280 |  21 |  21 |    34 |    34 |    80 |    90 |         |
 |   3 | `STEAL`                    |   255 |  21 |  35 |    59 |    24 |    90 |    26 |         |
-| 106 | `GENERAL_ONSCREEN`         |   247 |  23 |  18 |     9 |    16 |    50 |   131 |         |
+| 106 | `GENERAL_ONSCREEN`         |   247 |  23 |  18 |     9 |    16 |    50 |   131 | part    |
 |  52 | `ARROWCAR`                 |   245 |  35 |  57 |    31 |    33 |    60 |    29 |         |
 |  67 | `CHANGE_TYPE`              |   242 |   0 |   0 |     9 |     1 |   205 |    27 |         |
 |  90 | `IS_PED_IN_CAR`            |   223 |  38 |  56 |    43 |    17 |    46 |    23 |         |
@@ -177,7 +192,7 @@ Declarations: 50 of the original's 72 kinds in use, on 4568 lines. gfa-sim reads
 |  51 | `ARROWPED`                 |   170 |  19 |  12 |    32 |    36 |    35 |    36 |         |
 |  65 | `PLAIN_EXPL_BUILDING`      |   167 |  40 |   0 |     0 |    17 |    48 |    62 |         |
 | 114 | `PED_WEAPON`               |   164 |   0 |   1 |     4 |    39 |    21 |    99 |         |
-| 133 | `IS_POWERUP_DONE`          |   158 |  18 |  18 |    20 |    22 |    38 |    42 |         |
+| 133 | `IS_POWERUP_DONE`          |   158 |  18 |  18 |    20 |    22 |    38 |    42 | yes     |
 | 127 | `INCCOUNT`                 |   150 |  24 |  26 |    18 |    19 |    32 |    31 | yes     |
 | 135 | `FRENZY_BRIEF`             |   140 |   7 |   7 |    13 |    13 |    47 |    53 |         |
 |  88 | `PARKED_ON`                |   135 |   6 |  15 |    26 |    28 |    42 |    18 |         |
@@ -188,7 +203,7 @@ Declarations: 50 of the original's 72 kinds in use, on 4568 lines. gfa-sim reads
 | 130 | `KEEP_THIS_PROC`           |   113 |   6 |   6 |    36 |    22 |    21 |    22 | yes     |
 |  37 | `P_BRIEF`                  |   111 |  12 |  14 |    28 |    29 |     0 |    28 |         |
 | 141 | `KF_PROCESS`               |   102 |   7 |   7 |    12 |    12 |    30 |    34 |         |
-|  70 | `DOOR_ON`                  |   101 |  14 |  38 |    24 |    25 |     0 |     0 |         |
+|  70 | `DOOR_ON`                  |   101 |  14 |  38 |    24 |    25 |     0 |     0 | part    |
 |  39 | `WAIT_FOR_PED`             |   100 |   9 |  24 |     1 |     6 |    13 |    47 |         |
 |  45 | `MISSION_END`              |    91 |  11 |  14 |    18 |    16 |    16 |    16 |         |
 | 132 | `DEAD_ARRESTED`            |    90 |   8 |   8 |    24 |    17 |    14 |    19 |         |
@@ -198,7 +213,7 @@ Declarations: 50 of the original's 72 kinds in use, on 4568 lines. gfa-sim reads
 |  85 | `CHECK_CAR`                |    59 |  22 |  31 |     4 |     1 |     0 |     1 |         |
 |   8 | `DUMMYON`                  |    55 |   0 |   8 |     6 |    17 |     9 |    15 |         |
 | 109 | `LOCATE`                   |    55 |   0 |   0 |    21 |    18 |    15 |     1 |         |
-|  71 | `DOOR_OFF`                 |    54 |   2 |  12 |     6 |     4 |    15 |    15 |         |
+|  71 | `DOOR_OFF`                 |    54 |   2 |  12 |     6 |     4 |    15 |    15 | part    |
 | 138 | `KF_CANCEL_BRIEFING`       |    54 |   0 |   0 |    12 |    12 |    15 |    15 |         |
 |  79 | `KILL_PED`                 |    54 |  10 |  12 |     1 |     3 |    12 |    16 |         |
 |  23 | `PARK`                     |    51 |   7 |  18 |     6 |     6 |    12 |     2 |         |
@@ -216,7 +231,7 @@ Declarations: 50 of the original's 72 kinds in use, on 4568 lines. gfa-sim reads
 |  21 | `GOTO`                     |    33 |   0 |   0 |    13 |     6 |    12 |     2 |         |
 | 139 | `KF_BRIEF_GENERAL`         |    32 |   0 |   0 |     0 |     0 |    15 |    17 |         |
 | 140 | `KF_CANCEL_GENERAL`        |    32 |   0 |   0 |     0 |     0 |    15 |    17 |         |
-| 100 | `POWERUP_OFF`              |    32 |   0 |   0 |     0 |     0 |    15 |    17 |         |
+| 100 | `POWERUP_OFF`              |    32 |   0 |   0 |     0 |     0 |    15 |    17 | yes     |
 |  74 | `CLOSE_DOOR`               |    31 |   3 |  14 |     3 |     4 |     6 |     1 |         |
 | 120 | `IS_PED_ARRESTED`          |    27 |   4 |   6 |     1 |     4 |     6 |     6 |         |
 |  28 | `UNLOCK_DOOR`              |    27 |   0 |   3 |     6 |     5 |     3 |    10 |         |
@@ -243,7 +258,7 @@ Declarations: 50 of the original's 72 kinds in use, on 4568 lines. gfa-sim reads
 |  76 | `BANK_ROBBERY`             |    13 |   3 |   3 |     1 |     5 |     1 |     0 |         |
 |  48 | `DO_MODEL`                 |    12 |   0 |   1 |     2 |     3 |     3 |     3 |         |
 |  87 | `EXPL_PED`                 |    12 |   0 |   0 |     6 |     3 |     1 |     2 |         |
-|  16 | `MPHONE`                   |    12 |   1 |   1 |     2 |     2 |     3 |     3 |         |
+|  16 | `MPHONE`                   |    12 |   1 |   1 |     2 |     2 |     3 |     3 | part    |
 |  47 | `START_MODEL`              |    12 |   0 |   1 |     2 |     3 |     3 |     3 |         |
 | 107 | `GET_CAR_INFO`             |     9 |   0 |   0 |     3 |     4 |     1 |     1 |         |
 | 121 | `HELL_ON`                  |     9 |   3 |   2 |     0 |     0 |     4 |     0 |         |
@@ -257,7 +272,7 @@ Declarations: 50 of the original's 72 kinds in use, on 4568 lines. gfa-sim reads
 |  58 | `MODEL_HUNT`               |     7 |   0 |   0 |     0 |     0 |     4 |     3 |         |
 |  50 | `KILL_CAR`                 |     6 |   1 |   3 |     1 |     0 |     0 |     1 |         |
 | 112 | `PIXEL_CAR_ON`             |     6 |   0 |   0 |     0 |     5 |     0 |     1 |         |
-|  60 | `STARTUP`                  |     6 |   1 |   1 |     1 |     1 |     1 |     1 | part    |
+|  60 | `STARTUP`                  |     6 |   1 |   1 |     1 |     1 |     1 |     1 | yes     |
 |  80 | `BANK_ALARM_ON`            |     5 |   2 |   1 |     1 |     0 |     1 |     0 |         |
 | 146 | `RED_ARROW_OFF`            |     5 |   2 |   1 |     0 |     0 |     2 |     0 |         |
 |  34 | `ARMEDMESS`                |     4 |   2 |   2 |     0 |     0 |     0 |     0 |         |
@@ -284,7 +299,7 @@ In the original's table but used by none of these sections: `LOCATE_STOPPED`, `D
 | No. | Declaration              | Lines | [1] | [2] | [102] | [103] | [202] | [203] | gfa-sim |
 | --: | ------------------------ | ----: | --: | --: | ----: | ----: | ----: | ----: | ------- |
 |  50 | `POWERUP`                |  1009 | 151 | 151 |   201 |   198 |   150 |   158 | yes     |
-|   7 | `TELEPHONE`              |   691 | 128 | 128 |    90 |    89 |   128 |   128 |         |
+|   7 | `TELEPHONE`              |   691 | 128 | 128 |    90 |    89 |   128 |   128 | yes     |
 |  24 | `FUTUREPED`              |   424 |  31 |  49 |    57 |    98 |    85 |   104 |         |
 |   8 | `TRIGGER`                |   420 |  55 |  79 |    80 |    76 |    55 |    75 | yes     |
 |  15 | `DUMMY`                  |   388 |  95 |  48 |    38 |    50 |    89 |    68 |         |
@@ -309,8 +324,8 @@ In the original's table but used by none of these sections: `LOCATE_STOPPED`, `D
 |  57 | `GUN_TRIG`               |    20 |   3 |   3 |     0 |     0 |     5 |     9 |         |
 |  40 | `SPECIFIC_DOOR`          |    19 |   0 |   0 |     4 |     2 |    11 |     2 |         |
 |  53 | `MOVING_TRIG_HIRED`      |    14 |   0 |   0 |     3 |     5 |     4 |     2 |         |
-|  34 | `MPHONES`                |    12 |   1 |   1 |     2 |     2 |     3 |     3 |         |
-|  39 | `PHONE_TOGG`             |    12 |   1 |   1 |     2 |     2 |     3 |     3 |         |
+|  34 | `MPHONES`                |    12 |   1 |   1 |     2 |     2 |     3 |     3 | yes     |
+|  39 | `PHONE_TOGG`             |    12 |   1 |   1 |     2 |     2 |     3 |     3 | yes     |
 |  55 | `CARBOMB_TRIG`           |     9 |   0 |   0 |     2 |     1 |     3 |     3 |         |
 |  66 | `MISSION_COUNTER`        |     8 |   2 |   2 |     1 |     1 |     1 |     1 | yes     |
 |  32 | `MOVING_TRIG`            |     8 |   0 |   0 |     0 |     4 |     0 |     4 |         |
@@ -335,5 +350,4 @@ In the original's table but used by none of these sections: `LOCATE_STOPPED`, `D
 |   2 | `OBJECT`                 |     1 |   1 |   0 |     0 |     0 |     0 |     0 |         |
 
 In the original's table but used by none of these sections: `CAR`, `DRIVER`, `MODEL`, `CLOCK`, `ESCORT`, `CARBOMB`, `ESCORTED`, `STOPPED`, `INIT`, `FUTUREDROP`, `DRIVER_PARK`, `ONETRIGGER`, `MODEL_DOOR`, `MY_MODEL`, `CLOCK_START`, `CLOCK_STOP`, `MIDPOINT_MULTI`, `MID_MULTI_SETUP`, `FINAL_MULTI`, `SPECIFIC_DOOR_BOMB`, `SETUP_SPEED`, `CANNON_START`.
-
 <!-- END gfa-tool mission coverage --markdown -->

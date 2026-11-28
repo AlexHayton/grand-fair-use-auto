@@ -11,10 +11,14 @@
 # - MOBILE_BRIEF puts brief 1001 on the mobile;
 # - STARTUP marks 303 started and jumps to 30000;
 # - from 30000, POWERUP_ON after POWERUP_ON: the crates, and the 16 kill
-#   frenzies, which stand loose with no crate.
+#   frenzies, which stand loose with no crate;
+# - the DISABLEs, then DOOR_ON for the seven bomb shop doors;
+# - 32000 starts the 8000 block (KEEP_THIS_PROC, SURVIVE 65), which waits
+#   at 8011 SCORE_CHECK, not ported yet; 32001 starts the phone arrow at
+#   13 and ends the opening.
 #
-# The opening goes no further yet. 31500 is DOOR_ON, which is not ported,
-# and the process waits on it, logged.
+# The player stands still, far from the phones, so nothing rings
+# (mission_phones.txt answers one).
 #
 # section: 1
 # mission: on
@@ -22,13 +26,18 @@
 # expect: mission: trigger 303 starts line 9 in slot 4
 # expect: mission: arrow at 137
 # expect: mission: brief 1001 (mobile)
+# expect: STARTUP's sound 0 is due
 # expect: pickups: crate 0 at (127,136) - kind 1 (pistol), 99
 # expect: pickups: loose 1 at (81,146) - kind 14 (kill frenzy), 16
 # expect: pickups: crate 88 at (182,31) - kind 1 (pistol), 99
-# expect: 31500 DOOR_ON waits: not ported yet
+# expect: 8011 SCORE_CHECK waits: not ported yet
 # reject: does not know
 # reject: names no trigger
 # reject: not a POWERUP
 # reject: made no crate
 # reject: POWERUP_ON waits
-wait 300
+# reject: DOOR_ON waits
+# reject: ENABLE waits
+# reject: GENERAL_ONSCREEN waits
+# reject: trigger 192 starts
+wait 500

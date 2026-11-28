@@ -77,6 +77,12 @@ it: `.G24` if present, otherwise `.GRY`.
 | Vice City | `202`, `203` | `MIAMI.CMP` | `STYLE003` |
 | London 1969 (`--game london69`) | `2`, `3`, `4` | `UK/UK.CMP` | `UK/STYLE001` |
 
+### Career saves
+
+The title menu remembers the selected player, names, scores and options. Open **Options → Key bindings** to remap gameplay keys, then use **Back to options → Save**. The in-game HUD filter is saved when you change it. A game over in a chapter launched from the menu records the player's score.
+
+The first run imports the base game's career if available. On macOS the port stores its own database at `~/Library/Application Support/GrandFairUseAuto/career.sqlite3`. Windows uses `%APPDATA%/GrandFairUseAuto`, and Linux uses `$XDG_CONFIG_HOME/GrandFairUseAuto` (default `~/.config/GrandFairUseAuto`). The browser keeps the database in IndexedDB for the current origin, independently of the cached game files.
+
 ### Playing Vice City
 
 ```sh
@@ -142,7 +148,7 @@ cargo run -p gfa-tool -- run tools/scripts/walk_ramp.txt     # play a test scrip
 `--trace` the player's state every tick, `--out shots/f` a picture for each
 `dump`, and `--record input.txt` the input as a replay.
 
-Web (needs `cargo install trunk`):
+The web build uses Trunk, Clang and LLVM’s `llvm-ar` for SQLite. On macOS with Homebrew LLVM, set `AR_wasm32_unknown_unknown="$(brew --prefix llvm)/bin/llvm-ar"` in your environment.
 
 ```sh
 cd crates/gfa-web && trunk serve     # http://127.0.0.1:8080

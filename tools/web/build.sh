@@ -33,6 +33,10 @@ fi
 if ! command -v cc >/dev/null 2>&1 && command -v dnf >/dev/null 2>&1; then
     dnf install -y gcc
 fi
+# The browser build compiles SQLite C sources into a WebAssembly archive.
+if command -v dnf >/dev/null 2>&1 && { ! command -v clang >/dev/null 2>&1 || ! command -v llvm-ar >/dev/null 2>&1; }; then
+    dnf install -y clang llvm
+fi
 # The toolchain, components and wasm target that rust-toolchain.toml names.
 (cd "$root" && rustup toolchain install) ||
     (cd "$root" && rustup target add wasm32-unknown-unknown)

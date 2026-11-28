@@ -1,0 +1,2 @@
+ALTER TABLE career ADD COLUMN keybindings TEXT NOT NULL DEFAULT '';
+ALTER TABLE career ADD COLUMN hud_filter TEXT NOT NULL DEFAULT 'smooth_hd';

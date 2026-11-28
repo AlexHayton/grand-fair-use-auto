@@ -164,6 +164,27 @@ impl Scene {
                 }
             }
         }
+        // The phones the mission script made (object 0x28), each in the
+        // frame its MPHONE set: still, or rocking while it rings.
+        if let Some(vm) = &world.mission {
+            use gfa_render::sprites::{draw_angle, startup_heading};
+            for p in &vm.phones {
+                let [bx, by, bz] = p.block;
+                use gfa_sim::gfa_fixed::fx::block_centre;
+                let (x, y) = (block_centre(bx), block_centre(by));
+                let layer = world.map.stand_layer(bx, by).unwrap_or(bz);
+                let pos = ground(i64::from(x), i64::from(y), layer, 0);
+                let turn = draw_angle(startup_heading(p.turn as i16));
+                out.extend(object_sprite(
+                    style,
+                    &self.atlas,
+                    OBJ_PHONE,
+                    usize::from(p.frame),
+                    pos,
+                    turn,
+                ));
+            }
+        }
         for s in &world.pickups.smashes {
             if let Some(frame) = s.frame() {
                 let pos = ground(s.x, s.y, s.layer, 0);
@@ -546,6 +567,9 @@ fn flames(
     let pos = [pos[0], pos[1], pos[2] + 1.0];
     gfa_render::sprites::object_sprite(style, atlas, FIRE, frame, pos, 0.0)
 }
+
+/// A payphone, as the mission script makes one (GTA8.EXE's 0x76da0).
+const OBJ_PHONE: usize = 0x28;
 
 /// The map objects the weapons draw with.
 const OBJ_SPLAT: usize = 0x0d;

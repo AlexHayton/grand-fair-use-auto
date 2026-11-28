@@ -4,12 +4,14 @@ use art::{Art, Canvas};
 use egui::{Align, Key};
 use gfa_assets::{AssetSource, Dataset, level};
 use gfa_audio::MenuSfx;
-use gfa_formats::{career::Career, fxt::Fxt};
+use gfa_formats::fxt::Fxt;
 
-const NAMES: [&str; 8] = [
-    "Ulrika", "Travis", "Katie", "Mikki", "Divine", "Bubba", "Troy", "Kivlov",
-];
-const SECTIONS: [u32; 6] = [1, 2, 102, 103, 202, 203];
+use crate::career::{NAMES, Player};
+use crate::controls::{Action, Bindings};
+use crate::save::{CareerSave, SaveStore};
+use winit::keyboard::KeyCode;
+
+pub(crate) const SECTIONS: [u32; 6] = [1, 2, 102, 103, 202, 203];
 
 #[derive(PartialEq)]
 enum Page {
@@ -17,6 +19,7 @@ enum Page {
     Player,
     Chapter,
     Options,
+    Bindings,
     Rename,
     Reset,
 }
@@ -25,7 +28,7 @@ pub struct Menu {
     pub source: Box<dyn AssetSource>,
     page: Page,
     pub player: usize,
-    career: Option<Career>,
+    pub save: CareerSave,
     chapters: Vec<(u32, String)>,
     chapter: usize,
     art: Art,
@@ -33,8 +36,9 @@ pub struct Menu {
     option_row: usize,
     settings: [u8; 4],
     draft: [u8; 4],
-    names: [String; 8],
-    scores: [[Option<i32>; 6]; 8],
+    bindings: Bindings,
+    capture: Option<Action>,
+    binding_error: String,
     edit_name: String,
     reset_row: usize,
     sounds: Vec<MenuSfx>,
@@ -44,24 +48,21 @@ pub struct Menu {
 
 impl Menu {
     pub fn new(source: Box<dyn AssetSource>) -> Self {
-        let career = source
-            .read("GTADATA/PLAYER_A.DAT")
-            .ok()
-            .and_then(|b| Career::parse(&b).ok());
+        Self::with_store(source, crate::save::platform_store())
+    }
+
+    fn with_store(source: Box<dyn AssetSource>, store: Result<SaveStore, String>) -> Self {
+        let save = CareerSave::open(source.as_ref(), store);
+        let career = &save.career;
         let art = Art::load(source.as_ref());
         let english = source
             .read("GTADATA/ENGLISH.FXT")
             .ok()
             .and_then(|b| Fxt::parse(&b).ok());
-        let settings = career.as_ref().map_or([7, 6, 2, 0], |c| {
-            [
-                c.sound_volume().min(7),
-                c.music_volume().min(7),
-                c.text_speed().clamp(1, 3),
-                c.bytes[3].min(1),
-            ]
-        });
-        let player = career.as_ref().map_or(1, Career::current_slot);
+        let o = &career.options;
+        let settings = [o.sound_volume, o.music_volume, o.text_speed, o.music_mode];
+        let bindings = o.keybindings.clone();
+        let player = career.current_slot;
         let mut error = String::new();
         let mut chapters = Vec::new();
         match level::sections(source.as_ref(), Dataset::Gta) {
@@ -83,25 +84,13 @@ impl Menu {
             }
             Err(e) => error = e.to_string(),
         }
-        let names = std::array::from_fn(|i| {
-            career
-                .as_ref()
-                .map(|c| c.name(i))
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| NAMES[i].into())
-        });
-        let scores = std::array::from_fn(|p| {
-            std::array::from_fn(|i| career.as_ref().and_then(|c| c.best(p, i)))
-        });
         Self {
-            names,
-            scores,
             edit_name: String::new(),
             reset_row: 0,
             sounds: Vec::new(),
             source,
             page: Page::Title,
-            career,
+            save,
             player,
             chapters,
             chapter: 0,
@@ -110,13 +99,36 @@ impl Menu {
             option_row: 0,
             settings,
             draft: settings,
+            bindings,
+            capture: None,
+            binding_error: String::new(),
             quit: false,
             error,
         }
     }
 
     pub fn name(&self) -> String {
-        self.names[self.player].clone()
+        self.save.career.players[self.player].name.clone()
+    }
+
+    pub fn capture_key(&mut self, key: KeyCode) -> bool {
+        let Some(action) = self.capture else {
+            return false;
+        };
+        if key == KeyCode::Escape {
+            self.capture = None;
+        } else if crate::controls::reserved_key(key)
+            || Action::ALL
+                .into_iter()
+                .any(|a| a != action && a.keys(&self.bindings).contains(&key))
+        {
+            self.binding_error = "That key already has an action.".into();
+        } else {
+            self.bindings.insert(action, key);
+            self.capture = None;
+            self.binding_error.clear();
+        }
+        true
     }
 
     pub fn sound_volume(&self) -> u8 {
@@ -133,14 +145,6 @@ impl Menu {
         } else {
             self.settings[1]
         }
-    }
-
-    pub fn music_mode(&self) -> u8 {
-        self.settings[3]
-    }
-
-    pub fn text_speed(&self) -> u8 {
-        self.settings[2]
     }
 
     pub fn drain_sounds(&mut self) -> Vec<MenuSfx> {
@@ -161,15 +165,13 @@ impl Menu {
                 i32::from(i.key_pressed(Key::ArrowDown)) - i32::from(i.key_pressed(Key::ArrowUp)),
             )
         });
-        c.picture(&format!("F_LOGO{}", frame % 8), 0., 0.);
-        c.picture(
+        c.background(
+            &format!("F_LOGO{}", frame % 8),
             if self.page == Page::Chapter {
                 "F_LOWER1"
             } else {
                 "F_LOWER0"
             },
-            0.,
-            168.,
         );
         match self.page {
             Page::Title => {
@@ -195,6 +197,7 @@ impl Menu {
                     self.page = Page::Options;
                     self.option_row = 0;
                     self.draft = self.settings;
+                    self.bindings = self.save.career.options.keybindings.clone();
                 } else if choose && !self.chapters.is_empty() {
                     self.sounds.push(MenuSfx::Confirm);
                     self.page = Page::Player;
@@ -241,15 +244,71 @@ impl Menu {
                         _ => {}
                     }
                 }
+                if c.action("MTEXT", "K: Key bindings", 196., 355., Min)
+                    .clicked()
+                    || ui.input(|i| i.key_pressed(Key::K))
+                {
+                    self.binding_error.clear();
+                    self.page = Page::Bindings;
+                }
                 if c.action("MTEXT", "Enter: Save", 640., 450., Max).clicked() || enter {
                     self.sounds.push(MenuSfx::Confirm);
                     self.settings = self.draft;
+                    let options = &mut self.save.career.options;
+                    [
+                        options.sound_volume,
+                        options.music_volume,
+                        options.text_speed,
+                        options.music_mode,
+                    ] = self.settings;
+                    options.keybindings = self.bindings.clone();
+                    self.save.commit();
                     self.page = Page::Title;
                 }
                 if c.action("MTEXT", "Esc: Cancel", 0., 450., Min).clicked() || esc {
                     self.sounds.push(MenuSfx::Cancel);
                     self.page = Page::Title;
                 }
+            }
+            Page::Bindings => {
+                egui::Window::new("Key bindings")
+                    .collapsible(false)
+                    .resizable(false)
+                    .anchor(egui::Align2::CENTER_CENTER, [0., 0.])
+                    .show(ui.ctx(), |ui| {
+                        egui::Grid::new("game-keys").show(ui, |ui| {
+                            for action in Action::ALL {
+                                ui.label(action.layout().0);
+                                let label = if self.capture == Some(action) {
+                                    "Press a key…".into()
+                                } else {
+                                    action
+                                        .keys(&self.bindings)
+                                        .iter()
+                                        .map(|key| format!("{key:?}"))
+                                        .collect::<Vec<_>>()
+                                        .join(" / ")
+                                };
+                                if ui.button(label).clicked() {
+                                    self.capture = Some(action);
+                                    self.binding_error.clear();
+                                }
+                                ui.end_row();
+                            }
+                        });
+                        if !self.binding_error.is_empty() {
+                            ui.label(&self.binding_error);
+                        }
+                        if ui.button("Restore default keys").clicked() {
+                            self.bindings.clear();
+                            self.capture = None;
+                            self.binding_error.clear();
+                        }
+                        if ui.button("Back to options").clicked() || esc {
+                            self.capture = None;
+                            self.page = Page::Options;
+                        }
+                    });
             }
             Page::Reset => {
                 c.picture(&format!("F_PLAY{}", self.player + 1), 396., 192.);
@@ -268,8 +327,8 @@ impl Menu {
                 }
                 c.icon("KEY", frame, 114., 198. + 40. * self.reset_row as f32);
                 if confirm && self.reset_row == 1 {
-                    self.names[self.player] = NAMES[self.player].into();
-                    self.scores[self.player] = [Some(0), None, None, None, None, None];
+                    self.save.career.players[self.player] = Player::new(self.player);
+                    self.save.commit();
                 }
                 if confirm {
                     self.sounds.push(MenuSfx::Confirm);
@@ -284,8 +343,8 @@ impl Menu {
                 c.text("MTEXT", "Scores", 500., 202., Center);
                 {
                     let mut y = 226.;
-                    for (index, id) in SECTIONS.iter().enumerate() {
-                        if let Some(score) = self.scores[self.player][index]
+                    for id in &SECTIONS {
+                        if let Some(score) = self.save.career.players[self.player].best.get(id)
                             && let Some((_, title)) = self.chapters.iter().find(|(s, _)| s == id)
                         {
                             c.text("MMISS", title, 414., y, Min);
@@ -331,11 +390,13 @@ impl Menu {
                     };
                     if c.action("MTEXT", finish, 640., 450., Max).clicked() || enter {
                         self.sounds.push(MenuSfx::Confirm);
-                        self.names[self.player] = if self.edit_name.is_empty() {
-                            NAMES[self.player].into()
+                        let new_name = if self.edit_name.is_empty() {
+                            NAMES[self.player]
                         } else {
-                            self.edit_name.clone()
+                            &self.edit_name
                         };
+                        self.save.career.players[self.player].name = new_name.to_owned();
+                        self.save.commit();
                         self.page = Page::Player;
                     }
                     return None;
@@ -365,6 +426,8 @@ impl Menu {
                 self.player = cycle(self.player, player_delta, NAMES.len());
                 if c.action("MTEXT", "Enter: Play", 640., 450., Max).clicked() || enter {
                     self.sounds.push(MenuSfx::Confirm);
+                    self.save.career.current_slot = self.player;
+                    self.save.commit();
                     self.page = Page::Chapter;
                 }
                 if c.action("MTEXT", "Esc: Cancel", 0., 450., Min).clicked() || esc {
@@ -407,16 +470,17 @@ impl Menu {
                 }
                 self.chapter = rows[cycle(row, dy, rows.len())];
                 c.text("MTEXT", "Public Enemies", 532., 130., Center);
-                if let Some(career) = &self.career {
+                {
+                    let career = &self.save.career;
                     let index = SECTIONS
                         .iter()
                         .position(|&s| s == self.chapters[self.chapter].0)
                         .unwrap();
                     for (line, row) in (0..3).rev().enumerate() {
-                        let (score, name) = career.high_score(index, row);
+                        let entry = &career.high_scores[index][row];
                         let y = 154. + 12. * line as f32;
-                        c.text("MMISS", &name, 440., y, Min);
-                        c.text("MMISS", &score.to_string(), 624., y, Max);
+                        c.text("MMISS", &entry.name, 440., y, Min);
+                        c.text("MMISS", &entry.score.to_string(), 624., y, Max);
                     }
                 }
                 for city_id in cities {
@@ -476,10 +540,12 @@ impl Menu {
                 }
             }
         }
-        if !self.error.is_empty() || !status.is_empty() {
+        if !self.error.is_empty() || !status.is_empty() || !self.save.error.is_empty() {
             c.text(
                 "MTEXT",
-                if status.is_empty() {
+                if !self.save.error.is_empty() {
+                    &self.save.error
+                } else if status.is_empty() {
                     &self.error
                 } else {
                     status
@@ -515,7 +581,7 @@ mod tests {
             b"[1]\nFirst,1,NYC.CMP\n0\n-1\n-1\n[102]\nSecond,1,SANB.CMP\n0\n-1\n-1\n[1001]\nMultiplayer,1,NYC.CMP\n0\n-1\n-1\n"
                 .to_vec(),
         );
-        let mut menu = Menu::new(Box::new(source));
+        let mut menu = Menu::with_store(Box::new(source), SaveStore::memory());
         assert_eq!(menu.chapters.len(), 2);
         let ctx = egui::Context::default();
         let mut press = |key| {
@@ -568,9 +634,9 @@ mod tests {
 #[ignore = "requires the original game data"]
 fn original_menu_art_and_chapters_load() {
     let source = crate::DataPath::resolve(None).unwrap().open().unwrap();
-    let mut menu = Menu::new(source);
+    let mut menu = Menu::with_store(source, SaveStore::memory());
     assert_eq!(menu.chapters.len(), 6);
-    assert!(menu.career.is_some());
+    assert!(menu.save.error.is_empty());
     let ctx = egui::Context::default();
     for slot in 0..8 {
         menu.page = Page::Player;

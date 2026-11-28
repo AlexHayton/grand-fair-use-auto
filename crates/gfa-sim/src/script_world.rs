@@ -42,6 +42,10 @@ pub trait ScriptWorld {
     /// (state 1), which reads as getting in or out of a car or being down.
     fn trigger_block(&self) -> Option<(i32, i32)>;
 
+    /// The model of the car he drives (the scan's state 0), else `None`.
+    /// A driver of model 47 sets off no `MPHONES` (0xf4075).
+    fn trigger_car_model(&self) -> Option<u8>;
+
     /// Pay the player `points` (GTA8.EXE's 0xca190 with `100, 100, 0`),
     /// times his multiplier.
     fn pay(&mut self, points: i32);
@@ -109,6 +113,13 @@ impl ScriptWorld for World {
                 Some((self.player.x >> 21, self.player.y >> 21))
             }
             Doing::Entering(_) | Doing::Exiting(_) | Doing::Drowning(_) => None,
+        }
+    }
+
+    fn trigger_car_model(&self) -> Option<u8> {
+        match self.doing {
+            crate::world::Doing::Driving => self.driven.as_ref().map(|d| d.veh.model_id),
+            _ => None,
         }
     }
 

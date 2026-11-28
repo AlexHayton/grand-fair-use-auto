@@ -294,6 +294,11 @@ impl Game {
             start,
         );
         world.load_section(&level.files.mission);
+        // The script makes the crates, as in GTA8.EXE: its loader only
+        // keeps each POWERUP's numbers, and the script's POWERUP_ONs put
+        // them out (docs/MISSION_VM.md). The ones the level declares for
+        // its jobs, kill frenzies among them, stay away until a job asks.
+        world.start_mission();
         for line in world.drain_log() {
             log::info!("{}", line.text);
         }

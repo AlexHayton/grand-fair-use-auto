@@ -7,6 +7,7 @@ use std::collections::HashMap;
 pub struct Art {
     palette: Option<screen::Palette>,
     fonts: HashMap<String, Font>,
+    reflections: HashMap<String, TextureHandle>,
     textures: HashMap<String, Option<TextureHandle>>,
 }
 
@@ -33,6 +34,7 @@ impl Art {
         Self {
             palette,
             fonts,
+            reflections: HashMap::new(),
             textures: HashMap::new(),
         }
     }
@@ -73,7 +75,45 @@ impl<'a> Canvas<'a> {
             Color32::WHITE,
         );
     }
+    pub fn background(&mut self, logo: &str, lower: &str) {
+        let area = self.ui.max_rect();
+        let menu = self.rect(0., 0., 640., 480.);
+        let top = self
+            .load_picture(logo, false)
+            .or_else(|| self.load_picture("F_LOGO0", false));
+        let bottom = self.load_picture(lower, true);
+
+        if menu.is_positive()
+            && !menu.contains_rect(area)
+            && let Some(reflection) = self.art.reflections.get(lower)
+        {
+            // Only the lower panel contains scenery throughout. Align the
+            // reflection with it and mirror its top edge beside the title.
+            let scenery = self.rect(0., 168., 640., 312.);
+            let uv = Rect::from_min_max(
+                menu_normalized(area.min, scenery),
+                menu_normalized(area.max, scenery),
+            );
+            self.ui
+                .painter()
+                .image(reflection.id(), area, uv, Color32::WHITE);
+        }
+        for (picture, y) in [(top, 0.), (bottom, 168.)] {
+            if let Some((id, [w, h])) = picture {
+                self.paint(id, self.rect(0., y, w as f32, h as f32));
+            }
+        }
+    }
     pub fn picture(&mut self, stem: &str, x: f32, y: f32) {
+        if let Some((id, [w, h])) = self.load_picture(stem, false) {
+            self.paint(id, self.rect(x, y, w as f32, h as f32));
+        }
+    }
+    fn load_picture(
+        &mut self,
+        stem: &str,
+        backdrop: bool,
+    ) -> Option<(egui::TextureId, [usize; 2])> {
         let t = self.art.textures.entry(stem.into()).or_insert_with(|| {
             // GTA8 blits indexed RATs through the VGA DAC. Old browser caches
             // containing only the RGB masters can still draw those pictures.
@@ -95,17 +135,21 @@ impl<'a> Canvas<'a> {
                 let (w, h) = screen::screen_size(stem, b.len() / 3)?;
                 (b.len() == w * h * 3).then(|| ColorImage::from_rgb([w, h], &b))
             })?;
+            if backdrop {
+                let reflection = self.ui.ctx().load_texture(
+                    "menu scenery reflection",
+                    softened_tile(&img),
+                    TextureOptions::LINEAR_MIRRORED_REPEAT,
+                );
+                self.art.reflections.insert(stem.into(), reflection);
+            }
             Some(
                 self.ui
                     .ctx()
                     .load_texture(stem, img, TextureOptions::NEAREST),
             )
         });
-        if let Some((id, [w, h])) = t.as_ref().map(|t| (t.id(), t.size())) {
-            self.paint(id, self.rect(x, y, w as f32, h as f32));
-        } else if stem.starts_with("F_LOGO") && stem != "F_LOGO0" {
-            self.picture("F_LOGO0", x, y);
-        }
+        t.as_ref().map(|t| (t.id(), t.size()))
     }
     pub fn text(&mut self, font: &str, text: &str, x: f32, y: f32, align: Align) -> Rect {
         let key = format!("{font}/{text}");
@@ -189,6 +233,81 @@ impl<'a> Canvas<'a> {
             self.text(font, &ch.to_string(), x, y, Align::Min);
         } else if font == "KEY" {
             self.text("MTEXT", ">", x + 52., y + 20., Align::Min);
+        }
+    }
+}
+
+fn menu_normalized(point: egui::Pos2, menu: Rect) -> egui::Pos2 {
+    ((point - menu.min) / menu.size()).to_pos2()
+}
+
+// Average 8 × 8 source pixels per texel. Linear sampling of this small
+// backdrop softens the DOS dithering while retaining the edge colors.
+fn softened_tile(image: &ColorImage) -> ColorImage {
+    let size = [image.width() / 8, image.height() / 8];
+    let mut tile = ColorImage::filled(size, Color32::BLACK);
+    for y in 0..size[1] {
+        for x in 0..size[0] {
+            let mut rgb = [0u32; 3];
+            for row in y * 8..y * 8 + 8 {
+                let start = row * image.width() + x * 8;
+                for pixel in &image.pixels[start..start + 8] {
+                    rgb[0] += u32::from(pixel.r());
+                    rgb[1] += u32::from(pixel.g());
+                    rgb[2] += u32::from(pixel.b());
+                }
+            }
+            let [r, g, b] = rgb.map(|sum| (sum / 64) as u8);
+            tile[(x, y)] = Color32::from_rgb(r, g, b);
+        }
+    }
+    tile
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reflection_covers_wide_and_tall_windows() {
+        let mut src = gfa_assets::MemSource::new();
+        src.insert("GTADATA/F_LOGO0.RAW", vec![32; 640 * 168 * 3]);
+        src.insert("GTADATA/F_LOWER0.RAW", vec![96; 640 * 312 * 3]);
+        let mut art = Art::load(&src);
+        let ctx = egui::Context::default();
+        for (size, uv_min) in [
+            (vec2(1280., 480.), pos2(-0.5, -168. / 312.)),
+            (vec2(640., 960.), pos2(0., -408. / 312.)),
+        ] {
+            let area = Rect::from_min_size(egui::Pos2::ZERO, size);
+            let input = egui::RawInput {
+                screen_rect: Some(area),
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                Canvas::new(ui, &mut art, &src).background("F_LOGO0", "F_LOWER0");
+            });
+            let id = art.reflections["F_LOWER0"].id();
+            if let Some(deltas) = output.textures_delta.set.get(&id) {
+                let egui::ImageData::Color(image) = &deltas[0].image;
+                assert!(
+                    image
+                        .pixels
+                        .iter()
+                        .all(|&pixel| pixel == Color32::from_gray(96))
+                );
+            }
+            output.textures_delta.clear();
+            let mesh = output
+                .shapes
+                .iter()
+                .find_map(|s| match &s.shape {
+                    egui::Shape::Mesh(mesh) if mesh.texture_id == id => Some(mesh),
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(mesh.calc_bounds(), area);
+            assert_eq!(mesh.vertices[0].uv, uv_min);
         }
     }
 }
