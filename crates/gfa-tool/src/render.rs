@@ -269,6 +269,32 @@ impl Scene {
         )
     }
 
+    /// The mission arrow at a simulation position, turned to `angle`
+    /// (GTA8.EXE's 1024 steps, counter-clockwise).
+    pub fn arrow_sprite(&self, pos16: [i32; 3], angle: i32) -> Option<SpriteInstance> {
+        gfa_render::sprites::arrow_sprite(
+            &self.style,
+            &self.atlas,
+            gfa_render::sprites::from_sim(pos16),
+            angle,
+        )
+    }
+
+    /// A payphone the mission script made (object 0x28), in frame `frame`,
+    /// on block `block` (x, y and the layer it stands on), turned `turn`
+    /// as the app draws it.
+    pub fn phone_sprite(&self, frame: usize, pos16: [i32; 3], turn: i32) -> Option<SpriteInstance> {
+        use gfa_render::sprites::{draw_angle, startup_heading};
+        gfa_render::sprites::object_sprite(
+            &self.style,
+            &self.atlas,
+            0x28,
+            frame,
+            gfa_render::sprites::from_sim(pos16),
+            draw_angle(startup_heading(turn as i16)),
+        )
+    }
+
     /// Sprite `n` of the explosion category at a simulation position.
     pub fn blast_sprite(&self, n: usize, pos16: [i32; 3]) -> Option<SpriteInstance> {
         let sprite = self

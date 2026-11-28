@@ -243,6 +243,27 @@ fn fences_stop_walkers() {
 }
 
 #[test]
+fn a_door_wall_stops_walkers_until_it_opens() {
+    let mut b = CmpBuilder::new(1);
+    street(&mut b, 10..20, 10..20);
+    b.set(15, 15, 2, block(BUILDING));
+    let mut w = world(&b, south(15, 11));
+    // A shut door on the north edge of (15,14), held through an edit next
+    // to it, which works the grids round it out again.
+    w.map.set_door_wall(15, 14, 2, true, true);
+    w.map.set_block(16, 14, 2, block(ROAD));
+    run(&mut w, Buttons::UP, 200);
+    assert_eq!(w.player.block().1, 13, "held at the door");
+    // Open, and the building beyond made field: he walks into it.
+    w.map.set_door_wall(15, 14, 2, true, false);
+    assert!(!w.map.walkable(15, 15, 2));
+    w.map.set_block(15, 15, 2, block(FIELD));
+    assert!(w.map.walkable(15, 15, 2));
+    run(&mut w, Buttons::UP, 200);
+    assert!(w.player.block().1 > 14);
+}
+
+#[test]
 fn missing_pavement_is_pavement() {
     let mut b = CmpBuilder::new(1);
     let floor = Block {

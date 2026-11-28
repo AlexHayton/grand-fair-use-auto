@@ -402,8 +402,8 @@ mod tests {
 
     const SAMPLE: &str = "[1]\nT, 22, nyc.cmp, 0,\n1 1\n\
         0 1 (1,2,3) PLAYER 0 0\n5 (1,2,3) PARKED 0 0\n6 (1,2,3) PARKED 0 0\n-1\n\
-        1000 DONOWT 0 0 0 0 0\n1010 BRIEF 1 0 0 0 0\n1020 BRIEF 1 0 0 0\n1030 NOT_A_COMMAND 0 0 0 0 0\n-1\n\
-        [1001]\nDEATHMATCH1, 22, nyc.cmp, 0,\n1 1\n-1\n1 BRIEF 0 0 0 0 0\n-1\n";
+        1000 DONOWT 0 0 0 0 0\n1010 SPEECH_BRIEF 1 0 0 0 0\n1020 SPEECH_BRIEF 1 0 0 0\n1030 NOT_A_COMMAND 0 0 0 0 0\n-1\n\
+        [1001]\nDEATHMATCH1, 22, nyc.cmp, 0,\n1 1\n-1\n1 SPEECH_BRIEF 0 0 0 0 0\n-1\n";
 
     fn report(multiplayer: bool) -> Report {
         let s = gfa_formats::mission::parse(SAMPLE.as_bytes()).unwrap();
@@ -420,7 +420,7 @@ mod tests {
         let brief = &r.cmds[0];
         assert_eq!(
             (brief.name.as_str(), brief.lines, brief.first),
-            ("BRIEF", 2, (1, 9))
+            ("SPEECH_BRIEF", 2, (1, 9))
         );
         assert_eq!(r.decls[0].name, "PARKED");
         assert_eq!(r.unknown(), vec![("command", "NOT_A_COMMAND", 1, 11)]);

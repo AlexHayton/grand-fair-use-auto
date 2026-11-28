@@ -1,0 +1,50 @@
+# Liberty City's first job, as GTA8.EXE's script runs it (docs/MISSION_VM.md:
+# BRIEF, PARKED_ON, ARROWCAR, STEAL).
+#
+# He answers phone 68 as soon as the phones can ring, which starts the job
+# at 100:
+# - 101 BRIEF shows 1002 by the phone, and 104 PARKED_ON makes car 189, the
+#   FUTURECAR of model 18 at (167,97), turned 256: the mission's.
+# - 106 ARROWCAR points the arrow at it, and 108 STEAL waits for him at its
+#   wheel. Then it pays 5000, the arrow goes out, 112 MOBILE_BRIEF shows
+#   1003 and 120 points the arrow at the garage door, 191.
+# - Two side processes watch him: 150 IS_GOAL_DEAD (is the car gone?) and
+#   430 IS_PED_IN_CAR (did he get out?). Neither fires here.
+# - He drives onto the garage's trigger, 225 at (115,104): 125 IS_PED_IN_CAR
+#   and 126 CHECK_CAR find him in car 189, 130 DOOR_ON turns the door on, and
+#   132 ends the 430 side process. The job waits at 135 PARK.
+#
+# section: 1
+# mission: on
+# expect: mission: phone 68 answered
+# expect: mission: brief 1002 (phone)
+# expect: car: the mission's model 18 parked at (167,97) facing 64
+# expect: mission: car 189 parked
+# expect: mission: arrow at car 189
+# expect: car: in - model 18 at (167,97)
+# expect: mission: he has car 189
+# expect: score: mission +5000
+# expect: mission: brief 1003 (mobile)
+# expect: mission: arrow at 191
+# expect: player: goto (115,104)
+# expect: mission: trigger 225 starts line 125
+# expect: 135 PARK waits: not ported yet
+# reject: 125 IS_PED_IN_CAR waits
+# reject: 430 IS_PED_IN_CAR waits
+# reject: CHECK_CAR waits
+# reject: 150 IS_GOAL_DEAD waits
+# reject: DOOR_ON waits
+# reject: BRIEF waits
+# reject: PARKED_ON waits
+# reject: ARROWCAR waits
+# reject: STEAL waits
+# reject: ENABLE waits
+# reject: no free slot
+wait 400
+goto 122 136
+wait 240
+goto 167 96
+enter
+wait 400
+goto 115 104
+wait 100

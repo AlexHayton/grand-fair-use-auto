@@ -1,0 +1,33 @@
+# The mission arrow in Liberty City's opening (docs/MISSION_VM.md, "The arrow").
+# Boot as krishna_walk.probe does, with one more Enter for the city screen.
+# Stand still while the opening's arrow points at `137 TARGET`, then walk up
+# for 3 s. Each dump is 10 MB from 0, which holds the page tables, so
+# gta8.py's Ram reads it. The dumps gave:
+# - the run-time values the arrow needs: 0x1cc1dc (78), the sine table at
+#   0x1934a4, the tangent table behind [0x132524] and the draw flag 0x186ebc;
+# - at each dump, the player, the view rectangle, the arrow's target, its
+#   easing and the arrow object, which gfa_fixed::dos_trig's and the VM's
+#   tests check against.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
++2000 tap enter 80
+21000 shot start
+22200 memdump a00 0 a00000
+22201 shot f00
+22300 memdump a01 0 a00000
+22301 shot f01
+22500 memdump a02 0 a00000
+22501 shot f02
+24000 memdump a03 0 a00000
+24001 shot f03
+27000 memdump a04 0 a00000
+27001 shot f04
+27100 down up
+30100 up up
+30200 memdump a05 0 a00000
+30201 shot f05
+30300 memdump a06 0 a00000
+30301 shot f06
+31000 quit

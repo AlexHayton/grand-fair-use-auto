@@ -313,7 +313,8 @@ pub enum Status {
 
 /// The commands the VM carries out as GTA8.EXE's live cases do. Any other
 /// one is logged with its section and line and never takes its success
-/// path.
+/// path. `PARKED_ON`'s car does not clear its place of the people and cars
+/// in the way first, as the original's does.
 pub const IMPLEMENTED_OPS: &[Op] = &[
     Op::Donowt,
     Op::Driveon,
@@ -329,6 +330,8 @@ pub const IMPLEMENTED_OPS: &[Op] = &[
     Op::Inccount,
     Op::Deccount,
     Op::MobileBrief,
+    Op::Brief,
+    Op::ParkedOn,
     Op::ArrowOff,
     Op::PowerupOff,
     Op::IsPowerupDone,
@@ -338,15 +341,22 @@ pub const IMPLEMENTED_OPS: &[Op] = &[
 /// - `ENABLE` waits on the doors and the watch triggers, whose own routine
 ///   is not ported.
 /// - `ARROW` and `GENERAL_ONSCREEN` wait on anything that moves (a car, a
-///   person). `GENERAL_ONSCREEN` tests gfa-sim's view, not yet the
-///   original's rectangle.
+///   person). Both use the original's view rectangle, built from gfa-sim's
+///   model of the camera.
 /// - `POWERUP_ON` waits on the 56 uses whose label names no `POWERUP`
 ///   (sections 102 and 103), and `MPHONE` on its one whose labels name no
 ///   `TELEPHONE`.
 /// - `DOOR_ON` and `DOOR_OFF` wait on the gates and specific doors, whose
 ///   loaders are not read.
-/// - `RESET` and `MPHONE` skip the clean-ups for the mission's own cars,
-///   peds and objects, which no ported command makes yet.
+/// - `ARROWCAR`, `STEAL`, `CHECK_CAR` and `IS_GOAL_DEAD` wait on the cars
+///   and people the section's loader makes (`PARKED`, `HELLS`, `PED`),
+///   which gfa-sim does not make yet. `ARROWCAR` and `STEAL` also wait on
+///   declarations that are not cars (`DUMMY`, `TARGET`), and `CHECK_CAR`
+///   on the four uses that ask for a colour.
+/// - `IS_PED_IN_CAR` waits on the people other than the player
+///   (`FUTUREPED`s), which no ported command makes.
+/// - `RESET` and `MPHONE` skip the clean-ups for the mission's own cars
+///   (which `PARKED_ON` makes), peds and objects.
 pub const PARTIAL_OPS: &[Op] = &[
     Op::Enable,
     Op::Arrow,
@@ -356,14 +366,19 @@ pub const PARTIAL_OPS: &[Op] = &[
     Op::DoorOn,
     Op::DoorOff,
     Op::Reset,
+    Op::Arrowcar,
+    Op::Steal,
+    Op::IsPedInCar,
+    Op::CheckCar,
+    Op::IsGoalDead,
 ];
 
 /// The declarations gfa-sim reads. The world loads the start, crates and
 /// shops with the level (`World::load_section`, `Pickups::from_section`);
 /// when the mission runs, the crates are the script's `POWERUP_ON`s'. The
 /// VM fires `TRIGGER`s, `MPHONES` and `PHONE_TOGG`s, counts with the
-/// counters, points at `TARGET`s and rings the `TELEPHONE`s (which are not
-/// drawn yet). Every other trigger-making kind gets its trigger record, in
+/// counters, points at `TARGET`s, rings the `TELEPHONE`s and makes the
+/// `FUTURECAR`s' cars. Every other trigger-making kind gets its trigger record, in
 /// the original's order, but none of them fires yet. `DOOR`s get their door
 /// records for `DOOR_ON`, but the doors themselves are not made.
 pub const READ_DECLS: &[DeclKind] = &[
@@ -378,6 +393,7 @@ pub const READ_DECLS: &[DeclKind] = &[
     DeclKind::Telephone,
     DeclKind::Counter,
     DeclKind::Target,
+    DeclKind::Futurecar,
     DeclKind::MissionCounter,
     DeclKind::SecretMissionCounter,
     DeclKind::MissionTotal,

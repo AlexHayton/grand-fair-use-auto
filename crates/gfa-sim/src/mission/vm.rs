@@ -45,7 +45,8 @@ use gfa_formats::mission::Section;
 use super::{DeclKind, Op};
 use crate::clock::Ratio;
 use crate::hash::StateHasher;
-use crate::script_world::ScriptWorld;
+use crate::hud::BriefKind;
+use crate::script_world::{DoorPlace, ScriptWorld};
 
 /// Process slots.
 pub const SLOTS: usize = 32;
@@ -133,9 +134,11 @@ pub enum DoorState {
 }
 
 /// A door record (GTA8.EXE's 36 bytes at 0x3da9e5, made by 0xe7e10 as the
-/// section loads). This is what the script sees. The door itself (its
-/// object, its blocks, and the scan that opens it for the player) is the
-/// world's and is not ported, so no door here ever moves.
+/// section loads), with its block animation (a 0x53-byte record at
+/// 0x142888). The scan's door pass opens it for a player in a car and
+/// closes it behind him (`docs/MISSION_VM.md`, "Doors"); the world makes
+/// it in the map ([`ScriptWorld::door_build`]) and the renderer draws its
+/// frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Door {
     pub state: DoorState,
@@ -147,7 +150,36 @@ pub struct Door {
     pub flag: u8,
     /// The declaration that made it.
     pub decl: usize,
+    /// Where it stands, and the floor under its row.
+    pub place: DoorPlace,
+    /// The style's aux tile of its first frame (the second number).
+    pub first: u8,
+    /// The frame it shows, 0 (shut) to 7 (open): aux tile `first + frame`.
+    pub frame: u8,
+    /// Its animation while it runs: opening or closing, and the step.
+    pub anim: Option<DoorAnim>,
 }
+
+/// A door's animation running (0x122a0 forwards, 0x12350 backwards): a
+/// step every [`DOOR_FRAME_DELAY`] game frames; on reaching the last of
+/// [`DOOR_FRAMES`], the door is open or shut (0xe8860, 0xe88a0).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DoorAnim {
+    pub opening: bool,
+    /// Which frame of the run it shows, from 0.
+    pub step: u8,
+    /// Game frames on this step.
+    pub count: u8,
+}
+
+/// A door's frames: the loader passes 8 (0x79bb9).
+const DOOR_FRAMES: u8 = 8;
+/// Game frames on each of them (0x122a0 and 0x12350 with 15).
+const DOOR_FRAME_DELAY: u8 = 15;
+/// A `DOOR` opens for a player within this many blocks of its own on both
+/// axes (0xe8600 with 2).
+const DOOR_RADIUS: i32 = 2;
+
 
 /// A phone (GTA8.EXE's object 0x28, made by 0x76da0 for each `TELEPHONE`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -230,12 +262,58 @@ impl Proc {
     };
 }
 
-/// A line of text a command shows. Drawing it is the HUD's (M7).
+/// What the arrow follows (its +0, read each frame by 0xfefe0). The
+/// original also follows a ped (3) and a player (4), whose setters' commands
+/// are not ported.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Brief {
-    /// `MOBILE_BRIEF`: the text with this key, on the mobile phone.
-    Mobile(i32),
+pub enum Follows {
+    /// 1: a fixed point (`ARROW`, 0xfee50).
+    Point,
+    /// 0: a car the script made, by its handle (`ARROWCAR`, 0xfedd0).
+    Car(usize),
 }
+
+/// The arrow `ARROW` and `ARROWCAR` put up (GTA8.EXE's first arrow,
+/// 0x3e73e0), in the original's pixels: 16.16, 64 to a block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Arrow {
+    pub follows: Follows,
+    /// What it points at (0x3e73e6): x, y and z. A car's x and y are read
+    /// again each frame; its height is not kept.
+    pub target: [i32; 3],
+    /// How far it has eased out towards a target in view (0x3e74f0), whole
+    /// pixels. It can go below 0 close to the target.
+    pub ease: i32,
+    /// Where it stands now (the object at 0x3e7428): x, y and its angle
+    /// (1024 a turn, counter-clockwise from north, `gfa_fixed::dos_trig`).
+    /// `None` until the frame's placement.
+    pub at: Option<(i32, i32, i32)>,
+    /// Where the player was when it was placed, 16.16: ours, so that it can
+    /// be drawn with him between game frames.
+    pub from: (i32, i32),
+}
+
+/// How far short of the target the arrow keeps, by the margin's kind
+/// (0xff0e0): 32 pixels for kind 0, the only one `ARROW` sets. Kind 1 is 38
+/// and kind 2 is 32 + 6 × (n + 1); the commands that set them are not read.
+const ARROW_MARGIN: i32 = 32;
+/// Pixels a frame the arrow eases out or back (0xff0e0).
+const ARROW_EASE_STEP: i32 = 8;
+
+/// A text a command puts in the brief box at the bottom of the screen.
+/// GTA8.EXE's 0x1023d0 looks the key up in the text file and hands it to
+/// 0x101f00 with the icon; the world passes it on to the HUD.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Brief {
+    /// `BRIEF` shows the phone (0x101f00's kind 0), `MOBILE_BRIEF` the
+    /// mobile (kind 2).
+    pub icon: BriefKind,
+    /// The text's key: the key's decimal digits name it (0x10fd8d).
+    pub key: i32,
+}
+
+/// The lowest key a brief can have: below it GTA8.EXE stops (error -246).
+const FIRST_BRIEF_KEY: i32 = 1000;
 
 /// One section's script, running.
 #[derive(Debug, Clone)]
@@ -251,8 +329,8 @@ pub struct Vm {
     kicks: Vec<[i32; KICK_SLOTS]>,
     /// `STARTUP` has run (GTA8.EXE's 0x26cf6c): it runs once a game.
     started: bool,
-    /// The arrow's target in 16.16 world pixels and the layer, or `None`.
-    pub arrow: Option<(i32, i32, i32)>,
+    /// The arrow, while it is up.
+    pub arrow: Option<Arrow>,
     /// The door records, in load order.
     pub doors: Vec<Door>,
     /// An `MPHONE` is ringing (0x3dcbb8): one rings at a time.
@@ -264,6 +342,10 @@ pub struct Vm {
     /// here (GTA8.EXE's is its object's), -1 when none was made or once it
     /// is answered; the phone itself stays.
     pub phones: Vec<Phone>,
+    /// The cars the script made (`PARKED_ON`), in the order it made them:
+    /// the world's handle for each. Such a declaration has become a `CAR`
+    /// whose handle is its index here (GTA8.EXE's is the car's own index).
+    pub cars: Vec<u64>,
     /// The event clock (0x1427a0): one a game frame.
     clock: u32,
     /// Timed events, soonest first: (due, event).
@@ -305,6 +387,7 @@ impl Vm {
             ringing: false,
             phone_lock: false,
             phones: Vec::new(),
+            cars: Vec::new(),
             clock: 0,
             events: Vec::new(),
             briefs: Vec::new(),
@@ -362,10 +445,17 @@ impl Vm {
             second: 0,
         };
         match kind {
-            // 0x79b5d, and `POWERUP`'s own 0x79db3: the first two numbers
-            // into +4 and +8. A `POWERUP` is no more than that until a
-            // `POWERUP_ON` makes its crate.
-            Some(DeclKind::Counter | DeclKind::Target | DeclKind::Future | DeclKind::Powerup) => {
+            // 0x79b5d, and 0x79db3 for `POWERUP` and `FUTURECAR`: the first
+            // two numbers into +4 and +8. A `POWERUP` is no more than that
+            // until a `POWERUP_ON` makes its crate, and a `FUTURECAR` (its
+            // model and turn) until a `PARKED_ON` makes its car.
+            Some(
+                DeclKind::Counter
+                | DeclKind::Target
+                | DeclKind::Future
+                | DeclKind::Powerup
+                | DeclKind::Futurecar,
+            ) => {
                 decl.handle = a;
                 decl.second = b;
             }
@@ -402,8 +492,10 @@ impl Vm {
     }
 
     /// 0xe7e10 and 0xe8600, as the loader's `DOOR` case calls them: a door
-    /// record, shut and off. Past the last record GTA8.EXE stops (error -1);
-    /// ours: no record, logged.
+    /// record, shut and off, showing its first frame. Its numbers are its
+    /// facing (0xe74d0: 0 to 3; 4 stops the original, any other is 0), its
+    /// first frame and the floor tile under its row. Past the last record
+    /// GTA8.EXE stops (error -1); ours: no record, logged.
     fn make_door(&mut self, decl: usize, d: &Decl) -> i32 {
         if self.doors.len() >= MAX_DOORS {
             self.log.push(format!(
@@ -412,13 +504,140 @@ impl Vm {
             ));
             return -1;
         }
+        let num = |i: usize| d.nums.get(i).copied().unwrap_or(0);
+        let facing = match num(0) {
+            f @ 0..=3 => f as u8,
+            4 => {
+                self.log.push(format!(
+                    "mission: door {} faces 4: the original stops here",
+                    d.label
+                ));
+                0
+            }
+            _ => 0,
+        };
+        let [x, y, z] = d.pos;
         self.doors.push(Door {
             state: DoorState::Shut,
             on: false,
             flag: d.flag,
             decl,
+            place: DoorPlace {
+                // The file counts its layers from the top (AmiGTA1).
+                block: [x, y, crate::map::LAYERS - 1 - z],
+                facing,
+                lid: (num(2) & 0xff) as u8,
+            },
+            first: (num(1) & 0xff) as u8,
+            frame: 0,
+            anim: None,
         });
         (self.doors.len() - 1) as i32
+    }
+
+    /// Make the doors in the map, as the section's loader does: the world
+    /// was not there when the declarations were read.
+    pub fn place_doors(&mut self, w: &mut dyn ScriptWorld) {
+        for d in &self.doors {
+            w.door_build(&d.place);
+        }
+    }
+
+    /// 0xe84e0: door `k` opens. Its block becomes field for good (0x69450
+    /// with 0x40), and its animation runs forwards from the first frame.
+    /// gfa-sim takes its wall away now, as AmiGTA1 does.
+    fn door_open(&mut self, k: usize, w: &mut dyn ScriptWorld) {
+        let d = &mut self.doors[k];
+        d.state = DoorState::Opening;
+        d.frame = 0;
+        d.anim = Some(DoorAnim {
+            opening: true,
+            step: 0,
+            count: 0,
+        });
+        w.door_field(&d.place);
+        w.door_wall(&d.place, false);
+        self.log
+            .push(format!("mission: door {} opens", self.decls[d.decl].label));
+    }
+
+    /// 0xe8580 (and the scan's close): door `k` starts to shut, whatever it
+    /// was doing. Its animation runs backwards from the last frame, and
+    /// gfa-sim puts its wall back now, as AmiGTA1 does.
+    fn door_close(&mut self, k: usize, w: &mut dyn ScriptWorld) {
+        let d = &mut self.doors[k];
+        d.state = DoorState::Closing;
+        d.frame = DOOR_FRAMES - 1;
+        d.anim = Some(DoorAnim {
+            opening: false,
+            step: 0,
+            count: 0,
+        });
+        w.door_wall(&d.place, true);
+        self.log
+            .push(format!("mission: door {} closes", self.decls[d.decl].label));
+    }
+
+    /// 0x124f0, once a game frame before the script: each running door
+    /// animation counts its frame; every [`DOOR_FRAME_DELAY`] it steps, and
+    /// on its last frame the door is open or shut (0xe8860, 0xe88a0), with
+    /// the garage door's sound (0x15e20 with 0x26).
+    fn step_doors(&mut self, w: &mut dyn ScriptWorld) {
+        for k in 0..self.doors.len() {
+            let d = &mut self.doors[k];
+            let Some(a) = &mut d.anim else {
+                continue;
+            };
+            a.count += 1;
+            if a.count < DOOR_FRAME_DELAY {
+                continue;
+            }
+            a.count = 0;
+            a.step += 1;
+            let (opening, step) = (a.opening, a.step);
+            d.frame = if opening {
+                step
+            } else {
+                DOOR_FRAMES - 1 - step
+            };
+            if step == DOOR_FRAMES - 1 {
+                d.anim = None;
+                d.state = if opening {
+                    DoorState::Open
+                } else {
+                    DoorState::Shut
+                };
+                w.door_sound(&d.place);
+                let what = if opening { "open" } else { "shut" };
+                self.log.push(format!(
+                    "mission: door {} is {what}",
+                    self.decls[d.decl].label
+                ));
+            }
+        }
+    }
+
+    /// The scan's door pass (the start of 0xf3800), before the triggers:
+    /// each door that is on, open or shut, against the player. In range and
+    /// shut, it opens if he passes its check: a `DOOR`'s (type 0) is that
+    /// he is in a car (his state 0). Out of range and open, it shuts unless
+    /// he is in its doorway (0xe8900).
+    fn door_pass(&mut self, w: &mut dyn ScriptWorld, (bx, by): (i32, i32)) {
+        let in_car = w.trigger_car_model().is_some();
+        for k in 0..self.doors.len() {
+            let d = &self.doors[k];
+            if !d.on || !matches!(d.state, DoorState::Open | DoorState::Shut) {
+                continue;
+            }
+            let [x, y, _] = d.place.block;
+            if near([x, y, 0], DOOR_RADIUS, bx, by) {
+                if d.state == DoorState::Shut && in_car {
+                    self.door_open(k, w);
+                }
+            } else if d.state == DoorState::Open && !d.place.inside(bx, by) {
+                self.door_close(k, w);
+            }
+        }
     }
 
     /// 0x76da0: a phone (object 0x28) at the block's centre, turned by the
@@ -533,6 +752,7 @@ impl Vm {
     /// once.
     pub fn run_frame(&mut self, w: &mut dyn ScriptWorld) {
         self.run_events();
+        self.step_doors(w);
         self.scan_triggers(w);
         for slot in 0..SLOTS {
             if !self.procs[slot].in_use {
@@ -549,6 +769,65 @@ impl Vm {
                     .push("mission: the points target is met; every process ends".into());
             }
         }
+        self.place_arrow(w);
+    }
+
+    /// The arrow's frame (0x105f9b, which calls 0xff0e0): it points from the
+    /// player towards its target and stands a margin plus a quarter of the
+    /// camera's depth out from him. While the target is in his view it eases
+    /// further out, 8 pixels a frame, until it stands the margin short of
+    /// the target; out of view it eases back to 0.
+    ///
+    /// A car's position is read again first (0xfefe0); if it is gone from
+    /// the world, the arrow keeps pointing where it last was.
+    ///
+    /// The original leaves the arrow out while its target is exactly where
+    /// the player is, z included. That is so while he drives the car it
+    /// follows (in a car his position is the car's), and gfa-sim tests that
+    /// case. A player standing on the ground is 2 pixels above a
+    /// declaration's z, so a fixed point never passes the test.
+    fn place_arrow(&mut self, w: &dyn ScriptWorld) {
+        use gfa_fixed::dos_trig::{cos, sin, towards};
+        let Some(arrow) = &mut self.arrow else {
+            return;
+        };
+        if let Follows::Car(i) = arrow.follows {
+            let car = self.cars[i];
+            if w.player_car() == Some(car) {
+                arrow.at = None;
+                return;
+            }
+            if let Some((x, y)) = w.car_pos(car) {
+                arrow.target[0] = x;
+                arrow.target[1] = y;
+            }
+        }
+        let v = w.player_view();
+        let (px, py) = v.at;
+        let [tx, ty, _] = arrow.target;
+        let (m, q) = (ARROW_MARGIN, v.depth >> 2);
+        let a = towards((px, py), (tx, ty));
+        if v.shows(tx >> 16, ty >> 16) {
+            let ady = ((py >> 16) - (ty >> 16)).abs() - m;
+            let adx = ((px >> 16) - (tx >> 16)).abs() - m;
+            let d = adx.max(ady).max(0) - m;
+            if d > arrow.ease + m + q {
+                arrow.ease += ARROW_EASE_STEP;
+            } else {
+                arrow.ease = d - q;
+            }
+        } else if arrow.ease > 0 {
+            arrow.ease = (arrow.ease - ARROW_EASE_STEP).max(0);
+        } else {
+            arrow.ease = 0;
+        }
+        let r = arrow.ease + m + q;
+        arrow.from = (px, py);
+        arrow.at = Some((
+            px.wrapping_sub(sin(a).wrapping_mul(r)),
+            py.wrapping_sub(cos(a).wrapping_mul(r)),
+            a,
+        ));
     }
 
     /// GTA8.EXE's 0x10b50: an event `frames` from now. It goes before the
@@ -585,6 +864,7 @@ impl Vm {
         let Some((bx, by)) = w.trigger_block() else {
             return;
         };
+        self.door_pass(w, (bx, by));
         let car = w.trigger_car_model();
         for t in 0..self.triggers.len() {
             let (state, kind) = (self.triggers[t].state, self.triggers[t].kind);
@@ -655,7 +935,9 @@ impl Vm {
                 {
                     return;
                 }
-                let Some(phone) = usize::try_from(trig.line).ok().filter(|&p| p < self.triggers.len())
+                let Some(phone) = usize::try_from(trig.line)
+                    .ok()
+                    .filter(|&p| p < self.triggers.len())
                 else {
                     return;
                 };
@@ -663,8 +945,7 @@ impl Vm {
                     self.triggers[phone].state = TriggerState::Armed;
                     self.log.push(format!(
                         "mission: trigger {} re-arms trigger {}",
-                        self.decls[trig.decl].label,
-                        self.decls[self.triggers[phone].decl].label
+                        self.decls[trig.decl].label, self.decls[self.triggers[phone].decl].label
                     ));
                 }
             }
@@ -756,10 +1037,11 @@ impl Vm {
 
     /// The clean-ups after that loop that gfa-sim has anything for.
     /// GTA8.EXE's also take away the mission's own peds, cars and objects
-    /// (0x765b0, 0x76490, 0x766e0), which no ported command makes yet, and
-    /// stop its sounds (0xe7670, and for `RESET` 0xf20f0), which are M8's.
-    /// `MPHONE` also clears the briefs (0x102260, 0x1029a0, not read), which
-    /// are not drawn yet.
+    /// (0x765b0, 0x76490, 0x766e0) and stop its sounds (0xe7670, and for
+    /// `RESET` 0xf20f0), which are M8's. Of those, only cars are made yet
+    /// (by `PARKED_ON`); 0x76490 takes away the ones without a flag unless
+    /// a test (0x1e0f0, not read) keeps them, so here they stay. `MPHONE`
+    /// also clears the briefs (0x102260, 0x1029a0, not read).
     fn clean_up(&mut self) {
         // 0xe8460: every trigger without its declaration's flag is disabled.
         for t in &mut self.triggers {
@@ -827,6 +1109,68 @@ impl Vm {
     fn paid(&mut self, slot: usize, w: &mut dyn ScriptWorld) -> Step {
         self.pay(slot, w);
         self.success(slot)
+    }
+
+    /// The timeout `IS_POWERUP_DONE` and `STEAL` share. Arriving, the
+    /// state becomes p4 + 5, or 0 when p4 is not above 0.
+    fn arm_timeout(&mut self, slot: usize, p4: i32) {
+        if self.procs[slot].state == 1 {
+            self.procs[slot].state = if p4 > 0 { (p4 + 5) as u16 } else { 0 };
+        }
+    }
+
+    /// One frame of the timeout: the state, a signed word there, counts
+    /// down while above 5. True on the frame it reaches 5, p4 frames after
+    /// arriving (that frame included); never with no p4.
+    fn timeout_over(&mut self, slot: usize) -> bool {
+        let state = self.procs[slot].state as i16;
+        if state > 5 {
+            self.procs[slot].state -= 1;
+            return state - 1 == 5;
+        }
+        false
+    }
+
+    /// A declaration's health as 0x7af40 gives it, for `IS_GOAL_DEAD`: a
+    /// car's is 100 less its damage, 0 once gone; a person's is his ped's;
+    /// any other kind's is 100. Where it is a car or person gfa-sim has not
+    /// made, the command waits.
+    fn health(&self, d: usize, w: &dyn ScriptWorld) -> Result<i32, &'static str> {
+        use DeclKind as K;
+        let decl = &self.decls[d];
+        match decl.kind {
+            Some(K::Player) => Ok(w.player_health()),
+            Some(K::Car) => match self.script_car(d)? {
+                Some(i) => Ok(w.car_health(self.cars[i])),
+                None => Err("a car the section's loader makes, which gfa-sim does not yet"),
+            },
+            Some(
+                K::Ped | K::Parked | K::Model | K::Escort | K::Escorted | K::Stopped | K::Hells,
+            ) => Err("a car or person the section's loader makes, which gfa-sim does not yet"),
+            _ => Ok(100),
+        }
+    }
+
+    /// The car a car command's p1 names, as `ARROWCAR` and `STEAL` read it
+    /// (the declaration's handle): its index in [`Vm::cars`], or `None` for
+    /// a handle of -1, which the original passes over. Where the original
+    /// would read some other number as a car's index, the command waits.
+    fn script_car(&self, d: usize) -> Result<Option<usize>, &'static str> {
+        let d = &self.decls[d];
+        let made = usize::try_from(d.handle)
+            .ok()
+            .filter(|&i| i < self.cars.len());
+        match (d.kind, made) {
+            (Some(DeclKind::Car), Some(i)) => Ok(Some(i)),
+            (Some(DeclKind::Futurecar), _) => {
+                Err("a FUTURECAR before its PARKED_ON: the original reads its model as a car")
+            }
+            (Some(k), _) if moves(k) => {
+                Err("a car or person the section's loader makes, which gfa-sim does not yet")
+            }
+            _ if d.handle <= -1 => Ok(None),
+            _ => Err("a declaration that is not a car: the original reads its handle as one"),
+        }
     }
 
     /// One command for one process: GTA8.EXE's live cases (table 0xa1234).
@@ -1004,12 +1348,150 @@ impl Vm {
             }
             // 0xa5d0b: text p5 on the mobile; moves on by p2 without pay.
             Op::MobileBrief => {
-                self.briefs.push(Brief::Mobile(p5));
+                self.briefs.push(Brief {
+                    icon: BriefKind::Mobile,
+                    key: p5,
+                });
                 self.log.push(format!("mission: brief {p5} (mobile)"));
                 self.success(slot)
             }
+            // 0xa1628: text p5 (a word) by the phone (0xf1b70, which hands
+            // 0x1023d0 kind 1, the brief box's phone icon); moves on by p2
+            // without pay. It reads p1's position and p3 into the
+            // interpreter's scratch first, and works a time out of p4, but
+            // the brief box uses none of them.
+            Op::Brief => {
+                let key = i32::from(p5 as i16);
+                if key < FIRST_BRIEF_KEY {
+                    return Step::Wait("BRIEF of a key below 1000: the original stops here");
+                }
+                self.briefs.push(Brief {
+                    icon: BriefKind::Phone,
+                    key,
+                });
+                self.log.push(format!("mission: brief {key} (phone)"));
+                self.success(slot)
+            }
+            // 0xa34d4: p1's `FUTURECAR` made (0xedfd0, then 0xefd10), a car
+            // of its model (+4) turned by its +8 at its block's centre, and
+            // marked the mission's with p1. The declaration becomes a `CAR`
+            // whose handle is the car. One without a flag also goes on the
+            // mission's list of cars, which `RESET` takes away (0x76490, not
+            // ported). Then pay and take p2. Where no car can be made the
+            // original stops (error -78); ours: log it and take p3, the
+            // case's own path for no car.
+            Op::ParkedOn => {
+                let d = self.decl_index(p1);
+                if self.decls[d].kind != Some(DeclKind::Futurecar) {
+                    return Step::Wait(
+                        "PARKED_ON of a declaration that is not a FUTURECAR: the original reads its numbers as one",
+                    );
+                }
+                let (block, model, turn) = {
+                    let d = &self.decls[d];
+                    (d.pos, d.handle, d.second)
+                };
+                let Some(car) = w.car_on(model, block, turn) else {
+                    self.log.push(format!(
+                        "mission: PARKED_ON {p1} made no car of model {model}: the original stops here"
+                    ));
+                    return self.failure(slot);
+                };
+                self.cars.push(car);
+                self.decls[d].handle = (self.cars.len() - 1) as i32;
+                self.decls[d].kind = Some(DeclKind::Car);
+                self.log.push(format!("mission: car {p1} parked"));
+                self.paid(slot, w)
+            }
+            // 0xa2306: the arrow follows p1's car (0xfedd0, which puts it up
+            // and starts the easing again from 0). A handle of -1 leaves the
+            // arrow as it is. Then pay and move on.
+            Op::Arrowcar => {
+                let car = match self.script_car(self.decl_index(p1)) {
+                    Ok(car) => car,
+                    Err(why) => return Step::Wait(why),
+                };
+                if let Some(i) = car {
+                    let (target, at, from) = self
+                        .arrow
+                        .map_or(([0; 3], None, (0, 0)), |a| (a.target, a.at, a.from));
+                    self.arrow = Some(Arrow {
+                        follows: Follows::Car(i),
+                        target,
+                        ease: 0,
+                        at,
+                        from,
+                    });
+                    self.log.push(format!("mission: arrow at car {p1}"));
+                }
+                self.paid(slot, w)
+            }
+            // 0xa4c40: is p1's ped in a car (its +0x66 6 or 7), and with p4
+            // above -1, a car of model p4? Then pay and take p2; otherwise,
+            // or with a handle of -1, take p3. GTA's scripts name the PLAYER
+            // in all but 24 uses, which name `FUTUREPED`s (and once a
+            // `DUMMY`).
+            Op::IsPedInCar => {
+                if self.decls[self.decl_index(p1)].kind != Some(DeclKind::Player) {
+                    return Step::Wait("IS_PED_IN_CAR of a person gfa-sim does not make yet");
+                }
+                match w.player_in_car() {
+                    Some(model) if p4 <= -1 || i32::from(model) == p4 => self.paid(slot, w),
+                    _ => self.failure(slot),
+                }
+            }
+            // 0xa309a: is the root player in p1's car (his state 0, his car
+            // the handle), and with p4 above -1, is its colour (+0x23b) p4?
+            // Then pay and take p2; otherwise, or with a handle of -1, p3.
+            Op::CheckCar => {
+                if p4 > -1 {
+                    return Step::Wait("CHECK_CAR of a colour (the car's +0x23b): not read");
+                }
+                let car = match self.script_car(self.decl_index(p1)) {
+                    Ok(car) => car,
+                    Err(why) => return Step::Wait(why),
+                };
+                if car.is_some_and(|i| w.player_car() == Some(self.cars[i])) {
+                    self.paid(slot, w)
+                } else {
+                    self.failure(slot)
+                }
+            }
+            // 0xa5658: is p1 dead (0x7af40 gives it no health)? Then pay and
+            // take p2, otherwise p3. A made ped (kind 99) with p4 above 0
+            // must also have been killed by p4 (its +0x54); no ported command
+            // makes one.
+            Op::IsGoalDead => match self.health(self.decl_index(p1), w) {
+                Ok(0) => self.paid(slot, w),
+                Ok(_) => self.failure(slot),
+                Err(why) => Step::Wait(why),
+            },
+            // 0x7bea0. Arriving, the state becomes p4 + 5 (0 when p4 is not
+            // above 0). Once he is at the wheel of p1's car (0xee930), it
+            // plays sound 17 (M8's), pays and takes p2. Until then, with p4
+            // above 0 it takes p3 p4 frames after arriving; with none it
+            // waits for good.
+            Op::Steal => {
+                let car = match self.script_car(self.decl_index(p1)) {
+                    Ok(car) => car,
+                    Err(why) => return Step::Wait(why),
+                };
+                self.arm_timeout(slot, p4);
+                if car.is_some_and(|i| w.player_car() == Some(self.cars[i])) {
+                    self.log.push(format!(
+                        "mission: he has car {p1} (STEAL's sound 17 waits for M8)"
+                    ));
+                    return self.paid(slot, w);
+                }
+                if self.timeout_over(slot) {
+                    return self.failure(slot);
+                }
+                Step::Stay
+            }
             // 0xa1c49: the arrow at p1's position (-1 puts it out), a block
-            // corner nudged to its centre; then pay and move on.
+            // corner nudged to its centre; then pay and move on. 0xfee50
+            // sets the target and starts the easing again from 0; the arrow
+            // stands where it stood until the frame places it.
             Op::Arrow => {
                 if p1 == -1 {
                     self.arrow = None;
@@ -1023,7 +1505,14 @@ impl Vm {
                         x += 32;
                         y += 32;
                     }
-                    self.arrow = Some((x << 15, y << 15, z));
+                    let (at, from) = self.arrow.map_or((None, (0, 0)), |a| (a.at, a.from));
+                    self.arrow = Some(Arrow {
+                        follows: Follows::Point,
+                        target: [x << 16, y << 16, z << 16],
+                        ease: 0,
+                        at,
+                        from,
+                    });
                     self.log.push(format!("mission: arrow at {p1}"));
                 }
                 self.paid(slot, w)
@@ -1071,23 +1560,13 @@ impl Vm {
                 let Some(d) = self.powerup(p1) else {
                     return Step::Wait("IS_POWERUP_DONE of a declaration that is not a POWERUP");
                 };
-                if self.procs[slot].state == 1 {
-                    self.procs[slot].state = if p4 > 0 { (p4 + 5) as u16 } else { 0 };
-                }
+                self.arm_timeout(slot, p4);
                 let [bx, by, _] = self.decls[d].pos;
                 if !w.powerup_there(bx, by) {
                     return self.paid(slot, w);
                 }
-                if p4 <= 0 {
+                if p4 <= 0 || self.timeout_over(slot) {
                     return self.failure(slot);
-                }
-                // The state is a signed word there.
-                let state = self.procs[slot].state as i16;
-                if state > 5 {
-                    self.procs[slot].state -= 1;
-                    if state - 1 == 5 {
-                        return self.failure(slot);
-                    }
                 }
                 Step::Stay
             }
@@ -1111,6 +1590,37 @@ impl Vm {
                 door.on = op == Op::DoorOn;
                 self.paid(slot, w)
             }
+            // 0xa2aa4: p1's door starts to shut, whatever it was doing
+            // (0xe8580); then pay and take p2. With no door (a handle of
+            // -1) it takes p3.
+            Op::CloseDoor => {
+                let d = &self.decls[self.decl_index(p1)];
+                if d.kind != Some(DeclKind::Door) {
+                    return Step::Wait("a door or gate of a kind whose loader is not read");
+                }
+                let Some(k) = usize::try_from(d.handle)
+                    .ok()
+                    .filter(|&k| k < self.doors.len())
+                else {
+                    return self.failure(slot);
+                };
+                self.door_close(k, w);
+                self.paid(slot, w)
+            }
+            // 0xa5d86: text p5 (a word) by the talk icon (0xf1d10, kind 4);
+            // moves on by p2 without pay.
+            Op::SpeechBrief => {
+                let key = i32::from(p5 as i16);
+                if key < FIRST_BRIEF_KEY {
+                    return Step::Wait("SPEECH_BRIEF of a key below 1000: the original stops here");
+                }
+                self.briefs.push(Brief {
+                    icon: BriefKind::Talk,
+                    key,
+                });
+                self.log.push(format!("mission: brief {key} (speech)"));
+                self.success(slot)
+            }
             // 0x7d400.
             Op::Mphone => self.mphone(p, slot, ci, w),
             // 0xa7172: the loop and clean-ups above, then pay and move on.
@@ -1130,7 +1640,7 @@ impl Vm {
                     return Step::Wait("GENERAL_ONSCREEN of something that moves: not ported");
                 }
                 let [x, y, _] = original_pixels(d);
-                if w.onscreen(x >> 6, y >> 6) {
+                if w.player_view().shows(x, y) {
                     self.paid(slot, w)
                 } else {
                     self.failure(slot)
@@ -1269,18 +1779,38 @@ impl Vm {
                 h.i32(*v);
             }
         }
+        for &c in &self.cars {
+            h.bytes(&c.to_le_bytes());
+        }
         match self.arrow {
-            Some((x, y, z)) => {
+            Some(a) => {
                 h.bool(true);
-                h.i32(x);
-                h.i32(y);
-                h.i32(z);
+                h.i32(match a.follows {
+                    Follows::Point => -1,
+                    Follows::Car(i) => i as i32,
+                });
+                for v in a.target {
+                    h.i32(v);
+                }
+                h.i32(a.ease);
+                for v in a.at.map_or([0; 3], |(x, y, t)| [x, y, t]) {
+                    h.i32(v);
+                }
             }
             None => h.bool(false),
         }
         for d in &self.doors {
             h.u8(d.state as u8);
             h.bool(d.on);
+            h.u8(d.frame);
+            match d.anim {
+                Some(a) => {
+                    h.bool(a.opening);
+                    h.u8(a.step);
+                    h.u8(a.count);
+                }
+                None => h.u8(0xff),
+            }
         }
         for p in &self.phones {
             h.u8(p.frame);
@@ -1433,8 +1963,32 @@ mod tests {
         car: Option<u8>,
         paid: Vec<i32>,
         target: bool,
-        shown: Vec<(i32, i32)>,
         crates: Vec<([i32; 3], i32, i32)>,
+        /// The camera's depth, if not at rest (80).
+        depth: Option<i32>,
+        /// The cars `car_on` made.
+        made: Vec<FakeCar>,
+        /// The car he is at the wheel of.
+        driving: Option<u64>,
+        /// `car_on` makes nothing.
+        no_room: bool,
+        /// His ped is in a car of this model.
+        in_car: Option<u8>,
+        /// His health, if not 100.
+        health: Option<i32>,
+    }
+
+    /// A car `car_on` made: its handle, what it was asked for, and where it
+    /// is now (the original's pixels, 16.16).
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct FakeCar {
+        handle: u64,
+        model: i32,
+        block: [i32; 3],
+        turn: i32,
+        at: (i32, i32),
+        /// 100 less its damage; 0 written off.
+        health: i32,
     }
 
     impl ScriptWorld for Fake {
@@ -1448,8 +2002,16 @@ mod tests {
         fn player_on_foot(&self) -> bool {
             self.car.is_none()
         }
-        fn onscreen(&self, bx: i32, by: i32) -> bool {
-            self.shown.contains(&(bx, by))
+        /// The camera on him: at rest, 522 by 390 pixels round him.
+        fn player_view(&self) -> crate::script_world::PlayerView {
+            let (x, y, _) = self.player_pos();
+            let (x, y) = (x << 1, y << 1);
+            let depth = self.depth.unwrap_or(80);
+            crate::script_world::PlayerView {
+                at: (x, y),
+                rect: crate::script_world::PlayerView::rect_round((x >> 16, y >> 16), depth, 284),
+                depth,
+            }
         }
         fn trigger_block(&self) -> Option<(i32, i32)> {
             match self.at {
@@ -1476,6 +2038,40 @@ mod tests {
         }
         fn powerup_there(&self, bx: i32, by: i32) -> bool {
             self.crates.iter().any(|c| c.0[..2] == [bx, by])
+        }
+        fn car_on(&mut self, model: i32, block: [i32; 3], turn: i32) -> Option<u64> {
+            if self.no_room {
+                return None;
+            }
+            let handle = 7000 + self.made.len() as u64;
+            let [bx, by, _] = block;
+            self.made.push(FakeCar {
+                handle,
+                model,
+                block,
+                turn,
+                at: ((bx * 64 + 32) << 16, (by * 64 + 32) << 16),
+                health: 100,
+            });
+            Some(handle)
+        }
+        fn car_pos(&self, car: u64) -> Option<(i32, i32)> {
+            self.made.iter().find(|c| c.handle == car).map(|c| c.at)
+        }
+        fn player_car(&self) -> Option<u64> {
+            self.driving
+        }
+        fn car_health(&self, car: u64) -> i32 {
+            self.made
+                .iter()
+                .find(|c| c.handle == car)
+                .map_or(0, |c| c.health)
+        }
+        fn player_in_car(&self) -> Option<u8> {
+            self.in_car
+        }
+        fn player_health(&self) -> i32 {
+            self.health.unwrap_or(100)
         }
     }
 
@@ -1623,7 +2219,13 @@ mod tests {
             ..Fake::default()
         };
         frames(&mut v, &mut w, 2);
-        assert_eq!(v.drain_briefs(), vec![Brief::Mobile(1001)]);
+        assert_eq!(
+            v.drain_briefs(),
+            vec![Brief {
+                icon: BriefKind::Mobile,
+                key: 1001
+            }]
+        );
         w.block = Some((9, 9));
         frames(&mut v, &mut w, 2);
         assert_eq!(jobs(&v), vec![(4, 102, "DONOWT"), (5, 100, "STARTUP")]);
@@ -1747,7 +2349,10 @@ mod tests {
     #[test]
     fn the_phone_rings_and_answering_takes_that_phones_line() {
         let mut v = vm(PHONES);
-        assert_eq!(v.decls[1].second, -1, "a TELEPHONE's first number, if above 0");
+        assert_eq!(
+            v.decls[1].second, -1,
+            "a TELEPHONE's first number, if above 0"
+        );
         assert_eq!(v.triggers[1].line, 0, "the PHONE_TOGG names trigger 0");
         let mut w = Fake {
             block: Some((53, 50)),
@@ -1761,7 +2366,11 @@ mod tests {
         w.at = Some((51 * 64 + 32 + 15, 50 * 64 + 32 - 15));
         frames(&mut v, &mut w, 1);
         assert_eq!(jobs(&v), vec![(4, 102, "SURVIVE")], "its line; 200 ended");
-        assert_eq!(v.triggers[2].state, TriggerState::Armed, "re-armed by the end");
+        assert_eq!(
+            v.triggers[2].state,
+            TriggerState::Armed,
+            "re-armed by the end"
+        );
         assert!(!v.ringing && v.phone_lock);
         assert_eq!(v.decls[1].handle, -1, "that phone rings no more");
         assert!(w.paid.is_empty(), "MPHONE never pays");
@@ -1826,11 +2435,16 @@ mod tests {
         // As Liberty City's opening has it: p3 is its own label.
         let mut v = vm("3 (100,100,4) TELEPHONE 0 0\n-1\n\
             5 GENERAL_ONSCREEN 3 0 5 0 40\n6 DONOWT 0 0 0 0 0\n-1\n");
-        let mut w = Fake::default();
+        // The view at rest reaches 261 pixels either side, edges in.
+        let phone = 100 * 64 + 32;
+        let mut w = Fake {
+            at: Some((phone - 262, phone)),
+            ..Fake::default()
+        };
         frames(&mut v, &mut w, 3);
         assert_eq!(v.running(), vec![(0, 5, "GENERAL_ONSCREEN")]);
         assert!(w.paid.is_empty());
-        w.shown.push((100, 100));
+        w.at = Some((phone - 261, phone));
         frames(&mut v, &mut w, 1);
         assert_eq!(v.running(), vec![(0, 6, "DONOWT")]);
         assert_eq!(w.paid, vec![40]);
@@ -1845,5 +2459,291 @@ mod tests {
         assert_eq!(v.running(), vec![(0, 0, "POWERUP_ON")]);
         assert!(w.crates.is_empty());
         assert!(v.drain_log().iter().any(|l| l.contains("not a POWERUP")));
+    }
+    const ARROW_137: &str = "137 (7935,8736,256) TARGET 0 0\n-1\n\
+        0 ARROW 137 0 0 0 0\n1 DONOWT 0 0 0 0 0\n-1\n";
+
+    /// Liberty City's opening, as GTA8.EXE had it in mission_arrow.probe's
+    /// RAM dump: the player at (6752, 7648) on foot (depth 78), the arrow on
+    /// `137 TARGET` far off and out of view, so 32 + 78/4 = 51 pixels out.
+    #[test]
+    fn the_arrow_stands_where_the_original_put_it() {
+        let mut v = vm(ARROW_137);
+        let mut w = Fake {
+            at: Some((6752, 7648)),
+            depth: Some(78),
+            ..Fake::default()
+        };
+        frames(&mut v, &mut w, 1);
+        let a = v.arrow.unwrap();
+        assert_eq!(a.target, [7935 << 16, 8736 << 16, 256 << 16]);
+        assert_eq!(a.ease, 0);
+        assert_eq!(a.at, Some((444_947_837, 503_494_081, 646)));
+        w.at = Some((6792, 7648));
+        frames(&mut v, &mut w, 1);
+        assert_eq!(v.arrow.unwrap().at, Some((447_541_176, 503_523_967, 644)));
+    }
+
+    #[test]
+    fn the_arrow_eases_out_to_a_target_in_view_and_back() {
+        let mut v = vm(ARROW_137);
+        // 200 pixels west of it, in view: the arrow points east (768).
+        let mut w = Fake {
+            at: Some((7735, 8736)),
+            ..Fake::default()
+        };
+        let ease = |v: &Vm| v.arrow.unwrap().ease;
+        frames(&mut v, &mut w, 11);
+        assert_eq!(ease(&v), 88, "8 a frame");
+        frames(&mut v, &mut w, 1);
+        // d = 200 - 32 - 32 = 136 is within 88 + 32 + 20: it stops 32 short.
+        assert_eq!(ease(&v), 116);
+        let (x, y, a) = v.arrow.unwrap().at.unwrap();
+        assert_eq!((x >> 16, y >> 16, a), (7735 + 168, 8736, 768));
+        frames(&mut v, &mut w, 3);
+        assert_eq!(ease(&v), 116, "it stays");
+        // Out of view, it comes back 8 a frame, down to 0.
+        w.at = Some((7935 - 600, 8736));
+        frames(&mut v, &mut w, 14);
+        assert_eq!(ease(&v), 4);
+        frames(&mut v, &mut w, 1);
+        assert_eq!(ease(&v), 0);
+        let (x, _, _) = v.arrow.unwrap().at.unwrap();
+        assert_eq!(x >> 16, 7935 - 600 + 52);
+    }
+
+    #[test]
+    fn arrow_off_and_reset_take_the_arrow_away() {
+        let mut v = vm("137 (7935,8736,256) TARGET 0 0\n-1\n\
+            0 ARROW 137 0 0 0 0\n1 ARROW_OFF 0 0 0 0 0\n2 ARROW 137 0 0 0 0\n\
+            3 RESET 0 0 0 0 0\n4 DONOWT 0 0 0 0 0\n-1\n");
+        let mut w = Fake::default();
+        frames(&mut v, &mut w, 1);
+        assert!(v.arrow.unwrap().at.is_some());
+        frames(&mut v, &mut w, 1);
+        assert!(v.arrow.is_none());
+        frames(&mut v, &mut w, 2);
+        assert!(v.arrow.is_none(), "RESET puts it out (0xfef50)");
+    }
+
+    /// The commands run in the player's own slot, from command 0.
+    fn on(vm: &Vm) -> (i32, &str) {
+        let (_, label, name) = vm.running()[0];
+        (label, name)
+    }
+
+    #[test]
+    fn brief_shows_its_text_by_the_phone_and_moves_on_without_pay() {
+        let mut v = vm("-1\n0 BRIEF 0 0 0 0 1002\n1 BRIEF 0 0 -5 40 999\n-1\n");
+        let mut w = Fake::default();
+        frames(&mut v, &mut w, 3);
+        assert_eq!(
+            v.drain_briefs(),
+            vec![Brief {
+                icon: BriefKind::Phone,
+                key: 1002
+            }]
+        );
+        assert!(w.paid.is_empty(), "p5 is the text, not pay");
+        assert_eq!(on(&v), (1, "BRIEF"), "a key below 1000 stops the original");
+        assert!(v.drain_log().iter().any(|l| l.contains("1 BRIEF waits")));
+    }
+
+    /// Liberty City's first job's car: `189 FUTURECAR`, model 18, turned 256.
+    const CAR_189: &str = "189 (167,97,4) FUTURECAR 18 256\n-1\n";
+
+    #[test]
+    fn parked_on_makes_the_futurecar_a_car_and_pays() {
+        let mut v = vm(&format!(
+            "{CAR_189}0 PARKED_ON 189 0 0 0 30\n1 DONOWT 0 0 0 0 0\n-1\n"
+        ));
+        let mut w = Fake::default();
+        frames(&mut v, &mut w, 1);
+        assert_eq!(
+            w.made,
+            vec![FakeCar {
+                handle: 7000,
+                model: 18,
+                block: [167, 97, 4],
+                turn: 256,
+                at: ((167 * 64 + 32) << 16, (97 * 64 + 32) << 16),
+                health: 100,
+            }]
+        );
+        assert_eq!(v.cars, vec![7000]);
+        let d = &v.decls[0];
+        assert_eq!((d.kind, d.handle), (Some(DeclKind::Car), 0), "now a CAR");
+        assert_eq!(w.paid, vec![30]);
+        assert_eq!(on(&v), (1, "DONOWT"));
+    }
+
+    #[test]
+    fn parked_on_with_no_car_made_takes_p3_and_waits_on_other_kinds() {
+        let mut v = vm(&format!(
+            "{CAR_189}0 PARKED_ON 189 0 2 0 30\n1 DONOWT 0 0 0 0 0\n2 DONOWT 0 0 0 0 0\n-1\n"
+        ));
+        let mut w = Fake {
+            no_room: true,
+            ..Fake::default()
+        };
+        frames(&mut v, &mut w, 1);
+        assert_eq!(on(&v), (2, "DONOWT"), "p3, unpaid");
+        assert!(w.paid.is_empty());
+        assert_eq!(v.decls[0].kind, Some(DeclKind::Futurecar), "still to make");
+        let mut v = vm("1 1 (10,10,4) TRIGGER 100 0\n-1\n0 PARKED_ON 1 0 0 0 0\n-1\n");
+        frames(&mut v, &mut w, 2);
+        assert_eq!(on(&v), (0, "PARKED_ON"), "a TRIGGER is no FUTURECAR");
+    }
+
+    #[test]
+    fn arrowcar_follows_the_car_and_is_not_drawn_while_he_drives_it() {
+        // He stands at block (10, 10)'s centre, (672, 672); the car is two
+        // blocks east.
+        let mut v = vm("189 (12,10,4) FUTURECAR 18 256\n-1\n\
+            0 PARKED_ON 189 0 0 0 0\n1 ARROWCAR 189 0 0 0 20\n2 DONOWT 0 0 0 0 0\n-1\n");
+        let mut w = Fake {
+            block: Some((10, 10)),
+            ..Fake::default()
+        };
+        frames(&mut v, &mut w, 2);
+        assert_eq!(w.paid, vec![20], "ARROWCAR pays p5");
+        let a = v.arrow.unwrap();
+        assert_eq!(a.follows, Follows::Car(0));
+        assert_eq!([a.target[0] >> 16, a.target[1] >> 16], [800, 672]);
+        assert_eq!(a.at.unwrap().2, 768, "east");
+        // The car moves north of him: the arrow turns to it.
+        w.made[0].at = (672 << 16, 400 << 16);
+        frames(&mut v, &mut w, 1);
+        assert_eq!(v.arrow.unwrap().at.unwrap().2, 0, "north");
+        // At its wheel his position is the car's: the original skips it.
+        w.driving = Some(7000);
+        frames(&mut v, &mut w, 1);
+        assert_eq!(v.arrow.unwrap().at, None);
+        w.driving = None;
+        frames(&mut v, &mut w, 1);
+        assert!(v.arrow.unwrap().at.is_some());
+    }
+
+    #[test]
+    fn steal_waits_for_him_at_the_wheel_then_pays() {
+        let mut v = vm(&format!(
+            "{CAR_189}0 PARKED_ON 189 0 0 0 0\n1 STEAL 189 0 -1 0 5000\n2 DONOWT 0 0 0 0 0\n-1\n"
+        ));
+        let mut w = Fake::default();
+        frames(&mut v, &mut w, 50);
+        assert_eq!(on(&v), (1, "STEAL"), "with no p4 it waits for good");
+        w.driving = Some(1);
+        frames(&mut v, &mut w, 1);
+        assert_eq!(on(&v), (1, "STEAL"), "some other car");
+        w.driving = Some(7000);
+        frames(&mut v, &mut w, 1);
+        assert_eq!(on(&v), (2, "DONOWT"));
+        assert_eq!(w.paid, vec![5000]);
+    }
+
+    #[test]
+    fn steal_with_p4_takes_p3_p4_frames_after_arriving() {
+        let mut v = vm(&format!(
+            "{CAR_189}0 PARKED_ON 189 0 0 0 0\n1 STEAL 189 0 3 3 5000\n\
+             2 DONOWT 0 0 0 0 0\n3 DONOWT 0 0 0 0 0\n-1\n"
+        ));
+        let mut w = Fake::default();
+        // Frame 1 makes the car; STEAL runs on frames 2, 3 and 4.
+        frames(&mut v, &mut w, 3);
+        assert_eq!(on(&v), (1, "STEAL"));
+        frames(&mut v, &mut w, 1);
+        assert_eq!(on(&v), (3, "DONOWT"), "p3, unpaid");
+        assert!(w.paid.is_empty());
+    }
+
+    #[test]
+    fn car_commands_wait_on_cars_gfa_sim_has_not_made() {
+        let mut w = Fake::default();
+        let mut v = vm(&format!("{CAR_189}0 ARROWCAR 189 0 0 0 0\n-1\n"));
+        frames(&mut v, &mut w, 2);
+        assert_eq!(on(&v), (0, "ARROWCAR"));
+        assert!(v.arrow.is_none());
+        assert!(
+            v.drain_log()
+                .iter()
+                .any(|l| l.contains("before its PARKED_ON"))
+        );
+        let mut v = vm("293 1 (106,119,4) PARKED 31 0\n-1\n0 STEAL 293 0 0 0 0\n-1\n");
+        frames(&mut v, &mut w, 2);
+        assert_eq!(on(&v), (0, "STEAL"));
+        assert!(v.drain_log().iter().any(|l| l.contains("loader makes")));
+    }
+
+    /// Liberty City's player: `294 PLAYER`, beside car 293.
+    const PLAYER_294: &str = "294 1 (105,119,4) PLAYER 293 256\n";
+
+    #[test]
+    fn is_ped_in_car_asks_after_his_ped_and_its_cars_model() {
+        let script = format!(
+            "{PLAYER_294}-1\n0 IS_PED_IN_CAR 294 0 3 -1 10\n1 IS_PED_IN_CAR 294 0 3 18 10\n\
+             2 DONOWT 0 0 0 0 0\n3 DONOWT 0 0 0 0 0\n-1\n"
+        );
+        let mut v = vm(&script);
+        let mut w = Fake::default();
+        frames(&mut v, &mut w, 1);
+        assert_eq!(on(&v), (3, "DONOWT"), "on foot: p3");
+        let mut v = vm(&script);
+        w.in_car = Some(18);
+        frames(&mut v, &mut w, 2);
+        assert_eq!(on(&v), (2, "DONOWT"), "any car, then model 18");
+        assert_eq!(w.paid, vec![10, 10]);
+        let mut v = vm(&script);
+        w.in_car = Some(5);
+        frames(&mut v, &mut w, 2);
+        assert_eq!(on(&v), (3, "DONOWT"), "not model 18: p3");
+        let mut v = vm("150 1 (100,100,256) FUTUREPED 0 0\n-1\n0 IS_PED_IN_CAR 150 0 0 -1 0\n-1\n");
+        frames(&mut v, &mut w, 2);
+        assert_eq!(on(&v), (0, "IS_PED_IN_CAR"), "a person not made yet waits");
+    }
+
+    #[test]
+    fn check_car_asks_whether_he_is_in_the_car() {
+        let script = format!(
+            "{CAR_189}0 PARKED_ON 189 0 0 0 0\n1 CHECK_CAR 189 0 3 -1 7\n\
+             2 DONOWT 0 0 0 0 0\n3 DONOWT 0 0 0 0 0\n-1\n"
+        );
+        let mut v = vm(&script);
+        let mut w = Fake::default();
+        frames(&mut v, &mut w, 2);
+        assert_eq!(on(&v), (3, "DONOWT"), "not in it: p3");
+        let mut v = vm(&script);
+        w.made.clear();
+        w.driving = Some(7000);
+        frames(&mut v, &mut w, 2);
+        assert_eq!(on(&v), (2, "DONOWT"));
+        assert_eq!(w.paid, vec![7]);
+        let mut v = vm(&format!("{CAR_189}0 CHECK_CAR 189 0 0 3 0\n-1\n"));
+        frames(&mut v, &mut w, 2);
+        assert_eq!(on(&v), (0, "CHECK_CAR"), "a colour waits");
+    }
+
+    #[test]
+    fn is_goal_dead_waits_for_the_car_or_him_to_go() {
+        // A FUTURECAR not yet made has the default health, 100: p3.
+        let mut v = vm(&format!(
+            "{CAR_189}0 IS_GOAL_DEAD 189 0 0 0 0\n1 PARKED_ON 189 0 0 0 0\n\
+             2 IS_GOAL_DEAD 189 0 2 0 40\n3 DONOWT 0 0 0 0 0\n-1\n"
+        ));
+        let mut w = Fake::default();
+        frames(&mut v, &mut w, 5);
+        assert_eq!(on(&v), (2, "IS_GOAL_DEAD"), "the car is whole");
+        w.made[0].health = 0;
+        frames(&mut v, &mut w, 1);
+        assert_eq!(on(&v), (3, "DONOWT"), "written off");
+        assert_eq!(w.paid, vec![40]);
+        let mut v = vm(&format!(
+            "{PLAYER_294}-1\n0 IS_GOAL_DEAD 294 0 0 0 0\n1 DONOWT 0 0 0 0 0\n-1\n"
+        ));
+        w.health = Some(0);
+        frames(&mut v, &mut w, 1);
+        assert_eq!(on(&v), (1, "DONOWT"), "he is dead");
+        let mut v = vm("293 1 (106,119,4) PARKED 31 0\n-1\n0 IS_GOAL_DEAD 293 0 0 0 0\n-1\n");
+        frames(&mut v, &mut w, 2);
+        assert_eq!(on(&v), (0, "IS_GOAL_DEAD"), "the loader's car waits");
     }
 }

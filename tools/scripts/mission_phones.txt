@@ -12,9 +12,8 @@
 #   away, and the next approach rings them again.
 # - On foot on phone 68 he answers it. Every other process ends but the
 #   ones kept (the 8000 block), and the process takes that phone's line:
-#   29 RESET, then 60 to 65, and the first job at 100.
-#
-# The job goes no further yet: 101 is BRIEF, which is not ported.
+#   29 RESET, then 60 to 65, and the first job at 100, whose brief comes
+#   by the phone (mission_job1.txt plays the job).
 #
 # section: 1
 # mission: on
@@ -25,7 +24,7 @@
 # expect: mission: trigger 203 re-arms trigger 192
 # expect: mission: phone 68 answered
 # expect: mission: RESET
-# expect: 101 BRIEF waits: not ported yet
+# expect: mission: brief 1002 (phone)
 # reject: MPHONE waits
 # reject: RESET waits
 # reject: GENERAL_ONSCREEN waits

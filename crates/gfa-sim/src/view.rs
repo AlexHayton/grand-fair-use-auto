@@ -181,6 +181,19 @@ impl SimCamera {
     pub fn centre(&self, x: i64, y: i64) -> (i64, i64) {
         (x + self.lead.0, y + self.lead.1)
     }
+
+    /// The DOS camera's first setting now: the player record's +0x30, which
+    /// GTA8.EXE copies to 0x1cc1dc every frame and calls the camera's depth
+    /// (`docs/MISSION_VM.md`, "The arrow"). 80 at rest.
+    pub fn lens(&self) -> i32 {
+        self.lens.value
+    }
+
+    /// The DOS camera's second setting now: the player record's +0x3c and
+    /// +0x40. 284 at rest.
+    pub fn plane(&self) -> i32 {
+        self.plane.value
+    }
 }
 
 fn step_lead(lead: &mut i64, rate: &mut i64, target: i64) {

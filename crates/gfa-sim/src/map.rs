@@ -16,8 +16,9 @@
 //!   tile is in the style's short list of solid tiles blocks a person
 //!   crossing that edge.
 //!
-//! The grids are computed once from the map. Map edits by the mission
-//! script (M7) will have to refresh the edited cell and its neighbours.
+//! The grids are computed once from the map. A mission's edits
+//! ([`SimMap::set_block`], the doors) refresh the edited cell and its
+//! neighbours.
 
 use gfa_fixed::fx::{BLOCK_SHIFT, FP};
 use gfa_formats::cmp::{Block, Cmp, Face, MAP_DIM, MAP_LAYERS};
@@ -173,6 +174,10 @@ pub struct SimMap {
     nav: Vec<u8>,
     /// [`WALL_W`], [`WALL_N`], [`POST_W`] and [`POST_N`] per cell.
     walls: Vec<u8>,
+    /// The mission's doors that are shut: a thin wall on a cell's west or
+    /// north edge, `(x, y, z, WALL_W or WALL_N)`. Their tiles are the
+    /// mission's, not the style's, so the wall is kept here.
+    door_walls: Vec<(i32, i32, i32, u8)>,
 }
 
 impl SimMap {
@@ -184,6 +189,7 @@ impl SimMap {
             ground: vec![0; n],
             nav: vec![0; n],
             walls: vec![0; n],
+            door_walls: Vec::new(),
         };
         // Ground first: the nav byte of a missing block reads it.
         for z in 0..LAYERS {
@@ -216,9 +222,54 @@ impl SimMap {
             .unwrap_or(0)
     }
 
-    /// The parsed map file.
+    /// The parsed map file, with the mission's edits.
     pub fn cmp(&self) -> &Cmp {
         &self.cmp
+    }
+
+    /// Put `block` at `(x, y, z)`, as a mission does (GTA8.EXE's doors
+    /// write faces and flags into its map), and work out the grids round it
+    /// again. Off the map, nothing happens.
+    pub fn set_block(&mut self, x: i32, y: i32, z: i32, block: Block) {
+        if !in_map(x, y, z) {
+            return;
+        }
+        self.cmp
+            .set_block(x as usize, y as usize, z as usize, block);
+        self.refresh(x, y, z);
+    }
+
+    /// A door's thin wall on the west edge of `(x, y, z)`, or its north edge
+    /// when `north`: solid while the door is shut. It stops people, cars
+    /// and shots, as a fence does.
+    pub fn set_door_wall(&mut self, x: i32, y: i32, z: i32, north: bool, solid: bool) {
+        if !in_map(x, y, z) {
+            return;
+        }
+        let bit = if north { WALL_N } else { WALL_W };
+        self.door_walls.retain(|&w| w != (x, y, z, bit));
+        if solid {
+            self.door_walls.push((x, y, z, bit));
+        }
+        self.walls[cell(x, y, z)] = self.compute_walls(x, y, z);
+    }
+
+    /// The grids of the cells round `(x, y, z)` again, after an edit there:
+    /// a cell's ground reads its neighbours and the block below it.
+    fn refresh(&mut self, x: i32, y: i32, z: i32) {
+        let around = || {
+            (z - 1..=z + 1).flat_map(move |zz| {
+                (y - 1..=y + 1).flat_map(move |yy| (x - 1..=x + 1).map(move |xx| (xx, yy, zz)))
+            })
+        };
+        for (cx, cy, cz) in around().filter(|&(a, b, c)| in_map(a, b, c)) {
+            self.ground[cell(cx, cy, cz)] = self.compute_ground(cx, cy, cz);
+        }
+        for (cx, cy, cz) in around().filter(|&(a, b, c)| in_map(a, b, c)) {
+            let i = cell(cx, cy, cz);
+            self.nav[i] = self.compute_nav(cx, cy, cz);
+            self.walls[i] = self.compute_walls(cx, cy, cz);
+        }
     }
 
     /// The block at `(x, y, z)`; `None` for air and off the map.
@@ -479,11 +530,17 @@ impl SimMap {
     }
 
     fn compute_walls(&self, x: i32, y: i32, z: i32) -> u8 {
+        let mut doors = 0;
+        for &(dx, dy, dz, bit) in &self.door_walls {
+            if (dx, dy, dz) == (x, y, z) {
+                doors |= bit | if bit == WALL_W { SHOT_W } else { SHOT_N };
+            }
+        }
         let Some(b) = self.block(x, y, z) else {
-            return 0;
+            return doors;
         };
         if !b.is_flat() {
-            return 0;
+            return doors;
         }
         let (west, north) = (b.face(Face::West), b.face(Face::North));
         let mut w = 0;
@@ -505,7 +562,7 @@ impl SimMap {
         if self.walls_from.stops_shot(north) {
             w |= SHOT_N;
         }
-        w
+        w | doors
     }
 }
 

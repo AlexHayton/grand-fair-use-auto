@@ -206,6 +206,21 @@ pub fn world_sprites(
             }
         }
     }
+    // The phones the mission script made, as the app draws them.
+    if let Some(vm) = &world.mission {
+        use gfa_sim::gfa_fixed::fx::block_centre;
+        for p in &vm.phones {
+            let [bx, by, bz] = p.block;
+            let layer = world.map.stand_layer(bx, by).unwrap_or(bz);
+            let pos = at(
+                i64::from(block_centre(bx)),
+                i64::from(block_centre(by)),
+                layer,
+                0,
+            );
+            out.extend(scene.phone_sprite(usize::from(p.frame), pos, p.turn));
+        }
+    }
     for s in &world.pickups.smashes {
         if let Some(frame) = s.frame() {
             out.extend(scene.object_sprite(
@@ -308,6 +323,15 @@ pub fn world_sprites(
     if !player_under && let Some(frame) = world.player_frame() {
         let p = &world.player;
         out.extend(scene.ped_sprite(frame, 0, world.player_pos(), p.draw_angle()));
+    }
+    // The mission arrow, a pixel above the player (it is drawn over
+    // everything in the original). The simulation's pixels are half the
+    // original's.
+    if let Some(arrow) = world.mission.as_ref().and_then(|vm| vm.arrow)
+        && let Some((ax, ay, angle)) = arrow.at
+    {
+        let [_, _, z] = world.player_pos();
+        out.extend(scene.arrow_sprite([ax >> 1, ay >> 1, z + (1 << 16)], angle));
     }
     push_weapons(scene, world, &mut out);
     out

@@ -408,15 +408,20 @@ Ref, for the HUD and text: `gta_hud.c`, `gta_font.c`, `gta_text.c`, `gta_main.c:
   - kill frenzies;
   - the bank robbery.
 - [ ] Still to read before the commands that need them:
-  - the 34 trigger types;
-  - `MPHONE` and `ANSWER`;
+  - the other 31 trigger types, and the scan's pass for doors;
+  - `ANSWER`;
   - the per-kind `ENABLE` routine (0x7aa60);
-  - `RESET`'s eight clean-ups;
-  - 0x10b50;
+  - the arrow's setters for a ped and a player, the second arrow and the margins, for `ARROWPED` and its kin;
+  - what `PARKED_ON`'s car clears from its place (0xefd10), and `RESET`'s test for keeping a car (0x1e0f0);
+  - how a phone's turn reaches the screen (a DOS screenshot of one turned 0 or 512);
   - the score routine's multiplier (0xca190);
   - what taking a kill frenzy does beyond freeing its record.
 
-  Read 2026-11-28: each player's slot (0 to 3) runs from command 0, which is `0 DONOWT` in GTA's sections.
+  Read 2026-11-28:
+  - each player's slot (0 to 3) runs from command 0, which is `0 DONOWT` in GTA's sections;
+  - `MPHONE`, the `MPHONES` and `PHONE_TOGG` triggers, `RESET`'s clean-ups, the timed queue (0x10b50) and how the arrow is placed (`docs/MISSION_VM.md`);
+  - the view rectangle (0x736d0), the arrow's sprite, and GTA8.EXE's 1024-step sine and arctangent, checked against RAM dumps;
+  - `BRIEF` and the brief routine's kinds (0x1023d0), `PARKED_ON` and the `PARKED` loader, `ARROWCAR` and what the arrow follows, and `STEAL`.
 - [ ] **Unknown commands log section and line and count toward coverage. They do not silently succeed.** In the original an unknown command stops the game (error -182). gfa-sim logs it and never takes its success path.
 - [x] `docs/MISSION_OPCODES.md` lists every command used in GTA's `MISSION.INI` with its status. Sources: AmiGTA1's table, Carnage3D `docs/ped.txt`, community mission docs, and observed behaviour.
   - Done 2026-11-27 (decision log). The tables are generated, and `cargo data-test` fails when they are stale. The doc also records how GTA8.EXE reads a script and what it does with a name it lacks.
@@ -927,6 +932,73 @@ Each entry: date, decision, why.
 
 ## Progress log
 
+- **2026-11-28. M7: the first job's checks, and what "in a car" means.**
+  - **Read in GTA8.EXE** (`docs/MISSION_VM.md`): `IS_PED_IN_CAR`, `CHECK_CAR`, `IS_GOAL_DEAD` and its health routine (0x7af40); `PARK`'s three states; the scan's door pass and how a door opens and closes.
+  - **Probed:** `tools/dosprobe/scripts/mission_incar.probe` dumped RAM through a get-in and get-out. The player's state is 0, in a car, only at the wheel with the door shut, and 2 (on foot) while he gets in and out. His ped's +0x66 is 7 from when he sits down until he is out. So:
+    - `STEAL`, `CHECK_CAR` and the arrow's test see him in the car once its door has shut;
+    - `IS_PED_IN_CAR` sees him in it from when he sits down, getting out included;
+    - the trigger scan places him by his ped while he gets in or out. It used to skip him, on a wrong reading of state 1.
+  - **Ported:** the three checks, for the player and the cars `PARKED_ON` makes. `mission_job1.txt` now drives the car onto the garage's trigger: the job passes `IS_PED_IN_CAR` and `CHECK_CAR`, turns the door on, and waits at `PARK`.
+  - **Next:** the garage doors (map edits, wall collision, the animated face; AmiGTA1 models them the same way) and `PARK`, which takes over the car and makes him walk out.
+
+- **2026-11-28. M7: Liberty City's first job, up to the garage.**
+  - **Read in GTA8.EXE** (`docs/MISSION_VM.md`, "Briefs" and "Cars"):
+    - `BRIEF` shows its text by the phone; the brief routine (0x1023d0) picks the brief box's icon by kind. gfa-app's brief box already used the original's icon sprites;
+    - `PARKED_ON` makes a `FUTURECAR`'s car, marks it the mission's and turns the declaration into a `CAR`. The map loader hands a parked car's rotation to the same routine in the same place, so gfa-sim turns both by `turn / 4`;
+    - `ARROWCAR` makes the arrow follow a car, read again each frame (0xfefe0);
+    - `STEAL` waits until he is at the car's wheel (0xee930), with `IS_POWERUP_DONE`'s timeout but no give-up at p4 0.
+  - **Ported:** the four commands; the VM's briefs reach gfa-app's brief box, so `MOBILE_BRIEF`'s texts show too; `PARKED_ON`'s car stands in gfa-sim's fleet as the mission's; the arrow is not drawn on the car he drives, as in the original.
+  - **Checked:** `tools/scripts/mission_job1.txt` plays the job on Liberty City's script. He answers phone 68 and gets into car 189 at (167,97); `STEAL` pays 5000, and the arrow moves to the garage door.
+  - **Not yet:**
+    - the job waits at the garage on `125 IS_PED_IN_CAR`; its side processes wait on `IS_GOAL_DEAD` and `IS_PED_IN_CAR`;
+    - the `PARKED` cars the section's loader makes (nine in Liberty City, one beside the start), which later jobs' `ARROWCAR`s and `STEAL`s name;
+    - the clearing of the new car's place, and `RESET`'s removal of the mission's cars.
+
+- **2026-11-28. M7: the mission arrow.**
+  - **Read in GTA8.EXE** (`docs/MISSION_VM.md`, "The view rectangle" and "The arrow"):
+    - the arrow's sprite is the Arrow category's first, plus 24 with font set 2 (0xfda00). GTA8.EXE loads only set 1, so no RAM probe was needed for it;
+    - the view rectangle is built from the camera's depth (+0x30, the M6B probes' "lens") and plane;
+    - the angle routine (0x1040e) works in 1024 steps a turn, counter-clockwise from north, not 256. It searches a tangent table, and the sine table runs to 1280 entries.
+  - **Probed:** `tools/dosprobe/scripts/mission_arrow.probe` dumps RAM in Liberty City's opening. Checked against the dumps:
+    - the tables: `trunc(sin(2πi/1024) × 65536)` and `trunc(tan(πi/512) × 65536)`, with tan exactly 1.0 at 45°;
+    - the camera's depth of 78 on foot and the rectangle of 520 by 390;
+    - the arrow 51 pixels out at angle 646, to the 1/65536 pixel.
+  - **Ported:**
+    - `gfa_fixed::dos_trig`: the tables (generated, and rebuilt with floats by its tests), 0x1039c and 0x1040e;
+    - the arrow's placement each frame (0xff0e0), with its easing towards a target in view;
+    - `GENERAL_ONSCREEN` now tests the original's rectangle (`ScriptWorld::player_view`), not gfa-sim's spawn view;
+    - gfa-app draws the arrow (Arrow 24 with the G24 style's hi-res HUD art), with the player between game frames;
+    - gfa-tool's pictures draw it and the phones.
+  - **Differences:**
+    - gfa-sim's camera model rests at 80 where the original has 78 on foot, so the arrow stands a pixel further out (52);
+    - the original's screen squeezes y to 5/6, so its arrow looks a few degrees flatter than gfa-app's.
+  - **Not yet:**
+    - the arrow on a car or a person (`ARROWCAR`, `ARROWPED`) and the second arrow;
+    - phones turned 0 or 512 may be drawn half a turn round (see "Still to read").
+
+- **2026-11-28. M7: the doors, the phones and `RESET`; Liberty City's first job starts.**
+  - **Read in GTA8.EXE** (`docs/MISSION_VM.md`):
+    - `DOOR_ON`, `DOOR_OFF` and the door records;
+    - the `TELEPHONE` loader (each phone at its block's centre) and `MPHONE`: two rings every 36 frames, given up beyond 15 blocks, answered on foot within 16 pixels, and each phone leading to its own line;
+    - the `MPHONES` and `PHONE_TOGG` triggers;
+    - `RESET`'s eight clean-ups;
+    - `GENERAL_ONSCREEN`;
+    - the timed queue, whose event lifts the phone lock 250 frames after an answer;
+    - how the arrow is placed (not yet drawn).
+    - The scan's player state 0 is in a car and 2 on foot, the other way round from the earlier note.
+  - **Ported:**
+    - `MPHONE`, `RESET`, `DOOR_ON`/`DOOR_OFF` and `GENERAL_ONSCREEN`, in part (`docs/MISSION_OPCODES.md` says which uses wait);
+    - `STARTUP` is now done;
+    - the scan by type (4, 12, 13);
+    - the timed queue;
+    - phones are drawn as object 0x28 from the style, in the frames `MPHONE` gives them.
+  - **Liberty City now runs on:**
+    - the opening passes the bomb shop doors and starts the phone arrow;
+    - the phones ring when he comes near, stop when he goes out of reach, and ring again after `PHONE_TOGG` re-arms them;
+    - answering phone 68 runs `29 RESET` and starts the first job, which waits at `101 BRIEF`.
+    - New check: `tools/scripts/mission_phones.txt`.
+  - **Coverage:** commands 40.1% done and 8 more in part (3,189 lines); declarations 56.1%.
+  - **Not yet:** the arrow is not drawn. Its sprite is two run-time values (`[0x3dddc0] + [0x3e6e90]`) that a RAM probe has to find.
 - **2026-11-28. M7: the crates become the script's, and the game runs the script.**
   - **Read in GTA8.EXE** (`docs/MISSION_VM.md`):
     - the loader keeps only a `POWERUP`'s two numbers (0x79db3), so a crate exists only once a `POWERUP_ON` names it;

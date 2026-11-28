@@ -378,6 +378,37 @@ impl Cmp {
         self.block_index(x, y, z).map(|i| &self.blocks[i as usize])
     }
 
+    /// Put `block` at `(x, y, z)`, as a mission does while the game runs
+    /// (GTA8.EXE's doors write faces and flags into its map). The file
+    /// shares columns and block records between cells, so the cell gets a
+    /// column of its own and a record equal to `block`; no other cell
+    /// changes. A column lower than `z` grows, with empty blocks between.
+    pub fn set_block(&mut self, x: usize, y: usize, z: usize, block: Block) {
+        assert!(x < MAP_DIM && y < MAP_DIM && z < MAP_LAYERS, "({x},{y},{z})");
+        // Ground first, layer 0 upwards.
+        let mut ids: Vec<u16> = self.column(x, y)[1..].iter().rev().copied().collect();
+        if ids.len() <= z {
+            let empty = self.block_id(Block::default());
+            ids.resize(z + 1, empty);
+        }
+        ids[z] = self.block_id(block);
+        let start = self.columns.len();
+        self.columns.push((MAP_LAYERS - ids.len()) as u16);
+        self.columns.extend(ids.iter().rev());
+        self.base[y * MAP_DIM + x] = (start * 2) as u32;
+    }
+
+    /// The index of a block record equal to `b`, adding one if there is none.
+    fn block_id(&mut self, b: Block) -> u16 {
+        match self.blocks.iter().position(|&o| o == b) {
+            Some(i) => i as u16,
+            None => {
+                self.blocks.push(b);
+                (self.blocks.len() - 1) as u16
+            }
+        }
+    }
+
     fn located(&self, group: usize) -> impl Iterator<Item = BlockPos> + '_ {
         self.locations[group]
             .iter()
@@ -613,6 +644,29 @@ mod tests {
         f.extend(locations);
         f.extend(district);
         f
+    }
+
+    #[test]
+    fn set_block_changes_one_cell_of_a_shared_column() {
+        let mut m = Cmp::parse(&tiny()).unwrap();
+        let lid7 = Block {
+            faces: [0, 0, 0, 0, 7],
+            ..Block::default()
+        };
+        m.set_block(3, 4, 1, lid7);
+        assert_eq!(m.block(3, 4, 1), Some(&lid7));
+        assert_eq!(m.block(3, 4, 0), m.block(0, 0, 0), "the ground stays");
+        assert_eq!(m.block(0, 0, 1).unwrap().face(Face::Lid), 9, "others keep theirs");
+        // Up past the column's top: it grows, with empty blocks between.
+        m.set_block(3, 4, 4, lid7);
+        assert_eq!(m.column_height(3, 4), 5);
+        assert_eq!(m.block(3, 4, 2), Some(&Block::default()));
+        assert_eq!(m.block(3, 4, 4), Some(&lid7));
+        assert_eq!(m.column_height(3, 5), 2);
+        // An equal record is shared, not added again.
+        let n = m.blocks.len();
+        m.set_block(9, 9, 1, lid7);
+        assert_eq!(m.blocks.len(), n);
     }
 
     #[test]

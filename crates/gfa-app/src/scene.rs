@@ -185,6 +185,24 @@ impl Scene {
                 ));
             }
         }
+        // The mission arrow (GTA8.EXE's object at 0x3e7428, drawn over
+        // everything by 0xf6cc0). It keeps the offset the simulation gave it
+        // from the player, so it moves with him as drawn between game frames.
+        if let Some(arrow) = world.mission.as_ref().and_then(|vm| vm.arrow)
+            && let Some((ax, ay, angle)) = arrow.at
+            && let Some(him) = frame.player.map(|p| p.0).or(frame.car.map(|c| c.0))
+        {
+            let (dx, dy) = (ax.wrapping_sub(arrow.from.0), ay.wrapping_sub(arrow.from.1));
+            let [x, y, z] = him.pos.to_array();
+            // The original's pixels are the renderer's.
+            let pos = [x + dx as f32 / 65536.0, y + dy as f32 / 65536.0, z + 1.0];
+            out.extend(gfa_render::sprites::arrow_sprite(
+                style,
+                &self.atlas,
+                pos,
+                angle,
+            ));
+        }
         for s in &world.pickups.smashes {
             if let Some(frame) = s.frame() {
                 let pos = ground(s.x, s.y, s.layer, 0);

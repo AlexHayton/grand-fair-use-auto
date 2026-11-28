@@ -516,7 +516,7 @@ impl World {
         self.emit_hud(crate::hud::HudEvent::Big { text });
     }
 
-    fn emit_sfx(&mut self, id: u8, x: i32, y: i32, layer: i32) {
+    pub(crate) fn emit_sfx(&mut self, id: u8, x: i32, y: i32, layer: i32) {
         self.audio
             .push(crate::audio::AudioEvent::Sfx { id, x, y, layer });
     }
@@ -1076,7 +1076,7 @@ impl World {
 
     /// His car, while he drives it or gets out of it: what the fleet and
     /// the peds see instead of him.
-    fn in_car(&self) -> Option<&Driven> {
+    pub(crate) fn in_car(&self) -> Option<&Driven> {
         self.driven
             .as_ref()
             .filter(|_| self.doing == Doing::Driving || matches!(self.doing, Doing::Exiting(_)))
@@ -3664,6 +3664,7 @@ impl World {
     }
 
     /// The mission script's tick: a game frame of it when its clock says.
+    /// The texts it shows go to the HUD's brief box.
     fn mission_tick(&mut self) {
         let Some(mut vm) = self.mission.take() else {
             return;
@@ -3671,6 +3672,9 @@ impl World {
         vm.tick(self);
         for line in vm.drain_log() {
             self.say(line);
+        }
+        for b in vm.drain_briefs() {
+            self.hud_brief(b.icon, crate::hud::HudText::key(b.key.to_string()));
         }
         self.mission = Some(vm);
     }

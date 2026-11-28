@@ -1,0 +1,28 @@
+# What the mission commands see of a player getting into and out of a car
+# (docs/MISSION_VM.md, "In a car"): the player's ped's +0x66, +0x17 and
+# +0x46, and the car's driver (+2), through getin_door.probe's get-in and
+# get-out of the Bulldog. Run on the `getin` overlay
+# (`gfa-tool probe-overlay getin`) with `--cycles 150000`. Each dump is
+# 10 MB from 0, which gta8.py's Ram reads.
+3500 tap esc 80
++2000 tap enter 80
++3000 tap enter 80
++1500 tap enter 80
+
+17000 shot start
+17050 memdump i00 0 a00000
+17130 tap enter 70
+17300 memdump i01 0 a00000
+17600 memdump i02 0 a00000
+17900 memdump i03 0 a00000
+18300 memdump i04 0 a00000
+18800 memdump i05 0 a00000
+19300 memdump i06 0 a00000
+19430 tap enter 70
+19550 memdump i07 0 a00000
+19750 memdump i08 0 a00000
+20000 memdump i09 0 a00000
+20400 memdump i10 0 a00000
+21200 memdump i11 0 a00000
+21300 shot after
+21400 quit

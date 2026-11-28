@@ -372,6 +372,23 @@ pub fn object_sprite(
     own_sprite(style, atlas, sprite, pos, angle)
 }
 
+/// GTA8.EXE's mission arrow at `pos`, turned to `angle` (its own 1024 steps
+/// a turn, counter-clockwise from north, `gfa_fixed::dos_trig`): the
+/// style's first Arrow sprite, or its 25th with the hi-res HUD art and
+/// `*2.FON` fonts (font set 2), as 0xfda00 adds 24. Its art points north,
+/// and the original turns sprite art counter-clockwise.
+pub fn arrow_sprite(
+    style: &Style,
+    atlas: &SpriteAtlas,
+    pos: [f32; 3],
+    angle: i32,
+) -> Option<SpriteInstance> {
+    let hires = style.sprite_count(SpriteCategory::Arrow) >= 49;
+    let sprite = style.sprite_index(SpriteCategory::Arrow, if hires { 24 } else { 0 })?;
+    let turn = -(angle as f32) * std::f32::consts::TAU / 1024.0;
+    own_sprite(style, atlas, sprite, pos, turn)
+}
+
 /// Burnt-out wreck sprite index for a vehicle class (`vtype`), from the
 /// style's `WBus` or `WreckedCar` category (AmiGTA1 `wreck_sprite_for`).
 pub fn wreck_sprite(style: &Style, vtype: u8) -> Option<usize> {
