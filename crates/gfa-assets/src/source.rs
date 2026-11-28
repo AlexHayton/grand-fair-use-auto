@@ -58,35 +58,70 @@ pub(crate) fn components(path: &str) -> impl Iterator<Item = &str> {
 /// The extensions of the files a level is built from.
 const PLAY_EXTENSIONS: [&str; 6] = ["cmp", "g24", "gry", "ini", "fxt", "fon"];
 
-/// Whether the engine reads `game_path` to start a level: the maps,
-/// styles, mission scripts, texts and fonts under `GTADATA/`, but not its
-/// sounds. The browser copies these out of the user's folder or archive up
-/// front; the rest (sounds, music, films) stays where it is until a later
-/// milestone asks for it.
+/// Whether the engine reads `game_path` to start the menu or a level: the
+/// maps, styles, mission scripts, texts, fonts and front-end art/audio under
+/// `GTADATA/`, plus the front-end music under `MUSIC/GTA/`. The browser copies
+/// these out of the user's folder or archive up front; the rest (in-game
+/// sounds, radio tracks, films) stays where it is until a later milestone asks
+/// for it.
 pub fn is_play_file(game_path: &str) -> bool {
     let parts: Vec<&str> = components(game_path).collect();
     let (Some(first), Some(name)) = (parts.first(), parts.last()) else {
         return false;
     };
-    first.eq_ignore_ascii_case("GTADATA")
-        && parts.len() > 1
-        && !parts.iter().any(|p| p.eq_ignore_ascii_case("AUDIO"))
-        && ([
-            "F_PAL.RAW",
-            "F_BMG.RAT",
-            "F_DMA.RAT",
-            "F_PLAYN.RAT",
-            "F_LOWER0.RAT",
-            "F_LOWER1.RAT",
-            "PLAYER_A.DAT",
-        ]
+    if first.eq_ignore_ascii_case("MUSIC") {
+        return parts.len() == 3
+            && parts[1].eq_ignore_ascii_case("GTA")
+            && (name.eq_ignore_ascii_case("CDAUDIO.DAT")
+                || (2..=11).any(|n| name.eq_ignore_ascii_case(&format!("Track{n:02}.ogg"))));
+    }
+    if !first.eq_ignore_ascii_case("GTADATA") || parts.len() <= 1 {
+        return false;
+    }
+    if parts.iter().any(|p| p.eq_ignore_ascii_case("AUDIO")) {
+        return parts.len() == 3
+            && parts[1].eq_ignore_ascii_case("AUDIO")
+            && [
+                "LEVEL000.SDT",
+                "LEVEL000.RAW",
+                "LEVEL001.SDT",
+                "LEVEL001.RAW",
+                "LEVEL002.SDT",
+                "LEVEL002.RAW",
+                "LEVEL003.SDT",
+                "LEVEL003.RAW",
+                "VOCALCOM.SDT",
+                "VOCALCOM.RAW",
+            ]
+            .iter()
+            .any(|n| name.eq_ignore_ascii_case(n));
+    }
+    [
+        "F_PAL.RAW",
+        "F_BMG.RAT",
+        "F_DMA.RAT",
+        "F_PLAYN.RAT",
+        "F_LOWER0.RAT",
+        "F_LOWER1.RAT",
+        "PLAYER_A.DAT",
+    ]
+    .iter()
+    .any(|n| name.eq_ignore_ascii_case(n))
+        || (1..=8).any(|i| name.eq_ignore_ascii_case(&format!("F_PLAY{i}.RAT")))
+        || (0..8).any(|i| name.eq_ignore_ascii_case(&format!("F_LOGO{i}.RAT")))
+        || name
+            .rsplit_once('.')
+            .is_some_and(|(_, ext)| PLAY_EXTENSIONS.iter().any(|e| ext.eq_ignore_ascii_case(e)))
+}
+
+/// Split a path inside a folder or archive at its `GTADATA` or `MUSIC` folder:
+/// `"Some/GTA/MUSIC/GTA/Track02.ogg"` is `("Some/GTA", "MUSIC/GTA/Track02.ogg")`.
+pub fn split_at_game_dir(path: &str) -> Option<(String, String)> {
+    let parts: Vec<&str> = components(path).collect();
+    let i = parts
         .iter()
-        .any(|n| name.eq_ignore_ascii_case(n))
-            || (1..=8).any(|i| name.eq_ignore_ascii_case(&format!("F_PLAY{i}.RAT")))
-            || (0..8).any(|i| name.eq_ignore_ascii_case(&format!("F_LOGO{i}.RAT")))
-            || name.rsplit_once('.').is_some_and(|(_, ext)| {
-                PLAY_EXTENSIONS.iter().any(|e| ext.eq_ignore_ascii_case(e))
-            }))
+        .position(|p| p.eq_ignore_ascii_case("GTADATA") || p.eq_ignore_ascii_case("MUSIC"))?;
+    (i + 1 < parts.len()).then(|| (parts[..i].join("/"), parts[i..].join("/")))
 }
 
 /// Split a path inside a folder or archive at its `GTADATA` folder:
@@ -339,9 +374,17 @@ mod tests {
         assert!(is_play_file("GTADATA/NYC.CMP"));
         assert!(is_play_file("gtadata/uk/missuke.ini"));
         assert!(is_play_file("GTADATA/STYLE001.G24"));
-        assert!(!is_play_file("GTADATA/AUDIO/LEVEL001.SDT"));
+        assert!(is_play_file("GTADATA/AUDIO/LEVEL000.SDT"));
+        assert!(is_play_file("GTADATA/AUDIO/LEVEL000.RAW"));
+        assert!(is_play_file("GTADATA/AUDIO/LEVEL001.SDT"));
+        assert!(is_play_file("GTADATA/AUDIO/VOCALCOM.RAW"));
+        assert!(is_play_file("MUSIC/GTA/CDAUDIO.DAT"));
+        assert!(is_play_file("MUSIC/GTA/Track02.ogg"));
+        assert!(is_play_file("MUSIC/GTA/Track03.ogg"));
+        assert!(is_play_file("MUSIC/GTA/Track11.ogg"));
+        assert!(!is_play_file("MUSIC/GTA/Track12.ogg"));
+        assert!(!is_play_file("GTADATA/AUDIO/MISBRIEF.SDT"));
         assert!(!is_play_file("GTADATA/AUDIO/FOO.INI"));
-        assert!(!is_play_file("MUSIC/GTA/CDAUDIO.DAT"));
         assert!(!is_play_file("GTADATA/1.REP"));
         assert!(!is_play_file("GTADATA"));
         assert!(!is_play_file("NYC.CMP"));

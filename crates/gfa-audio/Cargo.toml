@@ -9,3 +9,20 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+gfa-assets.workspace = true
+gfa-formats.workspace = true
+kira.workspace = true
+log.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys.workspace = true
+wasm-bindgen.workspace = true
+web-sys = { workspace = true, features = [
+    "Blob",
+    "BlobPropertyBag",
+    "HtmlAudioElement",
+    "HtmlMediaElement",
+    "Url",
+] }

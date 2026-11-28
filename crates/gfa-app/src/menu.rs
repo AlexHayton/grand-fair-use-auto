@@ -3,6 +3,7 @@ mod art;
 use art::{Art, Canvas};
 use egui::{Align, Key};
 use gfa_assets::{AssetSource, Dataset, level};
+use gfa_audio::MenuSfx;
 use gfa_formats::{career::Career, fxt::Fxt};
 
 const NAMES: [&str; 8] = [
@@ -36,6 +37,7 @@ pub struct Menu {
     scores: [[Option<i32>; 6]; 8],
     edit_name: String,
     reset_row: usize,
+    sounds: Vec<MenuSfx>,
     pub quit: bool,
     error: String,
 }
@@ -96,6 +98,7 @@ impl Menu {
             scores,
             edit_name: String::new(),
             reset_row: 0,
+            sounds: Vec::new(),
             source,
             page: Page::Title,
             career,
@@ -114,6 +117,30 @@ impl Menu {
 
     pub fn name(&self) -> String {
         self.names[self.player].clone()
+    }
+
+    pub fn sound_volume(&self) -> u8 {
+        if self.page == Page::Options {
+            self.draft[0]
+        } else {
+            self.settings[0]
+        }
+    }
+
+    pub fn music_volume(&self) -> u8 {
+        if self.page == Page::Options {
+            self.draft[1]
+        } else {
+            self.settings[1]
+        }
+    }
+
+    pub fn music_mode(&self) -> u8 {
+        self.settings[3]
+    }
+
+    pub fn drain_sounds(&mut self) -> Vec<MenuSfx> {
+        std::mem::take(&mut self.sounds)
     }
 
     pub fn draw(&mut self, ui: &mut egui::Ui, status: &str) -> Option<u32> {
@@ -142,6 +169,7 @@ impl Menu {
         );
         match self.page {
             Page::Title => {
+                push_nav(&mut self.sounds, dy);
                 self.title_row = cycle(self.title_row, dy, 2);
                 let mut choose = enter;
                 for (row, label) in ["Play", "Options"].iter().enumerate() {
@@ -155,18 +183,22 @@ impl Menu {
                 c.picture("F_BMG", 27., 408.);
                 c.picture("F_DMA", 538., 360.);
                 if c.action("MTEXT", "Esc: Quit", 320., 450., Center).clicked() || esc {
+                    self.sounds.push(MenuSfx::Cancel);
                     self.quit = true;
                 }
                 if choose && self.title_row == 1 {
+                    self.sounds.push(MenuSfx::Confirm);
                     self.page = Page::Options;
                     self.option_row = 0;
                     self.draft = self.settings;
                 } else if choose && !self.chapters.is_empty() {
+                    self.sounds.push(MenuSfx::Confirm);
                     self.page = Page::Player;
                 }
             }
             Page::Options => {
                 c.text("MHEAD", "Options", 320., 176., Center);
+                push_nav(&mut self.sounds, dy);
                 self.option_row = cycle(self.option_row, dy, 4);
                 let labels = [
                     format!("Sound: {}", self.draft[0]),
@@ -192,14 +224,26 @@ impl Menu {
                 c.icon("KEY", frame, 114., 198. + self.option_row as f32 * 30.);
                 let row = self.option_row;
                 let (min, max) = [(0, 7), (0, 7), (1, 3), (0, 1)][row];
+                let prev = self.draft[row];
                 self.draft[row] = (i32::from(self.draft[row]) + adjust - min)
                     .rem_euclid(max - min + 1) as u8
                     + min as u8;
+                if adjust != 0 && self.draft[row] != prev {
+                    match row {
+                        0 => self.sounds.push(MenuSfx::SoundTest),
+                        1 => {} // Music volume changes live with no SFX.
+                        2 => self.sounds.push(MenuSfx::for_text_speed(self.draft[2])),
+                        3 => self.sounds.push(MenuSfx::for_music_mode(self.draft[3])),
+                        _ => {}
+                    }
+                }
                 if c.action("MTEXT", "Enter: Save", 640., 450., Max).clicked() || enter {
+                    self.sounds.push(MenuSfx::Confirm);
                     self.settings = self.draft;
                     self.page = Page::Title;
                 }
                 if c.action("MTEXT", "Esc: Cancel", 0., 450., Min).clicked() || esc {
+                    self.sounds.push(MenuSfx::Cancel);
                     self.page = Page::Title;
                 }
             }
@@ -207,6 +251,7 @@ impl Menu {
                 c.picture(&format!("F_PLAY{}", self.player + 1), 396., 192.);
                 c.picture("F_PLAYN", 356., 342.);
                 c.text("MTEXT", &name, 446., 356., Center);
+                push_nav(&mut self.sounds, dy);
                 self.reset_row = cycle(self.reset_row, dy, 2);
                 let mut confirm = enter;
                 for (row, label) in ["Cancel", "Reset"].iter().enumerate() {
@@ -222,7 +267,11 @@ impl Menu {
                     self.names[self.player] = NAMES[self.player].into();
                     self.scores[self.player] = [Some(0), None, None, None, None, None];
                 }
-                if confirm || esc {
+                if confirm {
+                    self.sounds.push(MenuSfx::Confirm);
+                    self.page = Page::Player;
+                } else if esc {
+                    self.sounds.push(MenuSfx::Cancel);
                     self.page = Page::Player;
                 }
             }
@@ -242,9 +291,11 @@ impl Menu {
                     }
                 }
                 if self.page == Page::Rename {
+                    let mut backspaced = false;
+                    let mut typed = false;
                     ui.input(|i| {
-                        if i.key_pressed(Key::Backspace) {
-                            self.edit_name.pop();
+                        if i.key_pressed(Key::Backspace) && self.edit_name.pop().is_some() {
+                            backspaced = true;
                         }
                         for event in &i.events {
                             if let egui::Event::Text(s) = event {
@@ -252,13 +303,21 @@ impl Menu {
                                 {
                                     if self.edit_name.len() < 14 {
                                         self.edit_name.push(ch);
+                                        typed = true;
                                     }
                                 }
                             }
                         }
                     });
+                    if backspaced {
+                        self.sounds.push(MenuSfx::Backspace);
+                    }
+                    if typed {
+                        self.sounds.push(MenuSfx::TypeChar);
+                    }
                     c.text("MHEAD", &self.edit_name, 318., 356., Center);
                     if c.action("MTEXT", "Esc: Cancel", 0., 450., Min).clicked() || esc {
+                        self.sounds.push(MenuSfx::Cancel);
                         self.page = Page::Player;
                     }
                     let finish = if self.edit_name.is_empty() {
@@ -267,6 +326,7 @@ impl Menu {
                         "Enter: Finish"
                     };
                     if c.action("MTEXT", finish, 640., 450., Max).clicked() || enter {
+                        self.sounds.push(MenuSfx::Confirm);
                         self.names[self.player] = if self.edit_name.is_empty() {
                             NAMES[self.player].into()
                         } else {
@@ -283,24 +343,28 @@ impl Menu {
                 if c.action("MMISS", "Del: Rename", 440., 400., Min).clicked()
                     || ui.input(|i| i.key_pressed(Key::Delete))
                 {
+                    self.sounds.push(MenuSfx::Confirm);
                     self.edit_name.clear();
                     self.page = Page::Rename;
                 }
                 if c.action("MMISS", "R: Reset", 440., 415., Min).clicked()
                     || ui.input(|i| i.key_pressed(Key::R))
                 {
+                    self.sounds.push(MenuSfx::Confirm);
                     self.reset_row = 0;
                     self.page = Page::Reset;
                 }
-                self.player = cycle(
-                    self.player,
-                    dx + i32::from(next) - i32::from(prev),
-                    NAMES.len(),
-                );
+                let player_delta = dx + i32::from(next) - i32::from(prev);
+                if player_delta != 0 {
+                    self.sounds.push(MenuSfx::PlayerSwitch);
+                }
+                self.player = cycle(self.player, player_delta, NAMES.len());
                 if c.action("MTEXT", "Enter: Play", 640., 450., Max).clicked() || enter {
+                    self.sounds.push(MenuSfx::Confirm);
                     self.page = Page::Chapter;
                 }
                 if c.action("MTEXT", "Esc: Cancel", 0., 450., Min).clicked() || esc {
+                    self.sounds.push(MenuSfx::Cancel);
                     self.page = Page::Title;
                 }
             }
@@ -311,6 +375,11 @@ impl Menu {
                     .collect();
                 let mut city = group(self.chapters[self.chapter].0);
                 if dx != 0 {
+                    self.sounds.push(if dx < 0 {
+                        MenuSfx::CityLeft
+                    } else {
+                        MenuSfx::CityRight
+                    });
                     let current = cities.iter().position(|g| *g == city).unwrap_or_default();
                     city = cities[cycle(current, dx, cities.len())];
                     self.chapter = self
@@ -329,6 +398,9 @@ impl Menu {
                     .iter()
                     .position(|&i| i == self.chapter)
                     .unwrap_or_default();
+                if dy != 0 && rows.len() > 1 {
+                    push_nav(&mut self.sounds, dy);
+                }
                 self.chapter = rows[cycle(row, dy, rows.len())];
                 c.text("MTEXT", "Public Enemies", 532., 130., Center);
                 if let Some(career) = &self.career {
@@ -359,6 +431,9 @@ impl Menu {
                             )
                             .clicked()
                     {
+                        if city_id != city {
+                            self.sounds.push(MenuSfx::CityRight);
+                        }
                         self.chapter = self
                             .chapters
                             .iter()
@@ -380,14 +455,19 @@ impl Menu {
                             )
                             .clicked()
                             {
+                                if self.chapter != index {
+                                    self.sounds.push(MenuSfx::NavDown);
+                                }
                                 self.chapter = index;
                             }
                         }
                     }
                 }
                 if c.action("MTEXT", "Esc: Cancel", 0., 450., Min).clicked() || esc {
+                    self.sounds.push(MenuSfx::Cancel);
                     self.page = Page::Player;
                 } else if c.action("MTEXT", "Enter: Play", 640., 450., Max).clicked() || enter {
+                    self.sounds.push(MenuSfx::Confirm);
                     return Some(self.chapters[self.chapter].0);
                 }
             }
@@ -410,6 +490,14 @@ impl Menu {
 }
 fn cycle(index: usize, delta: i32, len: usize) -> usize {
     (index as i32 + delta).rem_euclid(len as i32) as usize
+}
+
+fn push_nav(sounds: &mut Vec<MenuSfx>, dy: i32) {
+    if dy < 0 {
+        sounds.push(MenuSfx::NavUp);
+    } else if dy > 0 {
+        sounds.push(MenuSfx::NavDown);
+    }
 }
 #[cfg(test)]
 mod tests {
@@ -456,6 +544,18 @@ mod tests {
         }
         assert_eq!(press(Key::Enter), Some(102));
         assert_eq!(menu.name(), "Katie");
+        assert_eq!(
+            menu.drain_sounds(),
+            vec![
+                MenuSfx::Confirm,
+                MenuSfx::PlayerSwitch,
+                MenuSfx::Confirm,
+                MenuSfx::Cancel,
+                MenuSfx::Confirm,
+                MenuSfx::CityRight,
+                MenuSfx::Confirm,
+            ]
+        );
     }
 }
 

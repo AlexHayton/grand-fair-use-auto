@@ -17,4 +17,6 @@ pub mod source;
 pub use archive::{Archive, ArchiveError, ArchiveSource, GameIndex, ReadAt};
 pub use datapath::{DataPath, DataPathError, DataPathOrigin};
 pub use dataset::{Dataset, Datasets};
-pub use source::{AssetError, AssetSource, FsSource, MemSource, is_play_file, split_at_gtadata};
+pub use source::{
+    AssetError, AssetSource, FsSource, MemSource, is_play_file, split_at_game_dir, split_at_gtadata,
+};

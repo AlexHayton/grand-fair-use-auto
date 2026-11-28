@@ -333,6 +333,8 @@ pub struct World {
     /// Raw unmasked fire button from the previous tick, for the event-style latch.
     prev_fire: bool,
     log: Vec<LogLine>,
+    /// Transient one-shot audio events for the audio layer (not in `World::hash`).
+    audio: Vec<crate::audio::AudioEvent>,
 }
 
 impl World {
@@ -416,6 +418,7 @@ impl World {
             prev: Buttons::NONE,
             prev_fire: false,
             log: Vec::new(),
+            audio: Vec::new(),
         };
         let p = &world.player;
         let text = format!(
@@ -481,8 +484,32 @@ impl World {
         self.section = Some(section.clone());
     }
 
+    /// Drain one-shot audio events emitted since the last call.
+    pub fn drain_audio(&mut self) -> Vec<crate::audio::AudioEvent> {
+        std::mem::take(&mut self.audio)
+    }
+
+    fn emit_sfx(&mut self, id: u8, x: i32, y: i32, layer: i32) {
+        self.audio
+            .push(crate::audio::AudioEvent::Sfx { id, x, y, layer });
+    }
+
+    fn emit_voice(&mut self, line: u8, pos: Option<(i32, i32, i32)>, cut: bool) {
+        self.audio
+            .push(crate::audio::AudioEvent::Voice { line, pos, cut });
+    }
+
     /// Advance one tick.
     pub fn step(&mut self, input: TickInput) {
+        let prev_blasts: Vec<bool> = self.weapons.blasts.iter().map(|b| b.frame > 0).collect();
+        let prev_splats: Vec<i32> = self.weapons.splats.iter().map(|s| s.ticks).collect();
+        let prev_peds: Vec<(bool, bool, bool)> = self
+            .peds
+            .p
+            .iter()
+            .map(|p| (p.alive, p.burn > 0, p.corpse))
+            .collect();
+        let prev_kills = self.score.kills;
         let raw_fire = input.buttons.contains(Buttons::FIRE);
         let b = if self.bust_timer > 0 || self.foot_arrest > 0 || self.game_over {
             Buttons::NONE
@@ -649,6 +676,54 @@ impl World {
         self.harm();
         self.run_over();
         self.gouranga();
+        let mut new_sfx = Vec::new();
+        for (b, was) in self.weapons.blasts.iter().zip(prev_blasts) {
+            if b.frame > 0 && !was {
+                new_sfx.push((
+                    crate::audio::snd::EXPLOSION,
+                    b.x as i32,
+                    b.y as i32,
+                    b.layer,
+                ));
+            }
+        }
+        for (s, prev_t) in self.weapons.splats.iter().zip(prev_splats) {
+            if s.ticks > prev_t {
+                new_sfx.push((
+                    crate::audio::snd::BULLET_HIT,
+                    s.x as i32,
+                    s.y as i32,
+                    s.layer,
+                ));
+            }
+        }
+        for (p, (was_alive, was_burning, was_corpse)) in self.peds.p.iter().zip(prev_peds) {
+            if !p.alive || !was_alive {
+                continue;
+            }
+            if !was_burning && p.burn > 0 {
+                new_sfx.push((
+                    crate::audio::snd::IGNITE,
+                    p.x as i32,
+                    p.y as i32,
+                    p.layer,
+                ));
+            }
+            if !was_corpse && p.corpse {
+                let id = if was_burning && p.burn == 0 {
+                    crate::audio::snd::BURN_DEATH
+                } else {
+                    crate::audio::snd::DEATH
+                };
+                new_sfx.push((id, p.x as i32, p.y as i32, p.layer));
+            }
+        }
+        for (id, x, y, layer) in new_sfx {
+            self.emit_sfx(id, x, y, layer);
+        }
+        if self.score.kills != prev_kills && self.in_frenzy() {
+            self.audio.push(crate::audio::AudioEvent::FrenzyCheer);
+        }
         self.prev = b;
         self.prev_fire = raw_fire;
         self.tick += 1;
@@ -694,6 +769,11 @@ impl World {
                 }
             }
             Doing::OnFoot | Doing::Entering(_) if down => {
+                self.audio.push(crate::audio::AudioEvent::FootShout {
+                    x: self.player.x,
+                    y: self.player.y,
+                    layer: self.player.layer,
+                });
                 line = Some("special key - a shout".into());
             }
             _ => {}
@@ -794,8 +874,12 @@ impl World {
         match self.arms.tick(can, gun_step) {
             None | Some(Trigger::Swing) => {}
             Some(Trigger::Blow) => match self.peds.punch(x, y, angle, layer) {
-                Punch::Down(i) => self.say(format!("player: punch - ped {i} down")),
+                Punch::Down(i) => {
+                    self.emit_sfx(crate::audio::snd::PUNCH, x as i32, y as i32, layer);
+                    self.say(format!("player: punch - ped {i} down"));
+                }
                 Punch::Counter(i) => {
+                    self.emit_sfx(crate::audio::snd::PUNCH, x as i32, y as i32, layer);
                     self.knocked = KNOCKED_TICKS;
                     self.say(format!("player: ped {i} punched back - he is down"));
                 }
@@ -804,7 +888,18 @@ impl World {
             Some(Trigger::Shot(w)) => {
                 let running = p.anim == Anim::Run;
                 if self.weapons.fire(w, x, y, layer, angle, running, None) {
-                    self.peds.panic(x, y, layer);
+                    if let Some(id) = crate::audio::snd::for_weapon(w) {
+                        self.emit_sfx(id, x as i32, y as i32, layer);
+                    }
+                    let scared = self.peds.panic(x, y, layer);
+                    for (i, (px, py, pl)) in scared.into_iter().enumerate() {
+                        self.audio.push(crate::audio::AudioEvent::Panic {
+                            x: px,
+                            y: py,
+                            layer: pl,
+                            first: i == 0,
+                        });
+                    }
                     if self.arms.spent() {
                         let w = self.arms.weapon;
                         self.say(format!("player: out of ammo - weapon {w}"));
@@ -853,7 +948,16 @@ impl World {
         let angle = (d.veh.angle() + d.turret) & 255;
         let (x, y, layer) = (d.veh.ox, d.veh.oy, d.layer);
         if self.weapons.fire_shell(x, y, layer, angle) {
-            self.peds.panic(x, y, layer);
+            self.emit_sfx(crate::audio::snd::ROCKET, x as i32, y as i32, layer);
+            let scared = self.peds.panic(x, y, layer);
+            for (i, (px, py, pl)) in scared.into_iter().enumerate() {
+                self.audio.push(crate::audio::AudioEvent::Panic {
+                    x: px,
+                    y: py,
+                    layer: pl,
+                    first: i == 0,
+                });
+            }
             let left = self.cannon.shells;
             self.say(format!("tank: shell fired at angle {angle} ({left} left)"));
         }
@@ -924,7 +1028,11 @@ impl World {
                 3 => weapons::weapon::FLAME,
                 _ => weapons::weapon::PISTOL,
             };
-            self.weapons.fire(w, sx, sy, sl, sa, false, Some(si));
+            if self.weapons.fire(w, sx, sy, sl, sa, false, Some(si))
+                && let Some(id) = crate::audio::snd::for_weapon(w)
+            {
+                self.emit_sfx(id, sx as i32, sy as i32, sl);
+            }
         }
     }
 
@@ -1023,12 +1131,28 @@ impl World {
         if let Some((cx, cy, cl, ca)) = self.traffic.take_cop_out() {
             let max_out = (self.score.level as usize).max(1);
             if self.peds.cops_out() < max_out && self.peds.spawn_cop(cx, cy, cl, ca) {
+                let ped = (self.peds.last_slot().unwrap_or(0) % 3) as u8;
+                self.audio.push(crate::audio::AudioEvent::CopShout {
+                    kind: 0x12,
+                    ped,
+                    x: cx as i32,
+                    y: cy as i32,
+                    layer: cl,
+                });
                 self.say(format!(
                     "police: cop out on foot at ({},{}) layer {cl}",
                     cx >> 21,
                     cy >> 21
                 ));
             }
+        }
+        if let Some((yx, yy, yl)) = self.traffic.yell.take() {
+            self.audio.push(crate::audio::AudioEvent::StreetYell {
+                x: yx as i32,
+                y: yy as i32,
+                layer: yl,
+                chance_half: false,
+            });
         }
         while let Some((cx, cy, cl, ca)) = self.traffic.take_roadblock_cop() {
             if self.peds.spawn_cop(cx, cy, cl, ca) {
@@ -1411,6 +1535,7 @@ impl World {
             _ => "",
         };
         self.say(format!("player: wasted{how}"));
+        self.emit_voice(crate::audio::voice::BUSTED_WASTED, None, true);
         self.burning = 0;
         self.knocked = 0;
         self.player_speed = 0;
@@ -1471,6 +1596,7 @@ impl World {
             "police: BUSTED (multiplier {}, jail_free {})",
             self.score.multiplier, self.jail_free
         ));
+        self.emit_voice(crate::audio::voice::BUSTED_WASTED, None, true);
     }
 
     fn finish_card(&mut self) {
@@ -2058,6 +2184,13 @@ impl World {
         };
         let total = steps * ENTER_TICKS;
         let t = e.step * ENTER_TICKS + e.tick;
+        // Door opens on an occupied car: play its radio snippet (`0x7e..0x82`).
+        if !e.bike && e.driver && t == 0 {
+            let radio = self.cars[e.car.model].radio;
+            if let Some(id) = crate::audio::snd::for_car_radio(radio) {
+                self.emit_sfx(id, e.car.x, e.car.y, e.car.layer);
+            }
+        }
         // The door is fully open (a bike has none): out comes the driver.
         if e.driver && (e.bike || t >= DOOR_OPEN) {
             e.driver = false;
@@ -2121,6 +2254,10 @@ impl World {
         self.player.anim = Anim::Stand;
         self.player.frame = 0;
         self.doing = Doing::Driving;
+        if !e.bike {
+            self.emit_sfx(crate::audio::snd::DOOR, car.x, car.y, car.layer);
+        }
+        self.emit_sfx(crate::audio::snd::CAR_START, car.x, car.y, car.layer);
         self.say(format!(
             "car: in - model {} at ({},{})",
             self.cars[car.model].model,
@@ -2226,6 +2363,14 @@ impl World {
         self.player.y = y as i32;
         self.player.angle = (e.face + side * if e.bike { 64 } else { 32 }) & 255;
         self.park_driven(e.face);
+        if !e.bike {
+            self.emit_sfx(
+                crate::audio::snd::DOOR,
+                self.player.x,
+                self.player.y,
+                self.player.layer,
+            );
+        }
         self.stand_up();
         self.say(format!(
             "car: out at ({},{}) facing {}",
@@ -2273,12 +2418,29 @@ impl World {
             }
         }
         let mut lines = Vec::new();
+        let mut sfx = Vec::new();
+        let mut ram_yells = Vec::new();
         let (ox0, oy0, ang0) = (d.veh.ox, d.veh.oy, d.veh.ang16);
+        let prev_damage = d.veh.damage;
         let was_air = d.air.is_some();
         let ci = &self.cars[d.veh.model];
         let water = d.tick(&self.map, ci, pedals, &mut |s| lines.push(s));
         if water.is_none() {
+            if d.veh.damage > prev_damage {
+                sfx.push((
+                    crate::audio::snd::WALL,
+                    d.veh.ox as i32,
+                    d.veh.oy as i32,
+                    d.layer,
+                ));
+            }
             if was_air && d.air.is_none() {
+                sfx.push((
+                    crate::audio::snd::LANDING,
+                    d.veh.ox as i32,
+                    d.veh.oy as i32,
+                    d.layer,
+                ));
                 self.marks.sparks(
                     d.veh.ox,
                     d.veh.oy,
@@ -2323,6 +2485,12 @@ impl World {
                     lines.push(l);
                 }
                 if n > 0 {
+                    sfx.push((
+                        crate::audio::snd::CRASH,
+                        v.ox as i32,
+                        v.oy as i32,
+                        d.layer,
+                    ));
                     lines.push(format!("car: the tank crushed {n}"));
                 }
             } else {
@@ -2380,6 +2548,18 @@ impl World {
                     }
                 }
                 if r.hits > 0 {
+                    let sp = (hvx.abs().max(hvy.abs()) >> 15) as i32;
+                    let impact = if sp < 7 {
+                        crate::audio::snd::IMPACT_LIGHT
+                    } else if sp < 17 {
+                        crate::audio::snd::IMPACT_MED
+                    } else {
+                        crate::audio::snd::IMPACT_HARD
+                    };
+                    sfx.push((impact, v.ox as i32, v.oy as i32, d.layer));
+                    if sp > 10 {
+                        ram_yells.push((v.ox as i32, v.oy as i32, d.layer));
+                    }
                     v.damage += r.damage;
                     // The push points out of the other car: the dent is the
                     // other way.
@@ -2405,6 +2585,17 @@ impl World {
         for l in lines {
             self.say(l);
         }
+        for (id, x, y, layer) in sfx {
+            self.emit_sfx(id, x, y, layer);
+        }
+        for (x, y, layer) in ram_yells {
+            self.audio.push(crate::audio::AudioEvent::StreetYell {
+                x,
+                y,
+                layer,
+                chance_half: true,
+            });
+        }
         if let Some(z) = water {
             self.sink(z);
         }
@@ -2417,6 +2608,7 @@ impl World {
             return;
         };
         self.marks.splash(d.veh.ox, d.veh.oy, z);
+        self.emit_sfx(crate::audio::snd::SPLASH, d.veh.ox as i32, d.veh.oy as i32, z);
         self.player.x = d.veh.ox as i32;
         self.player.y = d.veh.oy as i32;
         self.player.layer = z;
@@ -2835,6 +3027,14 @@ impl World {
                 continue;
             }
             self.pickups.take_index(idx);
+            let pickup_snd = if (1..=4).contains(&kind) {
+                crate::audio::snd::PICKUP_GUN
+            } else if (kind & 1) != 0 {
+                crate::audio::snd::PICKUP_ODD
+            } else {
+                crate::audio::snd::PICKUP_EVEN
+            };
+            self.emit_sfx(pickup_snd, px as i32, py as i32, pl);
             match kind {
                 1..=4 => {
                     let w = kind as usize;
@@ -2886,6 +3086,7 @@ impl World {
                 pickups::kind::LIFE | 15 => {
                     let add = if amount > 0 { amount } else { 1 };
                     self.lives = (self.lives + add).min(99);
+                    self.emit_voice(crate::audio::voice::EXTRA_LIFE, None, true);
                     self.say(format!(
                         "pickups: took extra life (+{add} -> {})",
                         self.lives
@@ -2894,6 +3095,7 @@ impl World {
                 pickups::kind::FRENZY => {
                     self.arms.give_endless(weapons::weapon::MACHINE_GUN, 1500);
                     self.cannon.load();
+                    self.emit_voice(crate::audio::voice::FRENZY, None, true);
                     self.say("pickups: took kill frenzy".into());
                 }
                 _ => {}
@@ -2982,6 +3184,12 @@ impl World {
             self.say(format!("shop: {key}"));
         }
         if let Some((bx, by, remap, key, cost)) = sprayed {
+            self.emit_sfx(
+                crate::audio::snd::RESPRAY,
+                (bx << 21) + (1 << 20),
+                (by << 21) + (1 << 20),
+                self.player.layer,
+            );
             if let Some(l) = self.score.clear_heat() {
                 self.say(l);
             }

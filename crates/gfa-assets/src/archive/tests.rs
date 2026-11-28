@@ -155,7 +155,14 @@ fn a_zip_serves_the_game_below_its_gtadata_folder() {
         .map(|(p, _)| p)
         .filter(|p| is_play_file(p))
         .collect();
-    assert_eq!(play, ["GTADATA/MISSION.INI", "GTADATA/NYC.CMP"]);
+    assert_eq!(
+        play,
+        [
+            "GTADATA/MISSION.INI",
+            "GTADATA/NYC.CMP",
+            "MUSIC/GTA/Track02.ogg",
+        ]
+    );
 }
 
 #[test]

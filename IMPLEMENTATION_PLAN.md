@@ -433,9 +433,12 @@ Ref, for the HUD and text: `gta_hud.c`, `gta_font.c`, `gta_text.c`, `gta_main.c:
 
 - [ ] Title and menus in the original fonts; player and chapter select; high scores.
 - [ ] Briefing stills `CUT0-5` with `0-5.WAV`.
-- [ ] SFX banks with positional mix; engine pitch; VOCALCOM; MISBRIEF.
-- [ ] Radio: clock-based stations `(offset+elapsed) mod length` mapped to `Track02-11.ogg` through `CDAUDIO.DAT`; the police band only in police cars; on-foot ambience; a station key.
-- [ ] Web audio starts on the first gesture.
+- [x] Front-end audio: `LEVEL000` SFX (16-bit signed: entries 0–2 stereo, 3–15 mono, mapped from `GTA8.EXE` `0x15e70`) and looping `Track02.ogg` title theme. Done 2026-11-27.
+- [ ] In-game SFX banks (`LEVEL001`–`003`) with positional mix, roof-cover halving, engine pitch, skid, siren/horn, burning wrecks, `VOCALCOM`, `MISBRIEF`.
+  - Done (2026-11-27/28, all non-mission audio): weapons, explosions, punches, ped deaths/ignitions/burn-deaths (`0x11`, `0x18`, `0x19`), panic screams (`0x15..0x17` + lines `62..69`), carjack radio snippets (`0x7e..0x82`), on-foot Tab shout (`0x4c`/`0x4d`), impacts, wall/water/landing, door/start, pickups, respray, engine/skid/siren/player & AI horn patterns/wreck loops, and non-mission `VOCALCOM` lines (`BUSTED`/`WASTED`, extra life, frenzy start & cheers `7..10`, cop shouts `18..29`, driver street yells `30..50`).
+  - Waiting on M7 mission scripts: ringing phones (`0x1c`), scripted garage doors (`0x26`), mission-outcome `VOCALCOM` lines (`MISSION COMPLETE`/`FAILED`, `FRENZY PASSED`/`FAILED`), and `MISBRIEF`.
+- [x] Radio: clock-based stations `(offset+elapsed) mod length` mapped to `Track02-11.ogg` through `CDAUDIO.DAT`; the police band only in police cars; on-foot ambience; a station key (`F5`); Radio vs Constant mode. Native streams via Kira; web streams via browser-native `<audio>` (`Blob` URL + `canPlayType('audio/ogg; codecs="vorbis"')` check with Kira fallback). Done 2026-11-28.
+- [x] Web audio starts on the first gesture (`Audio::unlock` on first key/pointer/touch event, 2026-11-27).
 - [ ] Close the M8 items in _Gaps beyond AmiGTA1_: cheats, language, high scores, pause and options, attract demos, complete speech and SFX.
 - [ ] Saves: read and write the original `PLAYER_A.DAT` format behind a `SaveStore` trait.
   - Native: `~/Library/Application Support/GrandFairUseAuto`.
@@ -921,6 +924,18 @@ Each entry: date, decision, why.
 - **2026-11-20. Rust + wgpu (Metal native, WebGL2 web), one codebase.**
 
 ## Progress log
+
+- **2026-11-27. M8: in-game SFX, vehicle/siren/wreck loops, `VOCALCOM`, and CD-audio radio.**
+  - Added a pure, transient `World::drain_audio()` event queue (`gfa_sim::audio`, excluded from `World::hash` so determinism and replays are unchanged) emitting weapons, tank shell, punch, explosions, bullet wall hits, door shut/car start, car-car impacts, tank crush, wall hit, jump landing, water splash, pickups, respray, and `VOCALCOM` announcer lines (`BUSTED`/`WASTED`, extra life, kill frenzy).
+  - Implemented `gfa_audio::{sfx, radio}` and extended `Audio` with level bank (`LEVEL001`–`003`) & `VOCALCOM` loading, positional distance attenuation + stereo pan + roof-cover halving, `engine_rate()` pitch/volume curves, seamless looping handles for engine/skid/siren/horn/burning wrecks, single-channel `VOCALCOM` speech with interrupt/drop priority, and clock-based CD-audio radio (`CDAUDIO.DAT`, `Track03` police band, `F5` station cycling, Radio vs Constant mode).
+  - Wired `gfa_app::sound` into `App::load_level` and `App::redraw` (pausing loops on `F6`) and included `LEVEL001`–`003` and `VOCALCOM` in `gfa_assets::is_play_file` for web builds.
+
+- **2026-11-27. M8: front-end sound and music (`gfa-audio`).**
+  - Implemented `gfa-audio` on `kira 0.12` (`cpal` + Symphonia Ogg/Vorbis/WAV/PCM) with separate SFX and Music tracks mapped to GTA's `0..=7` volume scale. Native streams Ogg music via `StreamingSoundData`; `wasm32` uses `StaticSoundData` (avoiding `std::thread::spawn`) and defers opening audio until the first user gesture (`Audio::unlock`).
+  - Settled `LEVEL000` channel layout from the data (step-1 vs step-2 sample deltas): entries `0..3` are 16-bit signed interleaved stereo and `3..15` are 16-bit mono, matching Carnage3D.
+  - Mapped every menu interaction directly from `GTA8.EXE`'s `0x15e70` call sites (`0/1` city left/right, `2` confirm, `3` player switch, `4` cancel, `5/6` music mode, `7/8` cursor up/down, `9..11` text speed, `12/13` rename type/backspace, `14` sound volume test) and wired looping `Track02.ogg` via `MUSIC/GTA/CDAUDIO.DAT` in `gfa-app`.
+  - Updated `gfa-assets` (`is_play_file`, `split_at_game_dir`) so the web build unpacks `LEVEL000.{SDT,RAW}`, `CDAUDIO.DAT` and `Track02.ogg`.
+  - Audited in-game audio readiness before M7 mission scripts: ~85–90% (radio, engine/skid/siren/horn/wreck loops, weapons/impacts/pickups/respray SFX, and non-mission `VOCALCOM`) can be wired immediately; only ringing phones (`0x1c`), scripted garage doors (`0x26`), mission-outcome `VOCALCOM`, and `MISBRIEF` wait on M7.
 
 - **2026-11-27. M8 front-end parity.** Measured GTA8.EXE in DOSBox-X with `tools/dosprobe/scripts/front_end.probe`. The title, options, player and chapter screens use the indexed front-end palette, mixed-case bitmap fonts, animated logo, key cursor and city icons at the DOS layout coordinates. Player changes and options are in memory. All six chapters remain selectable during mission development.
 

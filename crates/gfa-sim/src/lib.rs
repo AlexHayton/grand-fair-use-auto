@@ -23,6 +23,7 @@
 //!   declaration tables.
 #![deny(clippy::float_arithmetic)]
 
+pub mod audio;
 pub mod cars;
 pub mod clock;
 pub mod hash;

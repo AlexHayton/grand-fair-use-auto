@@ -59,6 +59,8 @@ pub struct Controls {
     pub flying: bool,
     /// F6: the simulation is stopped. The camera still moves.
     pub paused: bool,
+    /// F5: cycle radio station (consumed once per press).
+    radio_next: bool,
     pub pitch: f32,
     pub yaw: f32,
     dragging: bool,
@@ -102,6 +104,7 @@ impl Controls {
             free_look: false,
             flying: false,
             paused: false,
+            radio_next: false,
             pitch: 0.0,
             yaw: 0.0,
             dragging: false,
@@ -130,6 +133,11 @@ impl Controls {
     /// Ticks have run with the queued presses: let them go.
     pub fn ticked(&mut self) {
         self.queued = Buttons::NONE;
+    }
+
+    /// Consume a pending F5 radio-station press.
+    pub fn take_radio_next(&mut self) -> bool {
+        std::mem::take(&mut self.radio_next)
     }
 
     pub fn jump_to(&mut self, target: Vec3) {
@@ -215,6 +223,7 @@ impl Controls {
                 self.yaw = 0.0;
             }
             KeyCode::KeyC => self.flying = !self.flying,
+            KeyCode::F5 => self.radio_next = true,
             KeyCode::F6 => self.paused = !self.paused,
             KeyCode::Equal | KeyCode::NumpadAdd | KeyCode::PageUp => self.follow.zoom(0.8),
             KeyCode::Minus | KeyCode::NumpadSubtract | KeyCode::PageDown => self.follow.zoom(1.25),

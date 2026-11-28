@@ -12,6 +12,7 @@ mod overlay;
 #[cfg(test)]
 mod popin;
 mod scene;
+mod sound;
 #[cfg(target_arch = "wasm32")]
 mod web;
 
@@ -106,6 +107,11 @@ struct App {
     /// Loaded before the GPU was ready; becomes a [`Scene`] when it is.
     pending: Option<Level>,
     menu: Option<menu::Menu>,
+    /// Retained while in-game so radio tracks can be read on demand.
+    source: Option<Box<dyn AssetSource>>,
+    audio: gfa_audio::Audio,
+    sound_state: sound::SoundState,
+    music_mode: u8,
     scene: Option<Scene>,
     game: Option<Game>,
     controls: Controls,
@@ -122,6 +128,11 @@ struct App {
 impl App {
     fn new(config: AppConfig, proxy: EventLoopProxy<UserEvent>) -> Self {
         let centre = 128.0 * 64.0;
+        let audio = if config.screenshot.is_some() {
+            gfa_audio::Audio::silent()
+        } else {
+            gfa_audio::Audio::new()
+        };
         Self {
             config,
             proxy,
@@ -130,6 +141,10 @@ impl App {
             overlay: None,
             pending: None,
             menu: None,
+            source: None,
+            audio,
+            sound_state: sound::SoundState::default(),
+            music_mode: 0,
             scene: None,
             game: None,
             controls: Controls::new(Vec3::new(centre, centre, 128.0)),
@@ -214,12 +229,22 @@ impl App {
         if self.config.show_menu {
             self.game = None;
             self.scene = None;
+            self.source = None;
             self.status.clear();
             #[cfg(target_arch = "wasm32")]
             web::set_playing(false);
-            self.menu = Some(menu::Menu::new(src));
+            let menu = menu::Menu::new(src);
+            self.music_mode = menu.music_mode();
+            self.audio.start_menu(
+                menu.source.as_ref(),
+                self.config.game,
+                menu.sound_volume(),
+                menu.music_volume(),
+            );
+            self.menu = Some(menu);
         } else {
             self.load_level(src.as_ref());
+            self.source = Some(src);
         }
     }
 
@@ -243,6 +268,13 @@ impl App {
                     w.set_title(&format!("{TITLE}: {}", level.files.name));
                 }
                 self.status.clear();
+                self.audio.load_level(
+                    src,
+                    self.config.game,
+                    level.map.sample_number,
+                    self.music_mode,
+                );
+                self.sound_state.reset();
                 self.pending = Some(level);
                 self.build_scene();
             }
@@ -290,8 +322,18 @@ impl App {
             elapsed.as_micros() as u64
         };
         let input = self.controls.input();
+        let radio_next = self.controls.take_radio_next();
         let frame = self.game.as_mut().map(|g| {
             let ticks = g.advance(sim_us, input);
+            sound::tick(
+                &mut self.audio,
+                &mut self.sound_state,
+                &mut g.world,
+                self.source.as_deref(),
+                elapsed.as_secs_f64(),
+                self.controls.paused,
+                radio_next,
+            );
             (g.frame(), g.floor_z(), ticks)
         });
         // A debug menu press is let go once a tick has run with it.
@@ -393,7 +435,15 @@ impl App {
         if let Some(action) = actions.setup {
             self.setup_action(action);
         }
+        if let Some(menu) = self.menu.as_mut() {
+            self.audio.set_sound_volume(menu.sound_volume());
+            self.audio.set_music_volume(menu.music_volume());
+            for sfx in menu.drain_sounds() {
+                self.audio.play_menu(sfx);
+            }
+        }
         if self.menu.as_ref().is_some_and(|m| m.quit) {
+            self.audio.stop_music();
             #[cfg(not(target_arch = "wasm32"))]
             event_loop.exit();
             #[cfg(target_arch = "wasm32")]
@@ -407,6 +457,7 @@ impl App {
             && let Some(menu) = self.menu.take()
         {
             self.config.level = section;
+            self.music_mode = menu.music_mode();
             self.load_level(menu.source.as_ref());
             self.last_frame = Instant::now();
             if let (Some(scene), Some(w)) = (&self.scene, &self.window) {
@@ -415,6 +466,7 @@ impl App {
                     menu.name(),
                     scene.level.files.name
                 ));
+                self.source = Some(menu.source);
             } else {
                 self.menu = Some(menu);
             }
@@ -567,6 +619,21 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        if matches!(
+            event,
+            WindowEvent::KeyboardInput {
+                event: KeyEvent {
+                    state: ElementState::Pressed,
+                    ..
+                },
+                ..
+            } | WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                ..
+            } | WindowEvent::Touch(_)
+        ) {
+            self.audio.unlock();
+        }
         let setup = self.needs_setup();
         #[cfg(not(target_arch = "wasm32"))]
         if setup && let WindowEvent::DroppedFile(path) = &event {

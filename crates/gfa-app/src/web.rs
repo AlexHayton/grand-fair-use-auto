@@ -13,7 +13,7 @@ use std::cell::RefCell;
 
 use gfa_assets::{
     Archive, ArchiveError, AssetSource, GameIndex, MemSource, ReadAt, is_play_file,
-    split_at_gtadata,
+    split_at_game_dir,
 };
 use gfa_sim::input::Buttons;
 use wasm_bindgen::prelude::wasm_bindgen;
@@ -128,11 +128,11 @@ pub fn gfa_touch(button: &str, down: bool) {
     });
 }
 
-/// For a file in a chosen folder, its game path if a level needs it:
-/// `"Games/GTA/GTADATA/NYC.CMP"` is `"GTADATA/NYC.CMP"`.
+/// For a file in a chosen folder, its game path if the menu or a level needs
+/// it: `"Games/GTA/GTADATA/NYC.CMP"` is `"GTADATA/NYC.CMP"`.
 #[wasm_bindgen]
 pub fn gfa_game_path(relative: &str) -> Option<String> {
-    split_at_gtadata(relative)
+    split_at_game_dir(relative)
         .map(|(_, path)| path)
         .filter(|p| is_play_file(p))
 }

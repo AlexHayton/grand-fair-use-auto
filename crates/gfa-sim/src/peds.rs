@@ -1103,8 +1103,10 @@ impl Peds {
     /// A shot at `(x, y)` frightens everybody on their feet in its two-block
     /// cell and the eight around it (AmiGTA1 reads the original's cell
     /// list): they run straight away from it, at full speed, for a while.
-    pub fn panic(&mut self, x: i64, y: i64, layer: i32) {
+    /// Returns the positions of the peds frightened on this call.
+    pub fn panic(&mut self, x: i64, y: i64, layer: i32) -> Vec<(i32, i32, i32)> {
         let cell = |v: i64| v >> (FP + BLOCK_SHIFT + 1);
+        let mut scared = Vec::new();
         for i in 0..self.p.len() {
             let p = &self.p[i];
             if !p.alive
@@ -1137,7 +1139,9 @@ impl Peds {
             p.speed = 4;
             p.panic = PANIC_TICKS;
             p.angle = angle;
+            scared.push((p.x as i32, p.y as i32, p.layer));
         }
+        scared
     }
 
     /// Ped `i` is set alight by a fire at `(fx, fy)`: he runs from it and
@@ -2393,6 +2397,11 @@ impl Peds {
         p.pulling = 0;
         self.stats.spawned += 1;
         true
+    }
+
+    /// Slot index of the most recently spawned ped (used for cop voice selection).
+    pub fn last_slot(&self) -> Option<usize> {
+        self.last
     }
 
     /// Keep the last spawned cop posted at a roadblock until the player comes near.

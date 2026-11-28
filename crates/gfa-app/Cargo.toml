@@ -15,6 +15,7 @@ gfa-assets.workspace = true
 gfa-formats.workspace = true
 gfa-sim.workspace = true
 gfa-render.workspace = true
+gfa-audio.workspace = true
 egui.workspace = true
 egui-wgpu.workspace = true
 egui-winit.workspace = true

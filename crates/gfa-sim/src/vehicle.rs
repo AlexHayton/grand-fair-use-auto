@@ -191,7 +191,7 @@ pub struct Veh {
     /// slide (tyre marks).
     pub skid: i64,
     pub sliding: bool,
-    skid_level: i64,
+    pub skid_level: i64,
     k_adh_x: i64,
     k_adh_y: i64,
     k_hand: i64,
