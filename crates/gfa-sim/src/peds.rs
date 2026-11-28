@@ -279,7 +279,7 @@ pub struct Ped {
     pub shot: i32,
     pub shot_step: i32,
     shot_tick: i32,
-    shot_dir: i32,
+    pub shot_dir: i32,
     /// Knocked down, falling back.
     pub fall: i32,
     panic: i32,

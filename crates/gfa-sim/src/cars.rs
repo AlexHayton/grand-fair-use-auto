@@ -439,6 +439,12 @@ pub struct Driven {
     /// turns with the hull as he steers (owner, under DOSBox-X). The special
     /// key held with left or right turns it ([`TURRET_STEP`]).
     pub turret: i32,
+    /// Remaining bloody tyre-mark drops after running over a ped or driving
+    /// through blood.
+    pub blood_tyres: i32,
+    /// Car position (16.16) where the last bloody tyre mark was dropped.
+    pub blood_x: i64,
+    pub blood_y: i64,
 }
 
 /// The tank's turret turns this much a game frame (23.333 Hz) while the
@@ -486,6 +492,11 @@ impl SimHash for Driven {
         h.u8(self.siren as u8);
         h.bool(self.horn);
         h.i32(self.turret);
+        if self.blood_tyres > 0 {
+            h.i32(self.blood_tyres);
+            h.bytes(&self.blood_x.to_le_bytes());
+            h.bytes(&self.blood_y.to_le_bytes());
+        }
         match self.air {
             Some(a) => {
                 h.bytes(&a.z.to_le_bytes());

@@ -50,6 +50,10 @@ pub const POOL_SPLAT_AT: i32 = POOL_LIFE - 4 * POOL_FRAME_TICKS;
 
 pub const SPLAT_FREE_LIFE: i32 = 1000;
 pub const BLOOD_REACH: i64 = 4 << FP;
+/// Bloody tyre-mark drops left after running over a ped.
+pub const BLOOD_TYRE_STEPS: i32 = 16;
+/// Distance (16.16 world px) between consecutive bloody tyre marks.
+pub const BLOOD_TYRE_STEP_PX: i64 = 4 << FP;
 pub const SPARK_LIFE: i32 = 5;
 const ORIG_UNIT: i64 = 0x4000;
 
@@ -234,7 +238,7 @@ impl Marks {
         self.stat_pools += 1;
     }
 
-    fn splat(&mut self, x: i64, y: i64, layer: i32, angle: i32) {
+    pub fn splat(&mut self, x: i64, y: i64, layer: i32, angle: i32) {
         self.stain_put(x, y, layer, angle, StainKind::Splat, SPLAT_FREE_LIFE);
         self.stat_splats += 1;
     }
@@ -244,7 +248,7 @@ impl Marks {
         self.stat_trails += 1;
     }
 
-    fn in_blood(&self, x: i64, y: i64, layer: i32) -> bool {
+    pub fn in_blood(&self, x: i64, y: i64, layer: i32) -> bool {
         for s in &self.stains {
             if s.left <= 0 || s.layer != layer {
                 continue;
@@ -460,6 +464,57 @@ impl Marks {
             let bl1 = self.in_blood(x + rx, y + ry, layer);
             self.put_mark(x - rx, y - ry, layer, ang, bl0);
             self.put_mark(x + rx, y + ry, layer, ang, bl1);
+        }
+        self.put_smoke(x, y, layer);
+    }
+
+    /// Leave red bloody tyre marks at the wheels (left/right pair, or single
+    /// centre mark for a bike), without skid smoke.
+    #[allow(clippy::too_many_arguments)]
+    pub fn blood_track(
+        &mut self,
+        map: &SimMap,
+        x: i64,
+        y: i64,
+        layer: i32,
+        wid: i32,
+        heading: i32,
+        vx: i64,
+        vy: i64,
+        single: bool,
+    ) {
+        let bx = (x >> BS) as i32;
+        let by = (y >> BS) as i32;
+        let g = map.nav_ground(bx, by, layer);
+        if matches!(g, ground::WATER | ground::BUILDING | ground::AIR) {
+            return;
+        }
+        let ang = if vx.abs() + vy.abs() > (1 << 14) {
+            (dir16((vx >> 8) as i32, (vy >> 8) as i32) >> 16) & 255
+        } else {
+            heading & 255
+        };
+        if single {
+            self.put_mark(x, y, layer, ang, true);
+        } else {
+            let half_w = i64::from((wid / 2).max(4));
+            let rx = i64::from(cos(heading)) * half_w * 4;
+            let ry = i64::from(sin(heading)) * half_w * 4;
+            self.put_mark(x - rx, y - ry, layer, ang, true);
+            self.put_mark(x + rx, y + ry, layer, ang, true);
+        }
+    }
+
+    /// Emit tyre smoke on a valid ground surface (on half-rate ticks).
+    pub fn smoke(&mut self, map: &SimMap, x: i64, y: i64, layer: i32) {
+        if self.half {
+            return;
+        }
+        let bx = (x >> BS) as i32;
+        let by = (y >> BS) as i32;
+        let g = map.nav_ground(bx, by, layer);
+        if matches!(g, ground::WATER | ground::BUILDING | ground::AIR) {
+            return;
         }
         self.put_smoke(x, y, layer);
     }

@@ -8,7 +8,15 @@ use crate::map::SimMap;
 pub const MAX_PICKUPS: usize = 256;
 
 pub const OBJ_CRATE: usize = 0x54;
+/// One-shot smash animation (`status = 5`, 13 frames: frame 0 is the intact
+/// crate, frames `1..=12` are the splintering planks).
 pub const OBJ_CRATE_OPEN: usize = 0x55;
+
+/// Active smashed-crate animations (`OBJ_CRATE_OPEN` frames `1..=12`).
+pub const MAX_SMASHES: usize = 16;
+pub const CRATE_SMASH_FRAMES: usize = 12;
+pub const CRATE_SMASH_TICKS: i32 = 2;
+pub const CRATE_SMASH_LIFE: i32 = CRATE_SMASH_FRAMES as i32 * CRATE_SMASH_TICKS;
 
 const BS: u32 = FP + BLOCK_SHIFT;
 
@@ -86,9 +94,31 @@ pub struct Pickup {
     pub state: PickupState,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct CrateSmash {
+    pub x: i64,
+    pub y: i64,
+    pub layer: i32,
+    /// Remaining 50 Hz ticks; `0` means inactive.
+    pub left: i32,
+}
+
+impl CrateSmash {
+    /// Frame index within [`OBJ_CRATE_OPEN`] (`1..=12`), or `None` when done.
+    pub fn frame(self) -> Option<usize> {
+        if self.left <= 0 {
+            return None;
+        }
+        let elapsed = (CRATE_SMASH_LIFE - self.left).max(0);
+        let f = (elapsed / CRATE_SMASH_TICKS).clamp(0, CRATE_SMASH_FRAMES as i32 - 1) as usize;
+        Some(f + 1)
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Pickups {
     pub p: Vec<Pickup>,
+    pub smashes: [CrateSmash; MAX_SMASHES],
     pub stat_opened: u64,
     pub stat_taken: u64,
 }
@@ -241,6 +271,35 @@ impl Pickups {
         n
     }
 
+    fn spawn_smash(&mut self, x: i64, y: i64, layer: i32) {
+        let mut slot = 0;
+        let mut best = i32::MAX;
+        for (i, s) in self.smashes.iter().enumerate() {
+            if s.left <= 0 {
+                slot = i;
+                break;
+            }
+            if s.left < best {
+                best = s.left;
+                slot = i;
+            }
+        }
+        self.smashes[slot] = CrateSmash {
+            x,
+            y,
+            layer,
+            left: CRATE_SMASH_LIFE,
+        };
+    }
+
+    pub fn tick(&mut self) {
+        for s in &mut self.smashes {
+            if s.left > 0 {
+                s.left -= 1;
+            }
+        }
+    }
+
     pub fn open_at(
         &mut self,
         x: i64,
@@ -251,12 +310,14 @@ impl Pickups {
     ) -> usize {
         let r = i64::from(radius_px) << FP;
         let mut n = 0;
+        let mut smashed = Vec::new();
         for (i, p) in self.p.iter_mut().enumerate() {
             if p.state != PickupState::Crate || p.layer != layer {
                 continue;
             }
             if (p.x - x).abs() <= r && (p.y - y).abs() <= r {
                 p.state = PickupState::Open;
+                smashed.push((p.x, p.y, p.layer));
                 self.stat_opened += 1;
                 n += 1;
                 say(format!(
@@ -268,6 +329,9 @@ impl Pickups {
                     p.amount
                 ));
             }
+        }
+        for (sx, sy, sl) in smashed {
+            self.spawn_smash(sx, sy, sl);
         }
         n
     }
@@ -312,6 +376,12 @@ impl Pickups {
             h.i32(p.kind);
             h.i32(p.amount);
             h.u8(p.state as u8);
+        }
+        for s in &self.smashes {
+            h.bytes(&s.x.to_le_bytes());
+            h.bytes(&s.y.to_le_bytes());
+            h.i32(s.layer);
+            h.i32(s.left);
         }
         h.bytes(&self.stat_opened.to_le_bytes());
         h.bytes(&self.stat_taken.to_le_bytes());

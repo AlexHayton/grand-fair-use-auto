@@ -362,19 +362,24 @@ impl HudState {
         let right = vw - 8.0;
         let top = 6.0;
 
-        // 1. Score (top-right, SCORE font) + Lives (immediately left, MISSMUL font)
-        //    + Multiplier (under score, MISSMUL font).
+        // 1. Score (top-right, SCORE font), with green Lives (`x4`) and yellow
+        //    Multiplier (`x1`, always shown) stacked to its immediate left in
+        //    MISSMUL font, matching the original DOS HUD layout.
         let score_digits = digits_of(world.score.score.max(0) as u64);
         let score_w = renderer.measure_indices(HudFontKind::Score, &score_digits);
         let score_h = renderer.font_height(HudFontKind::Score).unwrap_or(20.0);
+        let score_x = right - score_w;
         renderer.push_indices(
             batch,
             HudFontKind::Score,
-            right - score_w,
+            score_x,
             top,
             &score_digits,
             true,
         );
+
+        let mh = renderer.font_height(HudFontKind::Mult).unwrap_or(13.0);
+        let col_right = score_x - 6.0;
 
         let mut lives_glyphs = Vec::with_capacity(4);
         lives_glyphs.push(10); // boxed 'x'
@@ -389,31 +394,31 @@ impl HudState {
             lives_glyphs.push(l % 10);
         }
         let lives_w = renderer.measure_indices(HudFontKind::Mult, &lives_glyphs);
-        renderer.push_indices(
+        // Tint yellow MISSMUL glyphs vivid green (preserving black outline).
+        const LIVES_GREEN: [f32; 4] = [0.22, 1.0, 0.22, 1.0];
+        renderer.push_indices_tinted(
             batch,
             HudFontKind::Mult,
-            right - score_w - lives_w - 4.0,
-            top + 2.0,
+            col_right - lives_w,
+            top,
             &lives_glyphs,
+            LIVES_GREEN,
             true,
         );
 
-        let mut right_y = top + score_h + 3.0;
-        if world.score.multiplier > 1 {
-            let mut mult_glyphs = vec![10];
-            mult_glyphs.extend(digits_of(world.score.multiplier as u64));
-            let mw = renderer.measure_indices(HudFontKind::Mult, &mult_glyphs);
-            let mh = renderer.font_height(HudFontKind::Mult).unwrap_or(13.0);
-            renderer.push_indices(
-                batch,
-                HudFontKind::Mult,
-                right - mw,
-                right_y,
-                &mult_glyphs,
-                true,
-            );
-            right_y += mh + 4.0;
-        }
+        let mut mult_glyphs = vec![10];
+        mult_glyphs.extend(digits_of(world.score.multiplier.max(1) as u64));
+        let mult_w = renderer.measure_indices(HudFontKind::Mult, &mult_glyphs);
+        renderer.push_indices(
+            batch,
+            HudFontKind::Mult,
+            col_right - mult_w,
+            top + mh + 2.0,
+            &mult_glyphs,
+            true,
+        );
+
+        let right_y = top + score_h.max(2.0 * mh + 2.0) + 4.0;
 
         // Frenzy / endless weapon countdown (seconds remaining, right-aligned).
         if world.arms.inf_ticks > 0 {

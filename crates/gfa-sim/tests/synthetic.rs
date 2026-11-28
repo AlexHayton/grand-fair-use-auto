@@ -956,6 +956,23 @@ fn crates_open_by_shot_car_or_blast_and_powerups_obey_caps() {
     w.give_weapon(1, 5);
     run(&mut w, Buttons::FIRE, 10);
     assert_eq!(w.pickups.p[0].state, PickupState::Open);
+    assert!(
+        w.pickups
+            .smashes
+            .iter()
+            .any(|s| s.frame().is_some_and(|f| (1..=12).contains(&f))),
+        "shooting a crate should play the smashed crate animation"
+    );
+    // Advance until the smash animation finishes.
+    run(
+        &mut w,
+        Buttons::NONE,
+        gfa_sim::pickups::CRATE_SMASH_LIFE as u32,
+    );
+    assert!(
+        w.pickups.smashes.iter().all(|s| s.frame().is_none()),
+        "smash animation should finish and clear"
+    );
 
     // Refused when ammo is already 99; taken when below 99.
     w.arms.ammo[1] = 99;
@@ -1007,6 +1024,41 @@ fn crates_open_by_shot_car_or_blast_and_powerups_obey_caps() {
     assert_eq!(w.arms.inf_ticks, 0);
     assert_eq!(w.arms.weapon, 1);
     assert_eq!(w.arms.ammo[1], 12);
+}
+
+#[test]
+fn running_over_a_crate_plays_smash_animation_even_when_taken_immediately() {
+    use gfa_sim::pickups::{CRATE_SMASH_LIFE, PickupState, kind};
+    let mut b = CmpBuilder::new(1);
+    street(&mut b, 5..30, 5..30);
+    let mut w = world(&b, south(15, 15));
+    w.park(0, -20, 0, 128);
+    w.step(press(Buttons::ENTER));
+    run(&mut w, Buttons::NONE, 100);
+    assert_eq!(w.doing, Doing::Driving);
+
+    // Place a pistol crate 1 block south of the car and drive over it.
+    w.drop_crate(0, 1, kind::PISTOL, 0);
+    assert_eq!(w.pickups.p[0].state, PickupState::Crate);
+    let mut saw_smash = false;
+    for _ in 0..80 {
+        w.step(press(Buttons::UP));
+        if w.pickups.p[0].state == PickupState::Gone {
+            saw_smash = w.pickups.smashes.iter().any(|s| s.frame() == Some(1));
+            break;
+        }
+    }
+    assert_eq!(w.pickups.p[0].state, PickupState::Gone);
+    assert!(
+        saw_smash,
+        "running over a crate should start the smash animation at frame 1"
+    );
+    // Advance until the smash animation completes.
+    run(&mut w, Buttons::NONE, CRATE_SMASH_LIFE as u32);
+    assert!(
+        w.pickups.smashes.iter().all(|s| s.frame().is_none()),
+        "smash animation should finish after CRATE_SMASH_LIFE ticks"
+    );
 }
 
 #[test]
@@ -2527,5 +2579,92 @@ fn blocked_door_exit_forward_on_north_car_bus_and_l_corner() {
     assert_ne!(
         lw.map.nav_ground(bx, by, lw.player.layer),
         BUILDING as u8 >> 4
+    );
+}
+
+#[test]
+fn shooting_a_ped_leaves_a_blood_splat_and_pool() {
+    let mut b = CmpBuilder::new(1);
+    street(&mut b, 5..25, 5..25);
+    let mut w = world(&b, south(15, 15));
+    w.peds.clear();
+    // Place a ped directly south of the player (facing north).
+    w.drop_ped(0, 24, 0);
+    w.arms.give(gfa_sim::weapons::weapon::PISTOL, 10);
+
+    // Fire until the bullet hits the ped.
+    for _ in 0..20 {
+        w.step(press(Buttons::FIRE));
+        if w.peds.stats.shot > 0 {
+            break;
+        }
+    }
+    assert_eq!(w.peds.stats.shot, 1, "bullet should hit the ped");
+    assert_eq!(
+        w.marks.stat_splats, 1,
+        "shooting a ped should immediately leave a blood splat"
+    );
+    assert!(
+        w.marks
+            .ground_sprites()
+            .iter()
+            .any(|m| m.object == gfa_sim::marks::OBJ_SPLAT),
+        "OBJ_SPLAT should be in ground_sprites right after the shot"
+    );
+
+    // Let the ped finish falling into a corpse so the blood pool also appears.
+    run(&mut w, Buttons::NONE, 30);
+    assert!(
+        w.marks.stat_pools >= 1,
+        "shot corpse should also bleed a blood pool"
+    );
+    assert!(
+        w.marks
+            .ground_sprites()
+            .iter()
+            .any(|m| m.object == gfa_sim::marks::OBJ_POOL),
+        "OBJ_POOL should be in ground_sprites after the ped dies"
+    );
+}
+
+#[test]
+fn running_over_a_ped_leaves_a_blood_splat_and_bloody_tyre_marks() {
+    let mut b = CmpBuilder::new(1);
+    street(&mut b, 5..25, 5..25);
+    let mut w = world(&b, south(15, 10));
+    w.peds.clear();
+    w.put_in_car(0, 15, 10, 128);
+
+    // Accelerate straight south (not sliding) so the car is at run-over speed.
+    run(&mut w, Buttons::UP, 25);
+    assert_eq!(w.marks.stat_bloody, 0);
+    assert_eq!(w.marks.stat_splats, 0);
+
+    // Drop a ped right ahead of the moving car and drive straight through.
+    w.drop_ped(0, 24, 64);
+    run(&mut w, Buttons::UP, 30);
+
+    assert_eq!(w.peds.stats.runover, 1, "car should run over the ped");
+    assert_eq!(
+        w.marks.stat_splats, 1,
+        "running over a ped should leave a blood splat"
+    );
+    assert!(
+        w.marks.stat_bloody >= 4,
+        "wheels should leave multiple red bloody tyre marks after running over a ped (got {})",
+        w.marks.stat_bloody
+    );
+    let sprites = w.marks.ground_sprites();
+    assert!(
+        sprites
+            .iter()
+            .any(|m| m.object == gfa_sim::marks::OBJ_SPLAT),
+        "OBJ_SPLAT should be drawn on the ground"
+    );
+    assert!(
+        sprites
+            .iter()
+            .any(|m| m.object == gfa_sim::marks::OBJ_BLOODY),
+        "OBJ_BLOODY tyre marks should be drawn on the ground"
     );
 }

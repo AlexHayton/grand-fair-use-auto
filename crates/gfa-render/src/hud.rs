@@ -857,9 +857,25 @@ impl HudRenderer {
         &self,
         batch: &mut HudBatch,
         kind: HudFontKind,
+        x: f32,
+        y: f32,
+        indices: &[usize],
+        shadow: bool,
+    ) {
+        self.push_indices_tinted(batch, kind, x, y, indices, WHITE, shadow);
+    }
+
+    /// Push raw glyph indices with an RGBA multiplicative tint (e.g. green for
+    /// the lives counter drawn with `MISSMUL`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn push_indices_tinted(
+        &self,
+        batch: &mut HudBatch,
+        kind: HudFontKind,
         mut x: f32,
         y: f32,
         indices: &[usize],
+        tint: [f32; 4],
         shadow: bool,
     ) {
         let Some(font) = &self.fonts[kind as usize] else {
@@ -884,7 +900,7 @@ impl HudRenderer {
                 batch.quads.push(HudQuad {
                     dst: [x, y, g.width, font.height],
                     src: g.uv,
-                    tint: WHITE,
+                    tint,
                     clip: NO_CLIP,
                 });
                 x += g.width + font.gap;

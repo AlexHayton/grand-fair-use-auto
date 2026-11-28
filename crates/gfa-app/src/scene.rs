@@ -149,33 +149,32 @@ impl Scene {
             ));
         }
         for p in &world.pickups.p {
-            use gfa_sim::pickups::{OBJ_CRATE, OBJ_CRATE_OPEN, PickupState, item_object};
+            use gfa_sim::pickups::{OBJ_CRATE, PickupState, item_object};
             match p.state {
                 PickupState::Gone => {}
                 PickupState::Crate => {
                     let pos = ground(p.x, p.y, p.layer, 0);
                     out.extend(object_sprite(style, &self.atlas, OBJ_CRATE, 0, pos, 0.0));
                 }
-                PickupState::Open => {
-                    let pos = ground(p.x, p.y, p.layer, 0);
-                    out.extend(object_sprite(
-                        style,
-                        &self.atlas,
-                        OBJ_CRATE_OPEN,
-                        0,
-                        pos,
-                        0.0,
-                    ));
-                    if let Some(obj) = item_object(p.kind) {
-                        out.extend(object_sprite(style, &self.atlas, obj, 0, pos, 0.0));
-                    }
-                }
-                PickupState::Loose => {
+                PickupState::Open | PickupState::Loose => {
                     let pos = ground(p.x, p.y, p.layer, 0);
                     if let Some(obj) = item_object(p.kind) {
                         out.extend(object_sprite(style, &self.atlas, obj, 0, pos, 0.0));
                     }
                 }
+            }
+        }
+        for s in &world.pickups.smashes {
+            if let Some(frame) = s.frame() {
+                let pos = ground(s.x, s.y, s.layer, 0);
+                out.extend(object_sprite(
+                    style,
+                    &self.atlas,
+                    gfa_sim::pickups::OBJ_CRATE_OPEN,
+                    frame,
+                    pos,
+                    0.0,
+                ));
             }
         }
         for p in game.peds() {

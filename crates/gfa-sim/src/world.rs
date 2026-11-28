@@ -696,8 +696,16 @@ impl World {
         self.burn();
         self.score.tick(gun_step);
         self.run_peds(centre);
+        // Advance smashed-crate animations before shots/cars can open new ones.
+        self.pickups.tick();
         // The shots fly after the people have moved.
+        let was_shot: Vec<bool> = self.peds.p.iter().map(|p| p.shot != 0).collect();
         self.street(|w, st| w.tick(st, gun_step));
+        for (i, p) in self.peds.p.iter().enumerate() {
+            if p.alive && p.shot != 0 && !was_shot.get(i).copied().unwrap_or(false) {
+                self.marks.splat(p.x, p.y, p.layer, p.shot_dir);
+            }
+        }
         self.marks.tick(&self.map, &mut self.peds, &self.weapons);
         self.pickups_tick();
         self.aim_at_player();
@@ -1263,13 +1271,36 @@ impl World {
         } else {
             avy + avx / 2
         };
+        let (ox, oy, face, wid, vx, vy, layer, model) =
+            (v.ox, v.oy, v.angle(), v.wid, v.vx, v.vy, d.layer, v.model);
+        let was_corpse: Vec<bool> = self.peds.p.iter().map(|p| p.corpse).collect();
         let kinds = self
             .peds
-            .ram(v.ox, v.oy, v.angle(), v.len / 2, v.wid / 2, d.layer, speed);
+            .ram(ox, oy, face, v.len / 2, wid / 2, layer, speed);
+        let mut ran_over_any = false;
+        for (i, p) in self.peds.p.iter().enumerate() {
+            if p.alive && p.corpse && !was_corpse.get(i).copied().unwrap_or(false) {
+                self.marks.splat(p.x, p.y, p.layer, face);
+                ran_over_any = true;
+            }
+        }
+        if ran_over_any {
+            let ci = &self.cars[model];
+            if ci.model != 0x25 {
+                let single = ci.vtype == CLASS_BIKE;
+                if let Some(d) = self.driven.as_mut() {
+                    d.blood_tyres = crate::marks::BLOOD_TYRE_STEPS;
+                    d.blood_x = ox;
+                    d.blood_y = oy;
+                }
+                self.marks
+                    .blood_track(&self.map, ox, oy, layer, wid, face, vx, vy, single);
+            }
+        }
         if !kinds.is_empty() {
             // A run-over is a "hit and run"; from a motorbike the original
             // files nothing.
-            let bike = self.cars[v.model].vtype == CLASS_BIKE;
+            let bike = self.cars[model].vtype == CLASS_BIKE;
             let mut award = 0;
             for &kind in &kinds {
                 award = self.score.event(kind, score::reason::RUNOVER);
@@ -1334,7 +1365,10 @@ impl World {
                 TrainEvent::KilledPed(k) => {
                     let i = ped_slots[k];
                     if !self.peds.p[i].corpse {
+                        let (px, py, pl) =
+                            (self.peds.p[i].x, self.peds.p[i].y, self.peds.p[i].layer);
                         self.peds.kill(i);
+                        self.marks.splat(px, py, pl, 0);
                         self.say(format!("train: ran over ped {i}"));
                     }
                 }
@@ -2277,6 +2311,9 @@ impl World {
             siren: cars::Siren::Off,
             horn: false,
             turret: 0,
+            blood_tyres: 0,
+            blood_x: 0,
+            blood_y: 0,
         });
         self.player.anim = Anim::Stand;
         self.player.frame = 0;
@@ -2480,18 +2517,62 @@ impl World {
                     d.veh.angle(),
                 );
             }
-            if d.veh.sliding && d.air.is_none() && ci.model != 0x25 {
-                self.marks.slide(
-                    &self.map,
-                    d.veh.ox,
-                    d.veh.oy,
-                    d.layer,
-                    d.veh.wid,
-                    d.veh.angle(),
-                    d.veh.vx,
-                    d.veh.vy,
-                    ci.vtype == CLASS_BIKE,
-                );
+            if d.air.is_none() && ci.model != 0x25 {
+                let single = ci.vtype == CLASS_BIKE;
+                if d.blood_tyres > 0 {
+                    let dist = (d.veh.ox - d.blood_x).abs() + (d.veh.oy - d.blood_y).abs();
+                    if dist >= crate::marks::BLOOD_TYRE_STEP_PX {
+                        d.blood_x = d.veh.ox;
+                        d.blood_y = d.veh.oy;
+                        d.blood_tyres -= 1;
+                        self.marks.blood_track(
+                            &self.map,
+                            d.veh.ox,
+                            d.veh.oy,
+                            d.layer,
+                            d.veh.wid,
+                            d.veh.angle(),
+                            d.veh.vx,
+                            d.veh.vy,
+                            single,
+                        );
+                    }
+                    if d.veh.sliding {
+                        self.marks.smoke(&self.map, d.veh.ox, d.veh.oy, d.layer);
+                    }
+                } else if (d.veh.vx != 0 || d.veh.vy != 0)
+                    && self.marks.in_blood(d.veh.ox, d.veh.oy, d.layer)
+                {
+                    d.blood_tyres = crate::marks::BLOOD_TYRE_STEPS / 2;
+                    d.blood_x = d.veh.ox;
+                    d.blood_y = d.veh.oy;
+                    self.marks.blood_track(
+                        &self.map,
+                        d.veh.ox,
+                        d.veh.oy,
+                        d.layer,
+                        d.veh.wid,
+                        d.veh.angle(),
+                        d.veh.vx,
+                        d.veh.vy,
+                        single,
+                    );
+                    if d.veh.sliding {
+                        self.marks.smoke(&self.map, d.veh.ox, d.veh.oy, d.layer);
+                    }
+                } else if d.veh.sliding {
+                    self.marks.slide(
+                        &self.map,
+                        d.veh.ox,
+                        d.veh.oy,
+                        d.layer,
+                        d.veh.wid,
+                        d.veh.angle(),
+                        d.veh.vx,
+                        d.veh.vy,
+                        single,
+                    );
+                }
             }
             // The fleet. The tank: nothing stops it, and every car it
             // touches is written off (`Traffic::crush`). Any other car:
@@ -2893,6 +2974,9 @@ impl World {
             siren: cars::Siren::Off,
             horn: false,
             turret: 0,
+            blood_tyres: 0,
+            blood_x: 0,
+            blood_y: 0,
         });
         self.player.x = x;
         self.player.y = y;

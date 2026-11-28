@@ -193,24 +193,27 @@ pub fn world_sprites(
         out.extend(scene.object_sprite(m.object, m.frame, at(m.x, m.y, m.layer, 0), m.angle + 128));
     }
     for p in &world.pickups.p {
-        use gfa_sim::pickups::{OBJ_CRATE, OBJ_CRATE_OPEN, PickupState, item_object};
+        use gfa_sim::pickups::{OBJ_CRATE, PickupState, item_object};
         match p.state {
             PickupState::Gone => {}
             PickupState::Crate => {
                 out.extend(scene.object_sprite(OBJ_CRATE, 0, at(p.x, p.y, p.layer, 0), 0));
             }
-            PickupState::Open => {
-                let pos = at(p.x, p.y, p.layer, 0);
-                out.extend(scene.object_sprite(OBJ_CRATE_OPEN, 0, pos, 0));
-                if let Some(obj) = item_object(p.kind) {
-                    out.extend(scene.object_sprite(obj, 0, pos, 0));
-                }
-            }
-            PickupState::Loose => {
+            PickupState::Open | PickupState::Loose => {
                 if let Some(obj) = item_object(p.kind) {
                     out.extend(scene.object_sprite(obj, 0, at(p.x, p.y, p.layer, 0), 0));
                 }
             }
+        }
+    }
+    for s in &world.pickups.smashes {
+        if let Some(frame) = s.frame() {
+            out.extend(scene.object_sprite(
+                gfa_sim::pickups::OBJ_CRATE_OPEN,
+                frame,
+                at(s.x, s.y, s.layer, 0),
+                0,
+            ));
         }
     }
     // The crowd first, so a car at the same height is drawn over a body.
